@@ -26,7 +26,8 @@ gradle :data:testDebugUnitTest     # Android-library unit tests
 
 There is **no committed test suite yet**. The pure-JVM `:domain` module is the fast, dependency-free
 place to add unit tests. CI (`.github/workflows/android.yml`) runs `gradle :app:assembleDebug` on every
-push and uploads the APK as an artifact for sideloading.
+push and uploads the APK (artifact `anilocal-debug-apk`) for sideloading — it provisions Gradle 8.9 via
+`gradle/actions/setup-gradle`, **not** a committed wrapper, so don't "fix" CI by adding one.
 
 This codebase was **authored but not yet compiled** (see `README.md`) — don't assume a clean first build;
 the version catalog may have nits to settle. `gradle.properties` turns on `org.gradle.configuration-cache`
@@ -45,8 +46,9 @@ Three Gradle modules with a strict, one-way dependency direction:
   *interfaces*, and the `AnimeSource` seam. `import android.*` here will not compile — that is the
   enforced boundary, not a convention. Keep it that way. The repository interfaces (each bound in
   `:data`'s `AppModule`): `CatalogRepository`, `StreamRepository`, `SkipRepository`, `LibraryRepository`,
-  `ProgressRepository` (all in `repo/Repositories.kt`), `DownloadRepository`, `MalRepository`,
-  `SettingsRepository`, and `AuthRepository` (`auth/Auth.kt`).
+  `ProgressRepository` (all in `repo/Repositories.kt`), then **one file each** —
+  `DownloadRepository` (`repo/DownloadRepository.kt`), `MalRepository` (`repo/MalRepository.kt`),
+  `SettingsRepository` (`repo/SettingsRepository.kt`), and `AuthRepository` (`auth/Auth.kt`).
 - **`:data`** — Android library. *All* implementations live here: AniList/TMDB/MAL APIs, AniSkip,
   Room, DataStore, Firebase auth, the Media3 download stack, the sample source, and the Hilt wiring
   (`di/AppModule`). Depends only on `:domain`.
@@ -70,10 +72,15 @@ abstract fun bindAnimeSource(impl: SampleLocalSource): AnimeSource
 **To change where streams come from, change this one line** to bind a different `AnimeSource`
 implementation (e.g. a Jellyfin/Plex/local-files source). Nothing else in the app knows or cares:
 `StreamRepository` is bound to the *source-agnostic* `SourceStreamRepository`, which injects the
-**abstract** `AnimeSource`, so it works with any bound source — leave that binding alone. Note the
-`AnimeSource` contract is **five suspend methods**: `popular`/`search`/`detail` (catalog-shaped) *and*
-`servers`/`resolve` (stream-shaped), so a custom source must implement all five even though browsing
-goes through AniList's `CatalogRepository`.
+**abstract** `AnimeSource`, so it works with any bound source — leave that binding alone. The
+`AnimeSource` contract is **five suspend methods** — `popular`/`search`/`detail` (catalog-shaped) *and*
+`servers`/`resolve` (stream-shaped) — **plus a `val info: SourceInfo` property**, so a custom source must
+implement all six members even though browsing goes through AniList's `CatalogRepository`.
+`SourceStreamRepository` is the join: per request it runs `search` → `detail` → `servers().first()` →
+`resolve`, sorts variants by height descending, and **throws `error("no match…")` when `search` returns
+an empty list** (the sample source dodges this by returning a fixed demo list for *any* query). It exposes
+two methods consumers pick between — `resolveStream` (single, highest quality → online playback) and
+`resolveStreams` (all variants, highest-first → the download quality picker).
 
 The single `@Binds` module is **`AppModule` (in `:data`, package `com.anilocal.app.di`)**, which
 `@Binds` every domain interface → `:data` impl. `:data` additionally has three `@Provides` `object`
@@ -88,13 +95,18 @@ for the old MAL client id).
 ## Key cross-cutting patterns
 
 - **Room is the offline source of truth for the UI.** Everything the UI shows (downloads list,
-  badges, progress) reads from Room — never directly from Media3 or the network. `DownloadRepositoryImpl`
-  registers a `DownloadManager.Listener` that **bridges** Media3 download state → Room
-  (`dao.updateState(...)`), so the UI stays correct and fully offline. When adding download/offline
-  features, follow this bridge pattern rather than reading Media3 state in the UI. The DB (`anilocal.db`,
-  version 4, `exportSchema = false`) uses `fallbackToDestructiveMigration()` with **no `Migration`
-  objects** (`DatabaseModule.kt`) — any schema change must bump the version and **wipes all local data**
-  (library, progress, downloads, MAL cache) on next launch.
+  badges, progress) reads from Room — never directly from Media3 or the network. `DownloadRepositoryImpl`'s
+  `init` block **bridges** Media3 → Room three ways: a `DownloadManager.Listener` writes state changes
+  (`dao.updateState(...)`) and removals (`dao.deleteById`), and the `wifiOnlyDownloads` settings `Flow`
+  drives `downloadManager.setRequirements(...)`. When adding download/offline features, follow this bridge
+  pattern rather than reading Media3 state in the UI. **Gotchas:** download state persists as an Int code,
+  and the DAO hard-codes `state = 1` to mean COMPLETED — a magic number duplicated from private companion
+  consts, easy to break; subtitles and skip markers are stored as Moshi **JSON columns** on `DownloadEntity`
+  (not separate tables); offline subtitle files are pulled into `<downloadDir>/subs/` with their URLs
+  rewritten to `file://` and **deleted manually in `remove()`**. The DB (`anilocal.db`, version 4,
+  `exportSchema = false`) uses `fallbackToDestructiveMigration()` with **no `Migration` objects**
+  (`DatabaseModule.kt`) — any schema change must bump the version and **wipes all local data** (library,
+  progress, downloads, MAL cache) on next launch.
 
 - **One shared Media3 `Cache`** (`data/.../download/DownloadModule.kt`) is written by the
   `DownloadManager` and read back by the playback `CacheDataSource.Factory`. The player is built on that
@@ -110,7 +122,11 @@ for the old MAL client id).
 - **Player has a dual online/offline path** (`app/.../player/PlayerViewModel.kt`): on load it first
   checks `downloads.getOffline(...)`. Offline → skip markers and subtitles come from the cached Room
   record. Online → AniList resolves the title, the bound `AnimeSource` resolves the stream, and AniSkip
-  markers are fetched on `STATE_READY` (once duration is known). Auto-skip fires at most once per marker.
+  markers are fetched once on `STATE_READY` (gated on `markers.isEmpty() && !offline`, so the fetch never
+  re-runs or overrides offline markers). When a title has **no MAL id** (the keyless sample, or anything
+  AniSkip can't key), `AniSkipRepository` returns **hard-coded demo markers** instead of an empty list so
+  the Skip control always demonstrates — that `idMal == null` branch is intentional, not a bug. Auto-skip
+  fires at most once per marker.
 
 - **Optional features no-op when unconfigured.** TMDB artwork and Google Sign-In are gated on build-time
   config that defaults to blank; **MAL sync needs no config at all** (username only). Build-time keys flow
@@ -122,7 +138,12 @@ for the old MAL client id).
     only** (entered in Settings → DataStore). Per-entry status is MAL's numeric code, mapped in
     `MalRepositoryImpl`. Sync is one-way/read-only: it pages the list (~300/page, ≤50 pages), then
     `dao.clear()` + `upsertAll()` (full replace, not merge), throttled to once per 30 min. Requires the
-    user's MAL list privacy to be Public.
+    user's MAL list privacy to be Public. It fires from `AppViewModel.onAppOpen()` (a `MainActivity`
+    `LaunchedEffect` on every app open) through the gated/throttled `syncIfDue()`; **"Sync now"** in More
+    calls the un-throttled `sync()`. Library's **"My List"** then merges the Room library with the *entire*
+    MAL mirror (deduped by MAL id, local wins); MAL-only rows get a synthetic `mal-<malId>` id, so opening
+    one must first resolve `catalog.anilistIdForMal(malId)` before navigating — the detail route is keyed by
+    **AniList id** (`DetailsScreen` does `animeId.toInt()`), and a miss shows a "not found" Toast.
   - **`GOOGLE_WEB_CLIENT_ID`** is read directly in `:app` UI (`ui/more/MoreScreen.kt`); blank → the
     `GoogleSignInClient` is null, so tapping "Sign in with Google" shows a Toast prompting you to configure
     it (the button is **not** hidden). `app/google-services.json` is git-ignored and the Google Services
@@ -133,11 +154,17 @@ for the old MAL client id).
     yet (AniList already supplies artwork). Code paths must stay functional with all of these absent.
 
 - **Catalog vs. source are separate concerns.** AniList (`CatalogRepository`) provides the *metadata*
-  catalog (trending, search, detail pages) with no API key; the bound `AnimeSource` provides the *playable
-  streams*. They are deliberately decoupled — the sample source matches any query so playback always
-  resolves against AniList-browsed titles. The join happens in `data/.../source/SourceStreamRepository.kt`,
-  which bridges catalog metadata → the active `AnimeSource`; that is the seam consumer, while
-  `AppModule.bindAnimeSource` chooses *which* source it talks to.
+  catalog with no API key; the bound `AnimeSource` provides the *playable streams*. `CatalogRepository` is
+  the whole catalog surface, not just search/detail: the five Home rows (`trending`, `popularThisSeason`,
+  `topAiring`, `allTimePopular`, `upcoming`), the Explore grid `browse(genre, sort, page)`, and
+  `anilistIdForMal(malId)`. `AniListCatalogRepository` builds **raw GraphQL strings inline** (no
+  Apollo/codegen) through a shared `mediaPage()` helper and computes the current season locally — copy that
+  pattern when adding a row or query. They are deliberately decoupled — the sample source matches any query
+  so playback always resolves against AniList-browsed titles (that "always resolves" is a property of
+  `SampleLocalSource` returning a fixed list for *any* query, **not** of the seam; a real source that
+  returns no match throws in `SourceStreamRepository`). The join happens in
+  `data/.../source/SourceStreamRepository.kt`, while `AppModule.bindAnimeSource` chooses *which* source it
+  talks to.
 
 ## Conventions
 
@@ -146,7 +173,15 @@ for the old MAL client id).
   bottom `NavigationBar` shows only when the current route is a `TopTab` route, so detail/player have none;
   adding a tab = a new `TopTab` entry **plus** a `composable(tab.route)` in `MainActivity`'s `NavHost`.
 - ViewModels are `@HiltViewModel`, obtained via `hiltViewModel()`, and inject only domain interfaces/models
-  (plus framework types like `SavedStateHandle`) — never `:data` types.
+  (plus framework types — `SavedStateHandle`, `@ApplicationContext Context`, the Hilt-provided Media3
+  `CacheDataSource.Factory`) — never `:data` types. There are only a handful, and most are **co-located in
+  their screen file** (`DetailsViewModel` in `DetailsScreen.kt`, `HomeViewModel` in `HomeScreen.kt`,
+  `LibraryViewModel` in `LibraryScreen.kt`); only `MoreViewModel` and `PlayerViewModel` get their own file.
+  Look inside the screen file before assuming a missing `*ViewModel.kt`.
+- Error/empty states degrade **silently**: repo calls are wrapped in `runCatching { … }.getOrDefault/
+  getOrNull`, and screens render blank or a short hint (Home drops rows whose loader fails or returns empty;
+  Details just returns from the `Scaffold` when `detail` is null) — there are **no spinners or error
+  dialogs**. Match that pattern rather than adding loading/error UI that clashes with it.
 - Networking: Retrofit + Moshi + OkHttp, wired in `data/.../remote/NetworkModule.kt`.
 - Settings persist via DataStore (`DataStoreSettingsRepository`) exposed as Kotlin `Flow`s.
 - Source-dir quirk: `:domain` keeps sources under `src/main/kotlin/`, while `:data` and `:app` use
