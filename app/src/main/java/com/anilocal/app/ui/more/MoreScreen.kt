@@ -1,0 +1,132 @@
+package com.anilocal.app.ui.more
+
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.anilocal.app.BuildConfig
+import com.anilocal.app.domain.model.DownloadQuality
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
+
+@Composable
+fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
+    val context = LocalContext.current
+    val user by vm.user.collectAsStateWithLifecycle()
+    val autoSkip by vm.autoSkip.collectAsStateWithLifecycle()
+    val wifiOnly by vm.wifiOnly.collectAsStateWithLifecycle()
+    val downloadQuality by vm.downloadQuality.collectAsStateWithLifecycle()
+
+    val webClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
+    val signInClient = remember(webClientId) {
+        if (webClientId.isBlank()) null else {
+            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestIdToken(webClientId)
+                .requestEmail()
+                .build()
+            GoogleSignIn.getClient(context, gso)
+        }
+    }
+
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        runCatching {
+            val account = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+                .getResult(ApiException::class.java)
+            account.idToken?.let(vm::signInWithGoogle)
+        }.onFailure {
+            Toast.makeText(context, "Sign-in failed: ${it.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    Column(
+        Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text("More", style = MaterialTheme.typography.titleLarge)
+
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Auto-skip intro/outro", style = MaterialTheme.typography.bodyLarge)
+                Text("Skip automatically when a marker is reached",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = autoSkip, onCheckedChange = vm::setAutoSkip)
+        }
+        HorizontalDivider()
+
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Download over WiFi only", style = MaterialTheme.typography.bodyLarge)
+                Text("Pause downloads on mobile data; resume on WiFi",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = wifiOnly, onCheckedChange = vm::setWifiOnly)
+        }
+        HorizontalDivider()
+
+        Text("Default download quality", style = MaterialTheme.typography.bodyLarge)
+        DownloadQuality.entries.forEach { q ->
+            Row(
+                Modifier.fillMaxWidth().clickable { vm.setDownloadQuality(q) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = downloadQuality == q, onClick = { vm.setDownloadQuality(q) })
+                Text(q.label, modifier = Modifier.padding(start = 8.dp))
+            }
+        }
+        HorizontalDivider()
+
+        Text("Account", style = MaterialTheme.typography.titleMedium)
+        if (user != null) {
+            Text(user?.displayName ?: user?.email ?: "Signed in",
+                style = MaterialTheme.typography.bodyLarge)
+            OutlinedButton(onClick = vm::signOut) { Text("Sign out") }
+        } else {
+            Button(onClick = {
+                val client = signInClient
+                if (client == null) {
+                    Toast.makeText(
+                        context,
+                        "Add your Firebase project (GOOGLE_WEB_CLIENT_ID) to enable sign-in.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    launcher.launch(client.signInIntent)
+                }
+            }) { Text("Sign in with Google") }
+            Text("Sign-in uses YOUR Firebase project, so it actually works (unlike a re-signed mod).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        HorizontalDivider()
+
+        Text("Source: Sample (CC clip) — no scraper bundled.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}

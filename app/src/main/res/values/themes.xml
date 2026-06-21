@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base theme; Compose drives colors. This keeps the launcher/window styled before
+         Compose takes over. -->
+    <style name="Theme.AniLocal" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#0E0F13</item>
+        <item name="android:navigationBarColor">#0E0F13</item>
+        <item name="android:windowBackground">#0E0F13</item>
+    </style>
+</resources>

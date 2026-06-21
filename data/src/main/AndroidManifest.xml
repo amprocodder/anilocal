@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- :data declares no components or permissions of its own; the download service is
+     registered in :app's manifest (and runs in the app process). Namespace is set in
+     build.gradle.kts. -->
+<manifest />
