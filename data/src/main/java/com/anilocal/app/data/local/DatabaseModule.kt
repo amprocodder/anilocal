@@ -22,4 +22,5 @@ object DatabaseModule {
     @Provides fun libraryDao(db: AppDatabase): LibraryDao = db.libraryDao()
     @Provides fun progressDao(db: AppDatabase): ProgressDao = db.progressDao()
     @Provides fun downloadDao(db: AppDatabase): DownloadDao = db.downloadDao()
+    @Provides fun malDao(db: AppDatabase): MalDao = db.malDao()
 }

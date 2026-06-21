@@ -1,6 +1,7 @@
 package com.anilocal.app.data.remote
 
 import com.anilocal.app.data.metadata.anilist.AniListApi
+import com.anilocal.app.data.metadata.mal.MalApi
 import com.anilocal.app.data.metadata.tmdb.TmdbApi
 import com.anilocal.app.data.skip.AniSkipApi
 import com.squareup.moshi.Moshi
@@ -45,4 +46,8 @@ object NetworkModule {
     @Provides @Singleton
     fun tmdbApi(client: OkHttpClient, moshi: Moshi): TmdbApi =
         retrofit("https://api.themoviedb.org/3/", client, moshi).create(TmdbApi::class.java)
+
+    @Provides @Singleton
+    fun malApi(client: OkHttpClient, moshi: Moshi): MalApi =
+        retrofit("https://api.myanimelist.net/", client, moshi).create(MalApi::class.java)
 }

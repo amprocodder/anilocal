@@ -10,8 +10,10 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -41,6 +43,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AppRoot() {
+    val appVm: AppViewModel = hiltViewModel()
+    LaunchedEffect(Unit) { appVm.onAppOpen() }   // throttled MAL sync on app open
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route

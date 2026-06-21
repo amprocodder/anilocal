@@ -22,6 +22,9 @@ interface CatalogRepository {
 
     // Explore grid
     suspend fun browse(genre: String?, sort: BrowseSort, page: Int = 1): List<AnimeSummary>
+
+    /** Map a MAL anime id to its AniList id (to open MAL-synced items in the detail page). */
+    suspend fun anilistIdForMal(malId: Int): String?
 }
 
 /** Resolves a playable stream for a title+episode via the active AnimeSource plugin. */

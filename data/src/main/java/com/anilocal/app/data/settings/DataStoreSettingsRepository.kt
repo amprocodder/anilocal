@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.anilocal.app.domain.model.DownloadQuality
@@ -27,6 +28,9 @@ class DataStoreSettingsRepository @Inject constructor(
         val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality")
         val SUBTITLE_SCALE = floatPreferencesKey("subtitle_scale")
         val SUBTITLE_BG = booleanPreferencesKey("subtitle_background")
+        val MAL_USERNAME = stringPreferencesKey("mal_username")
+        val MAL_SYNC = booleanPreferencesKey("mal_sync_enabled")
+        val MAL_LAST_SYNCED = longPreferencesKey("mal_last_synced")
     }
 
     override val autoSkip: Flow<Boolean> =
@@ -65,5 +69,26 @@ class DataStoreSettingsRepository @Inject constructor(
 
     override suspend fun setSubtitleBackground(enabled: Boolean) {
         context.dataStore.edit { it[Keys.SUBTITLE_BG] = enabled }
+    }
+
+    override val malUsername: Flow<String> =
+        context.dataStore.data.map { it[Keys.MAL_USERNAME] ?: "" }
+
+    override suspend fun setMalUsername(username: String) {
+        context.dataStore.edit { it[Keys.MAL_USERNAME] = username }
+    }
+
+    override val malSyncEnabled: Flow<Boolean> =
+        context.dataStore.data.map { it[Keys.MAL_SYNC] ?: false }
+
+    override suspend fun setMalSyncEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.MAL_SYNC] = enabled }
+    }
+
+    override val malLastSynced: Flow<Long> =
+        context.dataStore.data.map { it[Keys.MAL_LAST_SYNCED] ?: 0L }
+
+    override suspend fun setMalLastSynced(epochMs: Long) {
+        context.dataStore.edit { it[Keys.MAL_LAST_SYNCED] = epochMs }
     }
 }

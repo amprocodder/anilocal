@@ -29,6 +29,17 @@ data class DownloadEntity(
     val createdAt: Long,
 )
 
+@Entity(tableName = "mal_list")
+data class MalEntryEntity(
+    @PrimaryKey val malId: Int,
+    val title: String,
+    val posterUrl: String?,
+    val status: String,                   // MAL api status string
+    val score: Int,
+    val episodesWatched: Int,
+    val totalEpisodes: Int?,
+)
+
 @Entity(tableName = "watch_progress")
 data class WatchProgressEntity(
     @PrimaryKey val animeId: String,

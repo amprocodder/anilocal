@@ -54,6 +54,18 @@ interface DownloadDao {
 }
 
 @Dao
+interface MalDao {
+    @Query("SELECT * FROM mal_list WHERE status = :status ORDER BY title")
+    fun observeByStatus(status: String): Flow<List<MalEntryEntity>>
+
+    @Upsert
+    suspend fun upsertAll(entries: List<MalEntryEntity>)
+
+    @Query("DELETE FROM mal_list")
+    suspend fun clear()
+}
+
+@Dao
 interface ProgressDao {
     @Query("SELECT * FROM watch_progress ORDER BY updatedAt DESC LIMIT :limit")
     fun observeRecent(limit: Int): Flow<List<WatchProgressEntity>>

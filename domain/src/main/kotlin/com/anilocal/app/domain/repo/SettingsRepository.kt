@@ -23,4 +23,12 @@ interface SettingsRepository {
     /** Whether subtitles render with a background box. */
     val subtitleBackground: Flow<Boolean>
     suspend fun setSubtitleBackground(enabled: Boolean)
+
+    // MyAnimeList username sync
+    val malUsername: Flow<String>
+    suspend fun setMalUsername(username: String)
+    val malSyncEnabled: Flow<Boolean>
+    suspend fun setMalSyncEnabled(enabled: Boolean)
+    val malLastSynced: Flow<Long>
+    suspend fun setMalLastSynced(epochMs: Long)
 }

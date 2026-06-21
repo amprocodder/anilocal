@@ -83,6 +83,11 @@ class AniListCatalogRepository @Inject constructor(
         return mediaPage("${g}sort: ${sort.anilist}", page)
     }
 
+    override suspend fun anilistIdForMal(malId: Int): String? = withContext(Dispatchers.IO) {
+        val q = "query(${'$'}idMal:Int){ Media(idMal:${'$'}idMal, type:ANIME){ id } }"
+        runCatching { api.query(body(q, JSONObject().put("idMal", malId))).data?.media?.id?.toString() }.getOrNull()
+    }
+
     private suspend fun mediaPage(mediaArgs: String, page: Int): List<AnimeSummary> = withContext(Dispatchers.IO) {
         val q = """
             query(${'$'}page:Int){ Page(page:${'$'}page, perPage:30){

@@ -21,6 +21,7 @@ android {
         // Optional features (blank = no-op). See README.
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty("GOOGLE_WEB_CLIENT_ID") ?: ""}\"")
         buildConfigField("String", "TMDB_API_KEY", "\"${project.findProperty("TMDB_API_KEY") ?: ""}\"")
+        buildConfigField("String", "MAL_CLIENT_ID", "\"${project.findProperty("MAL_CLIENT_ID") ?: ""}\"")
     }
 
     buildTypes {

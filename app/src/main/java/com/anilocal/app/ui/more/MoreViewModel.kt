@@ -5,8 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.anilocal.app.domain.auth.AuthRepository
 import com.anilocal.app.domain.auth.AuthUser
 import com.anilocal.app.domain.model.DownloadQuality
+import com.anilocal.app.domain.repo.MalRepository
 import com.anilocal.app.domain.repo.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -17,6 +19,7 @@ import javax.inject.Inject
 class MoreViewModel @Inject constructor(
     private val authRepo: AuthRepository,
     private val settings: SettingsRepository,
+    private val mal: MalRepository,
 ) : ViewModel() {
 
     val user: StateFlow<AuthUser?> =
@@ -37,6 +40,14 @@ class MoreViewModel @Inject constructor(
     val subtitleBackground: StateFlow<Boolean> =
         settings.subtitleBackground.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    val malConfigured: Boolean get() = mal.isConfigured
+    val malUsername: StateFlow<String> =
+        settings.malUsername.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+    val malSyncEnabled: StateFlow<Boolean> =
+        settings.malSyncEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    private val _syncStatus = MutableStateFlow<String?>(null)
+    val syncStatus: StateFlow<String?> = _syncStatus
+
     fun setAutoSkip(enabled: Boolean) = viewModelScope.launch { settings.setAutoSkip(enabled) }
 
     fun setWifiOnly(enabled: Boolean) = viewModelScope.launch { settings.setWifiOnlyDownloads(enabled) }
@@ -46,6 +57,13 @@ class MoreViewModel @Inject constructor(
     fun setSubtitleScale(scale: Float) = viewModelScope.launch { settings.setSubtitleScale(scale) }
 
     fun setSubtitleBackground(enabled: Boolean) = viewModelScope.launch { settings.setSubtitleBackground(enabled) }
+
+    fun setMalUsername(username: String) = viewModelScope.launch { settings.setMalUsername(username) }
+    fun setMalSyncEnabled(enabled: Boolean) = viewModelScope.launch { settings.setMalSyncEnabled(enabled) }
+    fun syncMalNow() = viewModelScope.launch {
+        _syncStatus.value = "Syncing…"
+        _syncStatus.value = mal.sync().fold({ "Synced $it titles" }, { "Sync failed: ${it.message}" })
+    }
 
     fun signInWithGoogle(idToken: String) = viewModelScope.launch { authRepo.signInWithGoogle(idToken) }
 
