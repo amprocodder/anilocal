@@ -128,6 +128,7 @@ fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
 
         // MyAnimeList Sync — expandable subsection.
         var malExpanded by remember { mutableStateOf(false) }
+        val malClientId by vm.malClientId.collectAsStateWithLifecycle()
         val malUsername by vm.malUsername.collectAsStateWithLifecycle()
         val malSyncEnabled by vm.malSyncEnabled.collectAsStateWithLifecycle()
         val syncStatus by vm.syncStatus.collectAsStateWithLifecycle()
@@ -139,38 +140,43 @@ fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
             Icon(if (malExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, "Toggle")
         }
         if (malExpanded) {
-            if (!vm.malConfigured) {
-                Text("Add a MAL Client ID (MAL_CLIENT_ID) to the build to enable sync.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                var usernameField by remember(malUsername) { mutableStateOf(malUsername) }
-                OutlinedTextField(
-                    value = usernameField,
-                    onValueChange = { usernameField = it },
-                    label = { Text("MAL username") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Active sync (on app open)", style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.weight(1f))
-                    Switch(checked = malSyncEnabled, onCheckedChange = vm::setMalSyncEnabled)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { vm.setMalUsername(usernameField.trim()) }) { Text("Save") }
-                    OutlinedButton(onClick = { vm.setMalUsername(usernameField.trim()); vm.syncMalNow() }) {
-                        Text("Sync now")
-                    }
-                }
-                syncStatus?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Text("Read-only mirror of your PUBLIC MAL list. Filter it on the Library tab.",
-                    style = MaterialTheme.typography.bodySmall,
+            var clientIdField by remember(malClientId) { mutableStateOf(malClientId) }
+            var usernameField by remember(malUsername) { mutableStateOf(malUsername) }
+            OutlinedTextField(
+                value = clientIdField,
+                onValueChange = { clientIdField = it },
+                label = { Text("MAL Client ID") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = usernameField,
+                onValueChange = { usernameField = it },
+                label = { Text("MAL username") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Active sync (on app open)", style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f))
+                Switch(checked = malSyncEnabled, onCheckedChange = vm::setMalSyncEnabled)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    vm.setMalClientId(clientIdField.trim()); vm.setMalUsername(usernameField.trim())
+                }) { Text("Save") }
+                OutlinedButton(onClick = {
+                    vm.setMalClientId(clientIdField.trim()); vm.setMalUsername(usernameField.trim()); vm.syncMalNow()
+                }) { Text("Sync now") }
+            }
+            syncStatus?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            Text("Get a free Client ID at myanimelist.net → Account Settings → API. Mirrors your " +
+                "PUBLIC list (read-only); filter it on the Library tab.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         HorizontalDivider()
 

@@ -20,26 +20,29 @@ class MalRepositoryImpl @Inject constructor(
     private val api: MalApi,
     private val dao: MalDao,
     private val settings: SettingsRepository,
-    @Named("mal_client_id") private val clientId: String,
+    @Named("mal_client_id") private val defaultClientId: String,   // optional baked-in fallback
 ) : MalRepository {
 
-    override val isConfigured: Boolean get() = clientId.isNotBlank()
+    /** In-app Client ID wins; falls back to any baked-in build default (usually blank). */
+    private suspend fun clientId(): String =
+        settings.malClientId.first().trim().ifBlank { defaultClientId }
 
     override fun list(status: MalStatus): Flow<List<MalListEntry>> =
         dao.observeByStatus(status.api).map { rows -> rows.map { it.toEntry() } }
 
     override suspend fun sync(): Result<Int> = withContext(Dispatchers.IO) {
         runCatching {
-            require(clientId.isNotBlank()) { "No MAL Client ID configured" }
+            val cid = clientId()
+            require(cid.isNotBlank()) { "Enter your MAL Client ID first" }
             val username = settings.malUsername.first().trim()
-            require(username.isNotEmpty()) { "No MAL username set" }
+            require(username.isNotEmpty()) { "Enter your MAL username first" }
 
             val rows = mutableListOf<MalEntryEntity>()
             var offset = 0
             var page = 0
             while (page < 10) {                           // safety cap ≈ 10k entries
                 page++
-                val resp = api.animeList(username = username, clientId = clientId, offset = offset)
+                val resp = api.animeList(username = username, clientId = cid, offset = offset)
                 val nodes = resp.data.orEmpty()
                 nodes.forEach { n ->
                     val node = n.node ?: return@forEach
@@ -66,8 +69,8 @@ class MalRepositoryImpl @Inject constructor(
     }
 
     override suspend fun syncIfDue() {
-        if (!isConfigured) return
         if (!settings.malSyncEnabled.first()) return
+        if (clientId().isBlank()) return
         if (settings.malUsername.first().isBlank()) return
         if (System.currentTimeMillis() - settings.malLastSynced.first() < THROTTLE_MS) return
         sync()

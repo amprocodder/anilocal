@@ -56,8 +56,6 @@ class LibraryViewModel @Inject constructor(
     private val catalog: CatalogRepository,
 ) : ViewModel() {
 
-    val malConfigured: Boolean get() = mal.isConfigured
-
     /** null = local "My List"; otherwise the selected MAL status. */
     val filter = MutableStateFlow<MalStatus?>(null)
 
@@ -105,9 +103,6 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
                         PosterCard(it, onClick = { onOpen(it.id) }, downloaded = it.id in downloadedIds)
                     }
                 }
-
-                !vm.malConfigured ->
-                    Hint("Set up MyAnimeList Sync in Settings to see your list here.")
 
                 malItems.isEmpty() ->
                     Hint("Nothing here yet — sync from Settings → MyAnimeList Sync.")

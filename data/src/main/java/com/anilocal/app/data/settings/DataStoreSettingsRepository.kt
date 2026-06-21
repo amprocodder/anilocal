@@ -28,6 +28,7 @@ class DataStoreSettingsRepository @Inject constructor(
         val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality")
         val SUBTITLE_SCALE = floatPreferencesKey("subtitle_scale")
         val SUBTITLE_BG = booleanPreferencesKey("subtitle_background")
+        val MAL_CLIENT_ID = stringPreferencesKey("mal_client_id")
         val MAL_USERNAME = stringPreferencesKey("mal_username")
         val MAL_SYNC = booleanPreferencesKey("mal_sync_enabled")
         val MAL_LAST_SYNCED = longPreferencesKey("mal_last_synced")
@@ -69,6 +70,13 @@ class DataStoreSettingsRepository @Inject constructor(
 
     override suspend fun setSubtitleBackground(enabled: Boolean) {
         context.dataStore.edit { it[Keys.SUBTITLE_BG] = enabled }
+    }
+
+    override val malClientId: Flow<String> =
+        context.dataStore.data.map { it[Keys.MAL_CLIENT_ID] ?: "" }
+
+    override suspend fun setMalClientId(clientId: String) {
+        context.dataStore.edit { it[Keys.MAL_CLIENT_ID] = clientId }
     }
 
     override val malUsername: Flow<String> =

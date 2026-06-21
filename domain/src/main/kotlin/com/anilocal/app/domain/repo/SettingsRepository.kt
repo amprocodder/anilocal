@@ -24,7 +24,9 @@ interface SettingsRepository {
     val subtitleBackground: Flow<Boolean>
     suspend fun setSubtitleBackground(enabled: Boolean)
 
-    // MyAnimeList username sync
+    // MyAnimeList sync (all entered in-app — no rebuild needed)
+    val malClientId: Flow<String>
+    suspend fun setMalClientId(clientId: String)
     val malUsername: Flow<String>
     suspend fun setMalUsername(username: String)
     val malSyncEnabled: Flow<Boolean>

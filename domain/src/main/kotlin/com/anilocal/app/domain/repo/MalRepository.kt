@@ -9,9 +9,6 @@ import kotlinx.coroutines.flow.Flow
  * Client-ID API) into a local Room table. No OAuth, no writing back to MAL.
  */
 interface MalRepository {
-    /** True when a MAL Client ID is baked into the build (feature usable). */
-    val isConfigured: Boolean
-
     /** The locally-mirrored list for a status, observable for the Library tab. */
     fun list(status: MalStatus): Flow<List<MalListEntry>>
 
