@@ -24,6 +24,9 @@ class MalRepositoryImpl @Inject constructor(
     override fun list(status: MalStatus): Flow<List<MalListEntry>> =
         dao.observeByStatus(status.api).map { rows -> rows.map { it.toEntry() } }
 
+    override fun all(): Flow<List<MalListEntry>> =
+        dao.observeAll().map { rows -> rows.map { it.toEntry() } }
+
     override suspend fun sync(): Result<Int> = withContext(Dispatchers.IO) {
         runCatching {
             val username = settings.malUsername.first().trim()

@@ -12,6 +12,9 @@ interface MalRepository {
     /** The locally-mirrored list for a status, observable for the Library tab. */
     fun list(status: MalStatus): Flow<List<MalListEntry>>
 
+    /** The full mirrored list (every status), for the uncategorised "My List" view. */
+    fun all(): Flow<List<MalListEntry>>
+
     /** Pull the user's public list from MAL and replace the local mirror. Returns count. */
     suspend fun sync(): Result<Int>
 

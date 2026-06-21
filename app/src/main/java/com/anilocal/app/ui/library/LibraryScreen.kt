@@ -41,8 +41,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -56,15 +57,25 @@ class LibraryViewModel @Inject constructor(
     private val catalog: CatalogRepository,
 ) : ViewModel() {
 
-    /** null = local "My List"; otherwise the selected MAL status. */
+    /** null = "My List" (local additions + ALL MAL entries, uncategorised); else a MAL status. */
     val filter = MutableStateFlow<MalStatus?>(null)
 
-    val localItems: StateFlow<List<AnimeSummary>> =
-        library.library.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val malItems: StateFlow<List<MalListEntry>> =
-        filter.flatMapLatest { f -> if (f == null) flowOf(emptyList()) else mal.list(f) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /**
+     * Grid items for the current filter, unified to [AnimeSummary]. "My List" merges the local
+     * library with the entire MAL mirror — deduped by MAL id, with the local entry winning so it
+     * opens directly. A status chip shows just that MAL category.
+     */
+    val items: StateFlow<List<AnimeSummary>> =
+        filter.flatMapLatest { f ->
+            if (f == null) {
+                combine(library.library, mal.all()) { local, malAll ->
+                    val localMalIds = local.mapNotNull { it.idMal }.toSet()
+                    local + malAll.filter { it.malId !in localMalIds }.map { it.toSummary() }
+                }
+            } else {
+                mal.list(f).map { entries -> entries.map { it.toSummary() } }
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val downloadedIds: StateFlow<Set<String>> =
         downloads.downloadedAnimeIds().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
@@ -72,6 +83,8 @@ class LibraryViewModel @Inject constructor(
     fun setFilter(status: MalStatus?) { filter.value = status }
 
     suspend fun anilistIdForMal(malId: Int): String? = catalog.anilistIdForMal(malId)
+
+    private fun MalListEntry.toSummary() = AnimeSummary("mal-$malId", title, posterUrl, malId)
 }
 
 @Composable
@@ -79,8 +92,7 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val filter by vm.filter.collectAsStateWithLifecycle()
-    val localItems by vm.localItems.collectAsStateWithLifecycle()
-    val malItems by vm.malItems.collectAsStateWithLifecycle()
+    val gridItems by vm.items.collectAsStateWithLifecycle()
     val downloadedIds by vm.downloadedIds.collectAsStateWithLifecycle()
 
     Column(Modifier.fillMaxSize().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -95,29 +107,30 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
 
         Box(Modifier.weight(1f).fillMaxSize()) {
             when {
-                filter == null && localItems.isEmpty() ->
-                    Hint("Your list is empty — add titles from a detail page.")
+                gridItems.isEmpty() && filter == null ->
+                    Hint("Your list is empty — add titles from a detail page, or sync your MAL list in Settings.")
 
-                filter == null -> Grid {
-                    items(localItems, key = { it.id }) {
-                        PosterCard(it, onClick = { onOpen(it.id) }, downloaded = it.id in downloadedIds)
-                    }
-                }
-
-                malItems.isEmpty() ->
+                gridItems.isEmpty() ->
                     Hint("Nothing here yet — sync from Settings → MyAnimeList Sync.")
 
                 else -> Grid {
-                    items(malItems, key = { it.malId }) { e ->
+                    items(gridItems, key = { it.id }) { summary ->
                         PosterCard(
-                            AnimeSummary("mal-${e.malId}", e.title, e.posterUrl, e.malId),
+                            summary,
                             onClick = {
-                                scope.launch {
-                                    val id = vm.anilistIdForMal(e.malId)
-                                    if (id != null) onOpen(id)
-                                    else Toast.makeText(context, "\"${e.title}\" not found on AniList", Toast.LENGTH_SHORT).show()
+                                val malId = summary.idMal
+                                if (summary.id.startsWith("mal-") && malId != null) {
+                                    // MAL-only entry: resolve its AniList id before opening detail.
+                                    scope.launch {
+                                        val id = vm.anilistIdForMal(malId)
+                                        if (id != null) onOpen(id)
+                                        else Toast.makeText(context, "\"${summary.title}\" not found on AniList", Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    onOpen(summary.id)
                                 }
                             },
+                            downloaded = summary.id in downloadedIds,
                         )
                     }
                 }

@@ -58,6 +58,9 @@ interface MalDao {
     @Query("SELECT * FROM mal_list WHERE status = :status ORDER BY title")
     fun observeByStatus(status: String): Flow<List<MalEntryEntity>>
 
+    @Query("SELECT * FROM mal_list ORDER BY title")
+    fun observeAll(): Flow<List<MalEntryEntity>>
+
     @Upsert
     suspend fun upsertAll(entries: List<MalEntryEntity>)
 
