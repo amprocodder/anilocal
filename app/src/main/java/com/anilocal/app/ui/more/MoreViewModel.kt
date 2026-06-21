@@ -40,8 +40,6 @@ class MoreViewModel @Inject constructor(
     val subtitleBackground: StateFlow<Boolean> =
         settings.subtitleBackground.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
-    val malClientId: StateFlow<String> =
-        settings.malClientId.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
     val malUsername: StateFlow<String> =
         settings.malUsername.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
     val malSyncEnabled: StateFlow<Boolean> =
@@ -59,7 +57,6 @@ class MoreViewModel @Inject constructor(
 
     fun setSubtitleBackground(enabled: Boolean) = viewModelScope.launch { settings.setSubtitleBackground(enabled) }
 
-    fun setMalClientId(clientId: String) = viewModelScope.launch { settings.setMalClientId(clientId) }
     fun setMalUsername(username: String) = viewModelScope.launch { settings.setMalUsername(username) }
     fun setMalSyncEnabled(enabled: Boolean) = viewModelScope.launch { settings.setMalSyncEnabled(enabled) }
     fun syncMalNow() = viewModelScope.launch {

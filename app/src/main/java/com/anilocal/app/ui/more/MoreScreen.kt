@@ -135,7 +135,6 @@ fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
 
         // MyAnimeList Sync — expandable subsection.
         var malExpanded by remember { mutableStateOf(false) }
-        val malClientId by vm.malClientId.collectAsStateWithLifecycle()
         val malUsername by vm.malUsername.collectAsStateWithLifecycle()
         val malSyncEnabled by vm.malSyncEnabled.collectAsStateWithLifecycle()
         val syncStatus by vm.syncStatus.collectAsStateWithLifecycle()
@@ -147,15 +146,7 @@ fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
             Icon(if (malExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, "Toggle")
         }
         if (malExpanded) {
-            var clientIdField by remember(malClientId) { mutableStateOf(malClientId) }
             var usernameField by remember(malUsername) { mutableStateOf(malUsername) }
-            OutlinedTextField(
-                value = clientIdField,
-                onValueChange = { clientIdField = it },
-                label = { Text("MAL Client ID") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
             OutlinedTextField(
                 value = usernameField,
                 onValueChange = { usernameField = it },
@@ -170,18 +161,18 @@ fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
-                    vm.setMalClientId(clientIdField.trim()); vm.setMalUsername(usernameField.trim())
+                    vm.setMalUsername(usernameField.trim())
                 }) { Text("Save") }
                 OutlinedButton(onClick = {
-                    vm.setMalClientId(clientIdField.trim()); vm.setMalUsername(usernameField.trim()); vm.syncMalNow()
+                    vm.setMalUsername(usernameField.trim()); vm.syncMalNow()
                 }) { Text("Sync now") }
             }
             syncStatus?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text("Get a free Client ID at myanimelist.net → Account Settings → API. Mirrors your " +
-                "PUBLIC list (read-only); filter it on the Library tab.",
+            Text("Enter your MAL username to mirror your PUBLIC list (read-only) — no API key " +
+                "needed. Make sure your list privacy is Public on MAL, then filter it on the Library tab.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

@@ -18,10 +18,9 @@ android {
         versionName = "0.1.0"
         vectorDrawables { useSupportLibrary = true }
 
-        // Optional features (blank = no-op). See README.
+        // Optional features (blank = no-op). See README. (MAL sync is keyless — username only.)
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty("GOOGLE_WEB_CLIENT_ID") ?: ""}\"")
         buildConfigField("String", "TMDB_API_KEY", "\"${project.findProperty("TMDB_API_KEY") ?: ""}\"")
-        buildConfigField("String", "MAL_CLIENT_ID", "\"${project.findProperty("MAL_CLIENT_ID") ?: ""}\"")
     }
 
     buildTypes {

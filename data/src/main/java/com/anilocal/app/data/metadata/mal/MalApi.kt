@@ -2,41 +2,38 @@ package com.anilocal.app.data.metadata.mal
 
 import com.squareup.moshi.Json
 import retrofit2.http.GET
-import retrofit2.http.Header
+import retrofit2.http.Headers
 import retrofit2.http.Path
 import retrofit2.http.Query
 
 /**
- * Official MAL API v2, read-only Client-ID mode: GET a user's PUBLIC anime list by username
- * with just the X-MAL-CLIENT-ID header (no OAuth). Paginated; status comes per-entry.
+ * Reads a user's **PUBLIC** MyAnimeList list with **no API key and no OAuth**, via the same
+ * `load.json` endpoint MAL's own list page calls. Only a username is required.
+ *
+ * `status=7` returns every category; the result is a flat JSON array paginated by `offset`
+ * (MAL serves ~300 entries per page). Per-entry `status` is numeric — see [MalLoadEntry].
+ * Requires the user's list privacy to be set to Public on MAL.
  */
 interface MalApi {
-    @GET("v2/users/{username}/animelist")
+    @GET("animelist/{username}/load.json")
+    @Headers("User-Agent: Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
     suspend fun animeList(
         @Path("username") username: String,
-        @Header("X-MAL-CLIENT-ID") clientId: String,
-        @Query("fields") fields: String = "list_status,num_episodes,main_picture",
-        @Query("limit") limit: Int = 1000,
         @Query("offset") offset: Int = 0,
-        @Query("nsfw") nsfw: Boolean = true,
-    ): MalListResponse
+        @Query("status") status: Int = 7,     // 7 = all categories
+    ): List<MalLoadEntry>
 }
 
-data class MalListResponse(val data: List<MalNode>?, val paging: MalPaging?)
-data class MalPaging(val next: String?)
-data class MalNode(val node: MalAnime?, @Json(name = "list_status") val listStatus: MalListStatus?)
-
-data class MalAnime(
-    val id: Int,
-    val title: String?,
-    @Json(name = "main_picture") val mainPicture: MalPicture?,
-    @Json(name = "num_episodes") val numEpisodes: Int?,
-)
-
-data class MalPicture(val medium: String?, val large: String?)
-
-data class MalListStatus(
-    val status: String?,
+/**
+ * One row from `load.json`. `status` is MAL's numeric list code:
+ * 1=watching, 2=completed, 3=on_hold, 4=dropped, 6=plan_to_watch.
+ */
+data class MalLoadEntry(
+    @Json(name = "anime_id") val animeId: Int,
+    @Json(name = "anime_title") val title: String?,
+    @Json(name = "anime_image_path") val imagePath: String?,
+    val status: Int,
     val score: Int?,
-    @Json(name = "num_episodes_watched") val episodesWatched: Int?,
+    @Json(name = "num_watched_episodes") val episodesWatched: Int?,
+    @Json(name = "anime_num_episodes") val numEpisodes: Int?,
 )

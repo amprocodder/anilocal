@@ -47,7 +47,8 @@ object NetworkModule {
     fun tmdbApi(client: OkHttpClient, moshi: Moshi): TmdbApi =
         retrofit("https://api.themoviedb.org/3/", client, moshi).create(TmdbApi::class.java)
 
+    // Keyless: the public list comes from MAL's own `load.json` page endpoint (not the v2 API).
     @Provides @Singleton
     fun malApi(client: OkHttpClient, moshi: Moshi): MalApi =
-        retrofit("https://api.myanimelist.net/", client, moshi).create(MalApi::class.java)
+        retrofit("https://myanimelist.net/", client, moshi).create(MalApi::class.java)
 }
