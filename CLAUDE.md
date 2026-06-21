@@ -62,6 +62,12 @@ abstract fun bindAnimeSource(impl: SampleLocalSource): AnimeSource
 **To change where streams come from, change this one line** to bind a different `AnimeSource`
 implementation (e.g. a Jellyfin/Plex/local-files source). Nothing else in the app knows or cares.
 
+There are **two DI modules, both in package `com.anilocal.app.di`** despite living in different
+Gradle modules: `AppModule` (in `:data`) `@Binds` every domain interface → `:data` impl; `AppConfigModule`
+(in `:app`) `@Provides` app-level `BuildConfig` values into the graph. Adding a new repo/source impl →
+add a `@Binds` in `:data`'s `AppModule`. Surfacing a new build-time key to a data-layer impl → add a
+`@Provides @Named(...)` in `:app`'s `AppConfigModule` (see config flow below).
+
 ## Key cross-cutting patterns
 
 - **Room is the offline source of truth for the UI.** Everything the UI shows (downloads list,
@@ -80,10 +86,17 @@ implementation (e.g. a Jellyfin/Plex/local-files source). Nothing else in the ap
   markers are fetched on `STATE_READY` (once duration is known). Auto-skip fires at most once per marker.
 
 - **Optional features no-op when unconfigured.** TMDB artwork, Google Sign-In, and MAL sync are gated on
-  build-time config that defaults to blank. Keys come from `gradle.properties` (or `~/.gradle/gradle.properties`)
-  → `app/build.gradle.kts` `buildConfigField` → exposed to `:data` via `app/.../di/AppConfigModule.kt`
-  (`@Named("mal_client_id")`, etc.). `app/google-services.json` is git-ignored; the Google Services plugin
-  auto-applies only if that file is present. Code paths must remain functional with these absent.
+  build-time config that defaults to blank. Keys flow `gradle.properties` (or `~/.gradle/gradle.properties`)
+  → `app/build.gradle.kts` `buildConfigField` → `BuildConfig` — which **only `:app` generates**
+  (`buildConfig = true` is set there, not in `:data`). The three features each consume config differently:
+  - **MAL client id** is the *only* key bridged into `:data`, via `app/.../di/AppConfigModule.kt`
+    (`@Provides @Named("mal_client_id")`), precisely because `:data` cannot see `:app`'s `BuildConfig`.
+    Any future config a data-layer impl needs must be bridged the same way.
+  - **`GOOGLE_WEB_CLIENT_ID`** is read directly in `:app` UI (`ui/more/MoreScreen.kt`); blank → the
+    sign-in button hides itself. `app/google-services.json` is git-ignored and the Google Services plugin
+    self-applies only when that file exists.
+  - **TMDB** is a documented *scaffold* (`data/.../metadata/tmdb/TmdbApi.kt`) — it doesn't consume its key
+    yet (AniList already supplies artwork). Code paths must stay functional with all of these absent.
 
 - **Catalog vs. source are separate concerns.** AniList (`CatalogRepository`) provides the *metadata*
   catalog (trending, search, detail pages) with no API key; the bound `AnimeSource` provides the *playable
