@@ -15,4 +15,12 @@ interface SettingsRepository {
     /** Default quality the download picker pre-selects. */
     val downloadQuality: Flow<DownloadQuality>
     suspend fun setDownloadQuality(quality: DownloadQuality)
+
+    /** Subtitle text-size multiplier (1.0 = default). */
+    val subtitleScale: Flow<Float>
+    suspend fun setSubtitleScale(scale: Float)
+
+    /** Whether subtitles render with a background box. */
+    val subtitleBackground: Flow<Boolean>
+    suspend fun setSubtitleBackground(enabled: Boolean)
 }

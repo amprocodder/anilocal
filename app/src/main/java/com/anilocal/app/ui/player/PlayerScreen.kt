@@ -20,13 +20,17 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 
 @OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
     val position by vm.position.collectAsStateWithLifecycle()
     val markers by vm.markers.collectAsStateWithLifecycle()
+    val subtitleScale by vm.subtitleScale.collectAsStateWithLifecycle()
+    val subtitleBackground by vm.subtitleBackground.collectAsStateWithLifecycle()
 
     BackHandler(onBack = onBack)
 
@@ -37,6 +41,25 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                     player = vm.player
                     setShowNextButton(false)
                     setShowPreviousButton(false)
+                }
+            },
+            update = { view ->
+                // Apply subtitle preferences live (re-runs when scale/background change).
+                view.subtitleView?.let { sv ->
+                    sv.setApplyEmbeddedStyles(false)
+                    sv.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitleScale)
+                    val bg = if (subtitleBackground) android.graphics.Color.argb(160, 0, 0, 0)
+                    else android.graphics.Color.TRANSPARENT
+                    sv.setStyle(
+                        CaptionStyleCompat(
+                            android.graphics.Color.WHITE,
+                            bg,
+                            android.graphics.Color.TRANSPARENT,
+                            CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                            android.graphics.Color.BLACK,
+                            null,
+                        )
+                    )
                 }
             },
             modifier = Modifier.fillMaxSize(),

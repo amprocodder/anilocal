@@ -2,6 +2,7 @@ package com.anilocal.app.domain.repo
 
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
+import com.anilocal.app.domain.model.BrowseSort
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.VideoStream
 import kotlinx.coroutines.flow.Flow
@@ -11,6 +12,16 @@ interface CatalogRepository {
     suspend fun popular(page: Int = 1): List<AnimeSummary>
     suspend fun search(query: String): List<AnimeSummary>
     suspend fun detail(animeId: String): AnimeDetail
+
+    // Home rows
+    suspend fun trending(page: Int = 1): List<AnimeSummary>
+    suspend fun popularThisSeason(page: Int = 1): List<AnimeSummary>
+    suspend fun topAiring(page: Int = 1): List<AnimeSummary>
+    suspend fun allTimePopular(page: Int = 1): List<AnimeSummary>
+    suspend fun upcoming(page: Int = 1): List<AnimeSummary>
+
+    // Explore grid
+    suspend fun browse(genre: String?, sort: BrowseSort, page: Int = 1): List<AnimeSummary>
 }
 
 /** Resolves a playable stream for a title+episode via the active AnimeSource plugin. */

@@ -29,7 +29,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -64,6 +66,11 @@ class PlayerViewModel @Inject constructor(
 
     private val _offline = MutableStateFlow(false)
     val offline: StateFlow<Boolean> = _offline
+
+    val subtitleScale: StateFlow<Float> =
+        settings.subtitleScale.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 1f)
+    val subtitleBackground: StateFlow<Boolean> =
+        settings.subtitleBackground.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
     private var summary: AnimeSummary? = null
     private var idMal: Int? = null

@@ -31,11 +31,21 @@ class MoreViewModel @Inject constructor(
     val downloadQuality: StateFlow<DownloadQuality> =
         settings.downloadQuality.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DownloadQuality.AUTO)
 
+    val subtitleScale: StateFlow<Float> =
+        settings.subtitleScale.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 1f)
+
+    val subtitleBackground: StateFlow<Boolean> =
+        settings.subtitleBackground.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
     fun setAutoSkip(enabled: Boolean) = viewModelScope.launch { settings.setAutoSkip(enabled) }
 
     fun setWifiOnly(enabled: Boolean) = viewModelScope.launch { settings.setWifiOnlyDownloads(enabled) }
 
     fun setDownloadQuality(quality: DownloadQuality) = viewModelScope.launch { settings.setDownloadQuality(quality) }
+
+    fun setSubtitleScale(scale: Float) = viewModelScope.launch { settings.setSubtitleScale(scale) }
+
+    fun setSubtitleBackground(enabled: Boolean) = viewModelScope.launch { settings.setSubtitleBackground(enabled) }
 
     fun signInWithGoogle(idToken: String) = viewModelScope.launch { authRepo.signInWithGoogle(idToken) }
 

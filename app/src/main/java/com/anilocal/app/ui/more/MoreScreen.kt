@@ -15,11 +15,14 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -39,6 +42,8 @@ fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
     val autoSkip by vm.autoSkip.collectAsStateWithLifecycle()
     val wifiOnly by vm.wifiOnly.collectAsStateWithLifecycle()
     val downloadQuality by vm.downloadQuality.collectAsStateWithLifecycle()
+    val subtitleScale by vm.subtitleScale.collectAsStateWithLifecycle()
+    val subtitleBackground by vm.subtitleBackground.collectAsStateWithLifecycle()
 
     val webClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
     val signInClient = remember(webClientId) {
@@ -98,6 +103,21 @@ fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
                 RadioButton(selected = downloadQuality == q, onClick = { vm.setDownloadQuality(q) })
                 Text(q.label, modifier = Modifier.padding(start = 8.dp))
             }
+        }
+        HorizontalDivider()
+
+        Text("Subtitles", style = MaterialTheme.typography.titleMedium)
+        Text("Text size: ${(subtitleScale * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
+        var sliderScale by remember(subtitleScale) { mutableStateOf(subtitleScale) }
+        Slider(
+            value = sliderScale,
+            onValueChange = { sliderScale = it },
+            onValueChangeFinished = { vm.setSubtitleScale(sliderScale) },
+            valueRange = 0.6f..2.0f,
+        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Subtitle background", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            Switch(checked = subtitleBackground, onCheckedChange = vm::setSubtitleBackground)
         }
         HorizontalDivider()
 
