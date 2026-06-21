@@ -19,6 +19,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.anilocal.app.domain.model.AnimeSummary
+import com.anilocal.app.domain.model.ContinueWatching
 import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.ProgressRepository
@@ -36,18 +37,21 @@ data class HomeRow(val title: String, val items: List<AnimeSummary>)
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val catalog: CatalogRepository,
-    progress: ProgressRepository,
+    private val progress: ProgressRepository,
     downloads: DownloadRepository,
 ) : ViewModel() {
 
     private val _rows = MutableStateFlow<List<HomeRow>>(emptyList())
     val rows: StateFlow<List<HomeRow>> = _rows
 
-    val continueWatching: StateFlow<List<AnimeSummary>> =
+    val continueWatching: StateFlow<List<ContinueWatching>> =
         progress.continueWatching.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val downloadedIds: StateFlow<Set<String>> =
         downloads.downloadedAnimeIds().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /** Permanently drop an item from the Continue Watching row. */
+    fun removeFromContinue(animeId: String) = viewModelScope.launch { progress.remove(animeId) }
 
     init {
         // Load the AniLab-style rows; each appears as soon as it returns (ordered).
@@ -68,7 +72,11 @@ class HomeViewModel @Inject constructor(
 }
 
 @Composable
-fun HomeScreen(onOpen: (String) -> Unit, vm: HomeViewModel = hiltViewModel()) {
+fun HomeScreen(
+    onOpen: (String) -> Unit,
+    onResume: (animeId: String, episodeNumber: Int, positionMs: Long) -> Unit,
+    vm: HomeViewModel = hiltViewModel(),
+) {
     val rows by vm.rows.collectAsStateWithLifecycle()
     val continueWatching by vm.continueWatching.collectAsStateWithLifecycle()
     val downloadedIds by vm.downloadedIds.collectAsStateWithLifecycle()
@@ -83,10 +91,44 @@ fun HomeScreen(onOpen: (String) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                 modifier = Modifier.padding(horizontal = 16.dp))
         }
         if (continueWatching.isNotEmpty()) {
-            item { Shelf("Continue Watching", continueWatching, downloadedIds, onOpen) }
+            item {
+                ContinueWatchingShelf(
+                    items = continueWatching,
+                    downloadedIds = downloadedIds,
+                    onResume = onResume,
+                    onRemove = vm::removeFromContinue,
+                )
+            }
         }
         items(rows, key = { it.title }) { row ->
             Shelf(row.title, row.items, downloadedIds, onOpen)
+        }
+    }
+}
+
+@Composable
+private fun ContinueWatchingShelf(
+    items: List<ContinueWatching>,
+    downloadedIds: Set<String>,
+    onResume: (animeId: String, episodeNumber: Int, positionMs: Long) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Continue Watching", style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = 16.dp))
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+        ) {
+            items(items, key = { it.anime.id }) { cw ->
+                PosterCard(
+                    item = cw.anime,
+                    onClick = { onResume(cw.anime.id, cw.episodeNumber, cw.positionMs) },
+                    downloaded = cw.anime.id in downloadedIds,
+                    progress = cw.fraction,
+                    onRemove = { onRemove(cw.anime.id) },
+                )
+            }
         }
     }
 }

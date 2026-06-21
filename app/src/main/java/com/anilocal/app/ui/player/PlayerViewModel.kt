@@ -18,7 +18,6 @@ import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.OfflineEpisode
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.Subtitle
-import com.anilocal.app.domain.model.VideoStream
 import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.ProgressRepository
@@ -27,6 +26,7 @@ import com.anilocal.app.domain.repo.SkipRepository
 import com.anilocal.app.domain.repo.StreamRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import javax.inject.Named
 
 @OptIn(UnstableApi::class)
 @HiltViewModel
@@ -47,11 +48,16 @@ class PlayerViewModel @Inject constructor(
     private val skip: SkipRepository,
     private val progress: ProgressRepository,
     private val downloads: DownloadRepository,
+    // App-lifetime scope so the final save survives viewModelScope being cancelled on teardown.
+    @Named("appScope") private val appScope: CoroutineScope,
     settings: SettingsRepository,
 ) : ViewModel() {
 
     private val animeId: String = checkNotNull(savedState["animeId"])
     private val episodeNumber: Int = checkNotNull(savedState["episodeNumber"])
+
+    // Optional resume point (ms) passed from Continue Watching; 0 means start from the beginning.
+    private val startMs: Long = savedState["startMs"] ?: 0L
 
     // Player reads downloaded bytes from the offline cache, falling through to network online.
     val player: ExoPlayer = ExoPlayer.Builder(context)
@@ -89,7 +95,16 @@ class PlayerViewModel @Inject constructor(
                         _markers.value = runCatching { skip.markers(idMal, episodeNumber, lengthSec) }
                             .getOrDefault(emptyList())
                     }
+                } else if (state == Player.STATE_ENDED) {
+                    // Finished — drop it from Continue Watching so it doesn't linger near 100%.
+                    summary?.let { s -> viewModelScope.launch { progress.remove(s.id) } }
                 }
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                // Capture the resume point when the user pauses (scope still alive here; the final
+                // save on teardown is handled separately in onCleared via appScope).
+                if (!isPlaying) viewModelScope.launch { saveProgress() }
             }
         })
 
@@ -124,7 +139,7 @@ class PlayerViewModel @Inject constructor(
 
     private fun playOffline(ep: OfflineEpisode) {
         idMal = ep.idMal
-        summary = AnimeSummary(animeId, ep.title, null, ep.idMal)
+        summary = AnimeSummary(animeId, ep.title, ep.posterUrl, ep.idMal)
         _markers.value = ep.markers
         play(ep.streamUri, ep.mimeType, ep.subtitles)
     }
@@ -147,7 +162,7 @@ class PlayerViewModel @Inject constructor(
                 }
             }
             .build()
-        player.setMediaItem(item)
+        if (startMs > 0) player.setMediaItem(item, startMs) else player.setMediaItem(item)
         player.prepare()
         player.playWhenReady = true
     }
@@ -160,15 +175,32 @@ class PlayerViewModel @Inject constructor(
 
     private suspend fun saveProgress() {
         val s = summary ?: return
-        if (player.currentPosition > 0) {
-            progress.save(s, episodeNumber, player.currentPosition, player.duration.coerceAtLeast(0))
-        }
+        persist(s, player.currentPosition, player.duration.coerceAtLeast(0))
+    }
+
+    private suspend fun persist(s: AnimeSummary, pos: Long, dur: Long) {
+        if (pos <= 0) return
+        // Don't record a position in the final stretch — otherwise "Continue" would resume at the
+        // credits. Scale the window down for short clips so they still get a resumable point.
+        val threshold = if (dur > 0) minOf(END_THRESHOLD_MS, dur / 10) else 0L
+        if (dur > 0 && pos >= dur - threshold) return
+        progress.save(s, episodeNumber, pos, dur)
     }
 
     fun seekPast(marker: SkipMarker) = player.seekTo(marker.endMs)
 
     override fun onCleared() {
+        // viewModelScope is already cancelled here, so persist the final position on the app scope
+        // (capturing values before release(), after which the player can't be read).
+        val s = summary
+        val pos = player.currentPosition
+        val dur = player.duration.coerceAtLeast(0)
+        if (s != null) appScope.launch { persist(s, pos, dur) }
         player.release()
+    }
+
+    private companion object {
+        const val END_THRESHOLD_MS = 5_000L
     }
 
     private fun subtitleMime(url: String): String = when {

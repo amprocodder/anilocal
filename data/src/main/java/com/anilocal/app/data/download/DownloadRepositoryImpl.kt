@@ -137,6 +137,7 @@ class DownloadRepositoryImpl @Inject constructor(
             streamUri = e.streamUri,
             mimeType = e.mimeType,
             title = e.title,
+            posterUrl = e.posterUrl,
             episodeNumber = e.episodeNumber,
             idMal = e.idMal,
             subtitles = runCatching { subAdapter.fromJson(e.subtitlesJson) }.getOrNull().orEmpty(),

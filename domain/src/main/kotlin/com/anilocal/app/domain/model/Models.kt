@@ -8,6 +8,19 @@ data class AnimeSummary(
     val idMal: Int? = null,
 )
 
+/** A "Continue Watching" entry: an anime plus where the user left off. */
+data class ContinueWatching(
+    val anime: AnimeSummary,
+    val episodeNumber: Int,
+    val positionMs: Long,
+    val durationMs: Long,
+    val updatedAt: Long,
+) {
+    /** Fraction watched in [0,1], or null when the duration isn't known yet. */
+    val fraction: Float?
+        get() = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else null
+}
+
 /** Full detail for the detail screen. */
 data class AnimeDetail(
     val id: String,

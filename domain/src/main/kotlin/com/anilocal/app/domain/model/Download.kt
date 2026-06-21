@@ -28,6 +28,7 @@ data class OfflineEpisode(
     val streamUri: String,         // original URI; served from the offline cache
     val mimeType: String?,
     val title: String,
+    val posterUrl: String?,        // so offline-first titles still get artwork in Continue Watching
     val episodeNumber: Int,
     val idMal: Int?,
     val subtitles: List<Subtitle>, // local file:// URIs

@@ -3,6 +3,7 @@ package com.anilocal.app.domain.repo
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.BrowseSort
+import com.anilocal.app.domain.model.ContinueWatching
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.VideoStream
 import kotlinx.coroutines.flow.Flow
@@ -50,6 +51,9 @@ interface LibraryRepository {
 
 /** "Continue Watching" — Room-backed watch progress. */
 interface ProgressRepository {
-    val continueWatching: Flow<List<AnimeSummary>>
+    /** Recently-watched items, most recent first, each carrying its resume point. */
+    val continueWatching: Flow<List<ContinueWatching>>
     suspend fun save(anime: AnimeSummary, episodeNumber: Int, positionMs: Long, durationMs: Long)
+    /** Manually drop an anime from Continue Watching (permanent, unlike dismissing the resume bar). */
+    suspend fun remove(animeId: String)
 }

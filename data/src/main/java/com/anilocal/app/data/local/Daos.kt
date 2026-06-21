@@ -75,4 +75,7 @@ interface ProgressDao {
 
     @Upsert
     suspend fun upsert(entity: WatchProgressEntity)
+
+    @Query("DELETE FROM watch_progress WHERE animeId = :animeId")
+    suspend fun deleteById(animeId: String)
 }

@@ -22,8 +22,13 @@ import com.anilocal.app.domain.repo.StreamRepository
 import com.anilocal.app.domain.source.AnimeSource
 import dagger.Binds
 import dagger.Module
+import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import javax.inject.Named
 import javax.inject.Singleton
 
 @Module
@@ -60,4 +65,16 @@ abstract class AppModule {
 
     @Binds @Singleton
     abstract fun bindMalRepository(impl: MalRepositoryImpl): MalRepository
+
+    companion object {
+        /**
+         * App-lifetime scope for fire-and-forget work that must outlive a ViewModel — e.g. the final
+         * watch-progress save when the player VM is being cleared (its own `viewModelScope` is already
+         * cancelled by then). Never cancelled; lives for the process.
+         */
+        @Provides
+        @Singleton
+        @Named("appScope")
+        fun appScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    }
 }

@@ -21,6 +21,8 @@ object Routes {
     const val DETAIL = "detail/{animeId}"
     fun detail(animeId: String) = "detail/$animeId"
 
-    const val PLAYER = "player/{animeId}/{episodeNumber}"
-    fun player(animeId: String, episodeNumber: Int) = "player/$animeId/$episodeNumber"
+    // startMs is an optional resume position (ms); omitted callers default to 0 (start from the beginning).
+    const val PLAYER = "player/{animeId}/{episodeNumber}?startMs={startMs}"
+    fun player(animeId: String, episodeNumber: Int, startMs: Long = 0L) =
+        "player/$animeId/$episodeNumber?startMs=$startMs"
 }

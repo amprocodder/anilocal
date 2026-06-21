@@ -1,6 +1,7 @@
 package com.anilocal.app.data.local
 
 import com.anilocal.app.domain.model.AnimeSummary
+import com.anilocal.app.domain.model.ContinueWatching
 import com.anilocal.app.domain.repo.LibraryRepository
 import com.anilocal.app.domain.repo.ProgressRepository
 import kotlinx.coroutines.flow.Flow
@@ -29,9 +30,17 @@ class RoomProgressRepository @Inject constructor(
     private val dao: ProgressDao,
 ) : ProgressRepository {
 
-    override val continueWatching: Flow<List<AnimeSummary>> =
+    override val continueWatching: Flow<List<ContinueWatching>> =
         dao.observeRecent(20).map { list ->
-            list.map { AnimeSummary(it.animeId, it.title, it.posterUrl, it.idMal) }
+            list.map {
+                ContinueWatching(
+                    anime = AnimeSummary(it.animeId, it.title, it.posterUrl, it.idMal),
+                    episodeNumber = it.episodeNumber,
+                    positionMs = it.positionMs,
+                    durationMs = it.durationMs,
+                    updatedAt = it.updatedAt,
+                )
+            }
         }
 
     override suspend fun save(
@@ -53,4 +62,6 @@ class RoomProgressRepository @Inject constructor(
             )
         )
     }
+
+    override suspend fun remove(animeId: String) = dao.deleteById(animeId)
 }
