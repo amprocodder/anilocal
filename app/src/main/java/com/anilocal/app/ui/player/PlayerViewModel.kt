@@ -91,6 +91,9 @@ class PlayerViewModel @Inject constructor(
 
     private var summary: AnimeSummary? = null
     private var idMal: Int? = null
+    // Last URI handed to the player, appended to playback errors so an unparseable/odd stream URL is
+    // visible for diagnosis (device logcat isn't reachable for sideload users).
+    private var currentUri: String? = null
     private var autoSkipEnabled = true
     private val autoSkipped = mutableSetOf<Long>()
 
@@ -120,8 +123,9 @@ class PlayerViewModel @Inject constructor(
 
             override fun onPlayerError(e: PlaybackException) {
                 // A transport/decode failure (e.g. the stream URL won't load) would otherwise leave
-                // the surface black with no signal. Surface why so it's diagnosable, not mysterious.
-                _error.value = "Playback failed: ${e.errorCodeName}"
+                // the surface black with no signal. Surface why — plus the URL — so it's diagnosable.
+                _error.value = "Playback failed: ${e.errorCodeName}" +
+                    (currentUri?.let { "\n${it.take(160)}" } ?: "")
             }
         })
 
@@ -177,6 +181,7 @@ class PlayerViewModel @Inject constructor(
         // headers) and before prepare(), since the data source reads these at open() time. Many real
         // sources 403 without their Referer — this is what lets a header-gated stream resolve.
         httpDataSourceFactory.setDefaultRequestProperties(headers)
+        currentUri = uri
         val subConfigs = subtitles.map { sub ->
             MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
                 .setMimeType(subtitleMime(sub.url))

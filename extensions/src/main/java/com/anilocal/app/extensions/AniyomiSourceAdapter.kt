@@ -118,12 +118,23 @@ class AniyomiSourceAdapter(private val src: AniyomiSource) : AnimeSource {
 
     private fun Video.toVideoStream() = VideoStream(
         url = videoUrl,
-        mimeType = if (videoUrl.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) HLS_MIME else null,
+        mimeType = inferStreamMime(videoUrl),
         headers = headers?.toMap() ?: emptyMap(),
         subtitles = subtitleTracks.map { Subtitle(url = it.url, language = it.lang, label = it.lang) },
         quality = videoTitle.ifBlank { resolution?.let { "${it}p" } },
         height = resolution,
     )
+
+    // Aniyomi's Video carries no format field, so infer the container from the URL. Match the token
+    // anywhere — proxied/tokenised stream URLs rarely end in the bare extension (e.g.
+    // ".../master.m3u8?token=…" or ".../hls/index.m3u8/seg"). HLS/DASH get an explicit mime so
+    // Media3 routes them to the right (now-bundled) source; null lets it sniff a progressive
+    // container (mp4/mkv/webm/…).
+    private fun inferStreamMime(url: String): String? = when {
+        url.contains(".m3u8", ignoreCase = true) -> HLS_MIME
+        url.contains(".mpd", ignoreCase = true) -> DASH_MIME
+        else -> null
+    }
 
     private fun String.toSEpisode(): SEpisode {
         val sep = lastIndexOf(EP)
@@ -138,6 +149,7 @@ class AniyomiSourceAdapter(private val src: AniyomiSource) : AnimeSource {
     companion object {
         const val SOURCE_PREFIX = "aniyomi:"
         private const val HLS_MIME = "application/x-mpegURL"
+        private const val DASH_MIME = "application/dash+xml"
 
         // Control-char delimiters that never appear in URLs/episode names.
         private const val EP = '\u0001' // SEpisode url / episode_number, packed into Episode.id
