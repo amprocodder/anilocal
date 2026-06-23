@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.anilocal.app.domain.model.DownloadQuality
 import com.anilocal.app.domain.repo.SettingsRepository
+import com.anilocal.app.domain.source.Sources
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -28,6 +29,7 @@ class DataStoreSettingsRepository @Inject constructor(
         val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality")
         val SUBTITLE_SCALE = floatPreferencesKey("subtitle_scale")
         val SUBTITLE_BG = booleanPreferencesKey("subtitle_background")
+        val SELECTED_SOURCE = stringPreferencesKey("selected_source")
         val MAL_USERNAME = stringPreferencesKey("mal_username")
         val MAL_SYNC = booleanPreferencesKey("mal_sync_enabled")
         val MAL_LAST_SYNCED = longPreferencesKey("mal_last_synced")
@@ -69,6 +71,13 @@ class DataStoreSettingsRepository @Inject constructor(
 
     override suspend fun setSubtitleBackground(enabled: Boolean) {
         context.dataStore.edit { it[Keys.SUBTITLE_BG] = enabled }
+    }
+
+    override val selectedSourceId: Flow<String> =
+        context.dataStore.data.map { it[Keys.SELECTED_SOURCE] ?: Sources.SAMPLE_ID }
+
+    override suspend fun setSelectedSourceId(id: String) {
+        context.dataStore.edit { it[Keys.SELECTED_SOURCE] = id }
     }
 
     override val malUsername: Flow<String> =

@@ -24,6 +24,10 @@ interface SettingsRepository {
     val subtitleBackground: Flow<Boolean>
     suspend fun setSubtitleBackground(enabled: Boolean)
 
+    /** Id of the [com.anilocal.app.domain.source.AnimeSource] chosen to resolve streams. */
+    val selectedSourceId: Flow<String>
+    suspend fun setSelectedSourceId(id: String)
+
     // MyAnimeList sync — keyless, by username only (mirrors the user's PUBLIC list)
     val malUsername: Flow<String>
     suspend fun setMalUsername(username: String)

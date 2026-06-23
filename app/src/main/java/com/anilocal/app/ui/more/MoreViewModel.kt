@@ -7,9 +7,14 @@ import com.anilocal.app.domain.auth.AuthUser
 import com.anilocal.app.domain.model.DownloadQuality
 import com.anilocal.app.domain.repo.MalRepository
 import com.anilocal.app.domain.repo.SettingsRepository
+import com.anilocal.app.domain.source.AnimeSource
+import com.anilocal.app.domain.source.SourceInfo
+import com.anilocal.app.domain.source.SourceRegistry
+import com.anilocal.app.domain.source.Sources
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -20,6 +25,7 @@ class MoreViewModel @Inject constructor(
     private val authRepo: AuthRepository,
     private val settings: SettingsRepository,
     private val mal: MalRepository,
+    private val sourceRegistry: SourceRegistry,
 ) : ViewModel() {
 
     val user: StateFlow<AuthUser?> =
@@ -40,6 +46,14 @@ class MoreViewModel @Inject constructor(
     val subtitleBackground: StateFlow<Boolean> =
         settings.subtitleBackground.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    /** Available stream sources (built-ins now; + installed extensions later) for the picker. */
+    val sources: StateFlow<List<SourceInfo>> =
+        sourceRegistry.sources.map { list -> list.map(AnimeSource::info) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val selectedSourceId: StateFlow<String> =
+        settings.selectedSourceId.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Sources.SAMPLE_ID)
+
     val malUsername: StateFlow<String> =
         settings.malUsername.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
     val malSyncEnabled: StateFlow<Boolean> =
@@ -56,6 +70,8 @@ class MoreViewModel @Inject constructor(
     fun setSubtitleScale(scale: Float) = viewModelScope.launch { settings.setSubtitleScale(scale) }
 
     fun setSubtitleBackground(enabled: Boolean) = viewModelScope.launch { settings.setSubtitleBackground(enabled) }
+
+    fun setSelectedSource(id: String) = viewModelScope.launch { settings.setSelectedSourceId(id) }
 
     fun setMalUsername(username: String) = viewModelScope.launch { settings.setMalUsername(username) }
     fun setMalSyncEnabled(enabled: Boolean) = viewModelScope.launch { settings.setMalSyncEnabled(enabled) }

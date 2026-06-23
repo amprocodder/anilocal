@@ -1,37 +1,54 @@
 package com.anilocal.app.data.source
 
 import com.anilocal.app.domain.model.VideoStream
+import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.repo.StreamRepository
 import com.anilocal.app.domain.source.AnimeSource
+import com.anilocal.app.domain.source.SourceRegistry
+import com.anilocal.app.domain.source.Sources
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Bridges catalog metadata (AniList) to playable streams via the active [AnimeSource]:
+ * Bridges catalog metadata (AniList) to playable streams via the user's selected [AnimeSource]:
  * find the title in the source, match the episode number, resolve a server to its quality
- * variants. With the bundled [SampleLocalSource] this yields the lawful CC clip in a few
- * quality labels; a real source would return distinct per-quality URLs.
+ * variants. The active source is taken from [SourceRegistry] by the persisted selected-source id,
+ * falling back to the lawful built-in sample (then any available source) so playback never depends
+ * on a single compile-time binding. Browsing/metadata stay on AniList; only the stream leg routes
+ * through the chosen source, so any source — built-in or extension — works with no branching here.
  */
 @Singleton
 class SourceStreamRepository @Inject constructor(
-    private val source: AnimeSource,
+    private val registry: SourceRegistry,
+    private val settings: SettingsRepository,
 ) : StreamRepository {
+
+    private suspend fun activeSource(): AnimeSource {
+        val selected = settings.selectedSourceId.first()
+        return registry.get(selected)
+            ?: registry.get(Sources.SAMPLE_ID)
+            ?: registry.sources.value.firstOrNull()
+            ?: error("no stream sources available")
+    }
 
     override suspend fun resolveStreams(animeTitle: String, episodeNumber: Int): List<VideoStream> =
         withContext(Dispatchers.IO) {
+            val source = activeSource()
             val match = source.search(animeTitle, page = 1).firstOrNull()
                 ?: error("source '${source.info.name}': no match for \"$animeTitle\"")
             val detail = source.detail(match.id)
             val episode = detail.episodes.firstOrNull { it.number == episodeNumber }
                 ?: detail.episodes.firstOrNull()
                 ?: error("source '${source.info.name}': no episodes for \"$animeTitle\"")
-            val server = source.servers(episode).first()
+            val server = source.servers(episode).firstOrNull()
+                ?: error("source '${source.info.name}': no servers for episode of \"$animeTitle\"")
             source.resolve(server).sortedByDescending { it.height ?: 0 }
         }
 
     override suspend fun resolveStream(animeTitle: String, episodeNumber: Int): VideoStream =
         resolveStreams(animeTitle, episodeNumber).firstOrNull()
-            ?: error("source '${source.info.name}': no stream for \"$animeTitle\"")
+            ?: error("no stream for \"$animeTitle\"")
 }

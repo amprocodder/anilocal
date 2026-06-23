@@ -202,8 +202,30 @@ fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
         }
         HorizontalDivider()
 
-        Text("Source: Sample (CC clip) — no scraper bundled.",
+        val sources by vm.sources.collectAsStateWithLifecycle()
+        val selectedSourceId by vm.selectedSourceId.collectAsStateWithLifecycle()
+        Text("Streaming source", style = MaterialTheme.typography.titleMedium)
+        Text("Where video is resolved from. Browsing and metadata always come from AniList.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
+        sources.forEach { src ->
+            Row(
+                Modifier.fillMaxWidth().clickable { vm.setSelectedSource(src.id) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(
+                    selected = selectedSourceId == src.id,
+                    onClick = { vm.setSelectedSource(src.id) },
+                )
+                Column(Modifier.padding(start = 8.dp)) {
+                    Text(src.name, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        if (src.isExternal) "Extension · ${src.lang}" else "Built-in",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }

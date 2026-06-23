@@ -7,6 +7,7 @@ import com.anilocal.app.domain.model.VideoServer
 import com.anilocal.app.domain.model.VideoStream
 import com.anilocal.app.domain.source.AnimeSource
 import com.anilocal.app.domain.source.SourceInfo
+import com.anilocal.app.domain.source.Sources
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,7 +22,7 @@ import javax.inject.Singleton
 @Singleton
 class SampleLocalSource @Inject constructor() : AnimeSource {
 
-    override val info = SourceInfo(id = "sample-local", name = "Sample (CC clip)", isExternal = false)
+    override val info = SourceInfo(id = Sources.SAMPLE_ID, name = "Sample (CC clip)", isExternal = false)
 
     private val sampleMp4 =
         "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
