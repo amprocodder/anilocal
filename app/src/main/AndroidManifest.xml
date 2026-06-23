@@ -16,11 +16,18 @@
     <!-- Install extension APKs the user chose to download in-app (sideload-only build). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- usesCleartextTraffic: user-selected sources/extensions may resolve streams to plain
+         http:// URLs (or https that redirect to http), which the platform blocks by default on
+         targetSdk 28+ (ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED). The plugin seam loads arbitrary
+         hosts, so this can't be a domain allowlist. Trade-off: HTTP streams are unencrypted —
+         an accepted tradeoff for a sideloaded player whose sources are user-chosen (catalog/
+         metadata — AniList, AniSkip, MAL — remain HTTPS regardless). -->
     <application
         android:name=".AniLocalApp"
         android:allowBackup="true"
         android:label="AniLocal"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.AniLocal">
 
         <activity
