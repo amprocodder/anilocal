@@ -125,13 +125,13 @@ class AniyomiSourceAdapter(private val src: AniyomiSource) : AnimeSource {
         height = resolution,
     )
 
-    // Aniyomi's Video carries no format field, so infer the container from the URL. Match the token
-    // anywhere — proxied/tokenised stream URLs rarely end in the bare extension (e.g.
-    // ".../master.m3u8?token=…" or ".../hls/index.m3u8/seg"). HLS/DASH get an explicit mime so
-    // Media3 routes them to the right (now-bundled) source; null lets it sniff a progressive
-    // container (mp4/mkv/webm/…).
+    // Aniyomi's Video carries no format field, so infer the container from the URL. "m3u8" is a
+    // distinctive token, so match it anywhere and WITHOUT the dot — some extensions serve via a local
+    // proxy whose path is the bare word, e.g. "http://localhost:44311/m3u8?url=<encoded>" (Animetsu)
+    // or ".../master.m3u8?token=…". DASH keeps the leading "." since bare "mpd" would false-match
+    // ordinary words (e.g. "tempdir"). null lets Media3 sniff a progressive container (mp4/mkv/…).
     private fun inferStreamMime(url: String): String? = when {
-        url.contains(".m3u8", ignoreCase = true) -> HLS_MIME
+        url.contains("m3u8", ignoreCase = true) -> HLS_MIME
         url.contains(".mpd", ignoreCase = true) -> DASH_MIME
         else -> null
     }
