@@ -18,6 +18,8 @@ enum class TopTab(val route: String, val label: String, val icon: ImageVector) {
 }
 
 object Routes {
+    const val EXTENSIONS = "extensions"
+
     const val DETAIL = "detail/{animeId}"
     fun detail(animeId: String) = "detail/$animeId"
 

@@ -30,6 +30,7 @@ class DataStoreSettingsRepository @Inject constructor(
         val SUBTITLE_SCALE = floatPreferencesKey("subtitle_scale")
         val SUBTITLE_BG = booleanPreferencesKey("subtitle_background")
         val SELECTED_SOURCE = stringPreferencesKey("selected_source")
+        val EXTENSION_REPOS = stringPreferencesKey("extension_repos")
         val MAL_USERNAME = stringPreferencesKey("mal_username")
         val MAL_SYNC = booleanPreferencesKey("mal_sync_enabled")
         val MAL_LAST_SYNCED = longPreferencesKey("mal_last_synced")
@@ -78,6 +79,16 @@ class DataStoreSettingsRepository @Inject constructor(
 
     override suspend fun setSelectedSourceId(id: String) {
         context.dataStore.edit { it[Keys.SELECTED_SOURCE] = id }
+    }
+
+    override val extensionRepoBaseUrls: Flow<List<String>> =
+        context.dataStore.data.map { prefs ->
+            prefs[Keys.EXTENSION_REPOS]?.lines()?.map { it.trim() }?.filter { it.isNotEmpty() }
+                ?: listOf("https://raw.githubusercontent.com/yuzono/anime-repo/repo")
+        }
+
+    override suspend fun setExtensionRepoBaseUrls(urls: List<String>) {
+        context.dataStore.edit { it[Keys.EXTENSION_REPOS] = urls.joinToString("\n") }
     }
 
     override val malUsername: Flow<String> =

@@ -26,6 +26,7 @@ import com.anilocal.app.ui.common.ContinueWatchingBar
 import com.anilocal.app.ui.details.DetailsScreen
 import com.anilocal.app.ui.downloads.DownloadsScreen
 import com.anilocal.app.ui.explore.ExploreScreen
+import com.anilocal.app.ui.extensions.ExtensionsScreen
 import com.anilocal.app.ui.home.HomeScreen
 import com.anilocal.app.ui.library.LibraryScreen
 import com.anilocal.app.ui.more.MoreScreen
@@ -107,7 +108,12 @@ private fun AppRoot() {
             composable(TopTab.Downloads.route) {
                 DownloadsScreen(onPlay = { animeId, ep -> nav.navigate(Routes.player(animeId, ep)) })
             }
-            composable(TopTab.More.route) { MoreScreen() }
+            composable(TopTab.More.route) {
+                MoreScreen(onBrowseExtensions = { nav.navigate(Routes.EXTENSIONS) })
+            }
+            composable(Routes.EXTENSIONS) {
+                ExtensionsScreen(onBack = { nav.popBackStack() })
+            }
 
             composable(
                 Routes.DETAIL,

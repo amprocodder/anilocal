@@ -44,7 +44,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 
 @Composable
-fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
+fun MoreScreen(onBrowseExtensions: () -> Unit, vm: MoreViewModel = hiltViewModel()) {
     val context = LocalContext.current
     val user by vm.user.collectAsStateWithLifecycle()
     val autoSkip by vm.autoSkip.collectAsStateWithLifecycle()
@@ -226,6 +226,9 @@ fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
                     )
                 }
             }
+        }
+        OutlinedButton(onClick = onBrowseExtensions, modifier = Modifier.padding(top = 4.dp)) {
+            Text("Browse extensions")
         }
     }
 }

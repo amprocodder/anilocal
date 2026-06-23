@@ -3,6 +3,7 @@ package com.anilocal.app.data.remote
 import com.anilocal.app.data.metadata.anilist.AniListApi
 import com.anilocal.app.data.metadata.mal.MalApi
 import com.anilocal.app.data.metadata.tmdb.TmdbApi
+import com.anilocal.app.data.metadata.extension.ExtensionRepoApi
 import com.anilocal.app.data.skip.AniSkipApi
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -51,4 +52,9 @@ object NetworkModule {
     @Provides @Singleton
     fun malApi(client: OkHttpClient, moshi: Moshi): MalApi =
         retrofit("https://myanimelist.net/", client, moshi).create(MalApi::class.java)
+
+    // Extension repo index.min.json — full URLs are supplied per-call via @Url, so the base is a placeholder.
+    @Provides @Singleton
+    fun extensionRepoApi(client: OkHttpClient, moshi: Moshi): ExtensionRepoApi =
+        retrofit("https://raw.githubusercontent.com/", client, moshi).create(ExtensionRepoApi::class.java)
 }

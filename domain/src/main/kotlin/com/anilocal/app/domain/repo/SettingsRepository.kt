@@ -28,6 +28,10 @@ interface SettingsRepository {
     val selectedSourceId: Flow<String>
     suspend fun setSelectedSourceId(id: String)
 
+    /** Base URLs of extension repos (each serving an `index.min.json`). Pre-seeded with yuzono. */
+    val extensionRepoBaseUrls: Flow<List<String>>
+    suspend fun setExtensionRepoBaseUrls(urls: List<String>)
+
     // MyAnimeList sync — keyless, by username only (mirrors the user's PUBLIC list)
     val malUsername: Flow<String>
     suspend fun setMalUsername(username: String)

@@ -5,6 +5,7 @@ import com.anilocal.app.data.download.DownloadRepositoryImpl
 import com.anilocal.app.data.local.RoomLibraryRepository
 import com.anilocal.app.data.local.RoomProgressRepository
 import com.anilocal.app.data.metadata.anilist.AniListCatalogRepository
+import com.anilocal.app.data.metadata.extension.ExtensionRepositoryImpl
 import com.anilocal.app.data.metadata.mal.MalRepositoryImpl
 import com.anilocal.app.data.settings.DataStoreSettingsRepository
 import com.anilocal.app.data.skip.AniSkipRepository
@@ -15,6 +16,7 @@ import com.anilocal.app.data.source.SourceStreamRepository
 import com.anilocal.app.domain.auth.AuthRepository
 import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
+import com.anilocal.app.domain.repo.ExtensionRepository
 import com.anilocal.app.domain.repo.LibraryRepository
 import com.anilocal.app.domain.repo.MalRepository
 import com.anilocal.app.domain.repo.ProgressRepository
@@ -79,6 +81,9 @@ abstract class AppModule {
 
     @Binds @Singleton
     abstract fun bindMalRepository(impl: MalRepositoryImpl): MalRepository
+
+    @Binds @Singleton
+    abstract fun bindExtensionRepository(impl: ExtensionRepositoryImpl): ExtensionRepository
 
     companion object {
         /**

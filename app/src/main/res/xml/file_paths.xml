@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Downloaded extension APKs live in cacheDir/extensions/ and are shared with the system
+         installer via the FileProvider declared in AndroidManifest.xml. -->
+    <cache-path name="ext_apks" path="extensions/" />
+</paths>
