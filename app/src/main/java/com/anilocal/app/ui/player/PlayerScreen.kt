@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -29,6 +30,7 @@ import androidx.media3.ui.SubtitleView
 fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
     val position by vm.position.collectAsStateWithLifecycle()
     val markers by vm.markers.collectAsStateWithLifecycle()
+    val error by vm.error.collectAsStateWithLifecycle()
     val subtitleScale by vm.subtitleScale.collectAsStateWithLifecycle()
     val subtitleBackground by vm.subtitleBackground.collectAsStateWithLifecycle()
 
@@ -78,5 +80,14 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
             onSkip = vm::seekPast,
             modifier = Modifier.align(Alignment.BottomEnd).padding(24.dp),
         )
+
+        // A failed load/resolve/playback shows its reason here rather than leaving a black screen.
+        error?.let { message ->
+            Text(
+                message,
+                color = Color.White,
+                modifier = Modifier.align(Alignment.Center).padding(24.dp),
+            )
+        }
     }
 }
