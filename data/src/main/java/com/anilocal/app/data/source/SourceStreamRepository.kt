@@ -48,7 +48,13 @@ class SourceStreamRepository @Inject constructor(
             source.resolve(server).sortedByDescending { it.height ?: 0 }
         }
 
-    override suspend fun resolveStream(animeTitle: String, episodeNumber: Int): VideoStream =
-        resolveStreams(animeTitle, episodeNumber).firstOrNull()
-            ?: error("no stream for \"$animeTitle\"")
+    override suspend fun resolveStream(animeTitle: String, episodeNumber: Int): VideoStream {
+        val variants = resolveStreams(animeTitle, episodeNumber)
+        val best = variants.firstOrNull() ?: error("no stream for \"$animeTitle\"")
+        // Online playback uses only the top-quality variant, but some sources attach subtitle tracks to
+        // a lower rendition (or only some of them). Union every variant's subs onto the chosen stream
+        // (deduped by url, best's own first) so captions aren't silently lost to the height sort.
+        val mergedSubs = variants.flatMap { it.subtitles }.distinctBy { it.url }
+        return if (mergedSubs.size > best.subtitles.size) best.copy(subtitles = mergedSubs) else best
+    }
 }

@@ -182,11 +182,24 @@ class PlayerViewModel @Inject constructor(
         // sources 403 without their Referer — this is what lets a header-gated stream resolve.
         httpDataSourceFactory.setDefaultRequestProperties(headers)
         currentUri = uri
-        val subConfigs = subtitles.map { sub ->
+        // Auto-enable a track on load. ExoPlayer's DefaultTrackSelector NEVER reads
+        // SELECTION_FLAG_AUTOSELECT for text — a side-loaded subtitle only renders by default if it
+        // carries SELECTION_FLAG_DEFAULT (or matches a preferred text language, which we don't set).
+        // So flag the first track DEFAULT and the rest AUTOSELECT: captions show immediately, while the
+        // player's subtitle button (enabled in PlayerScreen) still lets the user switch or turn them
+        // off. Only ONE track may be DEFAULT — multiple defaults in a group is an undefined pick.
+        // setLabel carries the source's human name ("English", "Spanish - sub") into the CC menu.
+        val subConfigs = subtitles.mapIndexed { index, sub ->
+            val flags = if (index == 0) {
+                C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_AUTOSELECT
+            } else {
+                C.SELECTION_FLAG_AUTOSELECT
+            }
             MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
                 .setMimeType(subtitleMime(sub.url))
                 .setLanguage(sub.language)
-                .setSelectionFlags(C.SELECTION_FLAG_AUTOSELECT)
+                .setLabel(sub.label)
+                .setSelectionFlags(flags)
                 .build()
         }
         val item = MediaItem.Builder()
@@ -240,9 +253,17 @@ class PlayerViewModel @Inject constructor(
         const val END_THRESHOLD_MS = 5_000L
     }
 
-    private fun subtitleMime(url: String): String = when {
-        url.endsWith(".srt", true) -> MimeTypes.APPLICATION_SUBRIP
-        url.endsWith(".ass", true) || url.endsWith(".ssa", true) -> MimeTypes.TEXT_SSA
-        else -> MimeTypes.TEXT_VTT
+    // Classify by the URL *path* only. Many sources serve sidecars behind a query/proxy
+    // ("…/sub.srt?token=…"), so matching the raw URL string would leave a real SubRip in the VTT
+    // fallback and the WebVTT parser would silently drop every cue. VTT stays the last-resort fallback
+    // (a SubtitleConfiguration requires a non-null mime), but only after the path has no known suffix.
+    private fun subtitleMime(url: String): String {
+        val path = (Uri.parse(url).path ?: url).lowercase()
+        return when {
+            path.endsWith(".srt") -> MimeTypes.APPLICATION_SUBRIP
+            path.endsWith(".ass") || path.endsWith(".ssa") -> MimeTypes.TEXT_SSA
+            path.endsWith(".ttml") || path.endsWith(".dfxp") -> MimeTypes.APPLICATION_TTML
+            else -> MimeTypes.TEXT_VTT
+        }
     }
 }

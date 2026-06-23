@@ -41,6 +41,10 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = vm.player
+                    // Surface the CC button so users can switch/disable subtitle tracks; it's hidden by
+                    // default in Media3 (showSubtitleButton defaults to false) and only un-dims once the
+                    // media actually exposes text tracks.
+                    setShowSubtitleButton(true)
                     setShowNextButton(false)
                     setShowPreviousButton(false)
                 }

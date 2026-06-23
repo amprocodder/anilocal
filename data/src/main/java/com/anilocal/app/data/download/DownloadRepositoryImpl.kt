@@ -169,7 +169,10 @@ class DownloadRepositoryImpl @Inject constructor(
     override suspend fun remove(id: String) {
         DownloadService.sendRemoveDownload(context, AniLocalDownloadService::class.java, id, false)
         withContext(Dispatchers.IO) {
-            File(downloadDir, "subs").listFiles { f -> f.name.startsWith(id) }?.forEach { it.delete() }
+            // Match on the id PLUS its delimiter — sidecars are "$id-$index.$ext", so a bare
+            // startsWith(id) would let "anime-ep1" also match "anime-ep10-0.srt" and wipe episode 10's
+            // (11's, …) subtitles when episode 1 is removed.
+            File(downloadDir, "subs").listFiles { f -> f.name.startsWith("$id-") }?.forEach { it.delete() }
         }
         dao.deleteById(id)
     }
@@ -177,7 +180,10 @@ class DownloadRepositoryImpl @Inject constructor(
     private suspend fun downloadSubtitle(sub: Subtitle, id: String, index: Int): File =
         withContext(Dispatchers.IO) {
             val dir = File(downloadDir, "subs").apply { mkdirs() }
-            val ext = sub.url.substringAfterLast('.', "vtt").take(5)
+            // Derive the extension from the URL PATH, not the raw URL: "…/sub.srt?token=abc" must yield
+            // "srt", not "srt?token=abc" — the latter both makes an odd/illegal filename and defeats the
+            // path-based mime classifier when the cached file:// uri is replayed offline.
+            val ext = (Uri.parse(sub.url).path ?: sub.url).substringAfterLast('.', "vtt").take(5)
             val file = File(dir, "$id-$index.$ext")
             okHttp.newCall(Request.Builder().url(sub.url).build()).execute().use { resp ->
                 file.outputStream().use { out -> resp.body?.byteStream()?.copyTo(out) }
