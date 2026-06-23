@@ -12,7 +12,10 @@ navigation = "2.8.3"
 room = "2.6.1"
 datastore = "1.1.1"
 retrofit = "2.11.0"
-okhttp = "4.12.0"
+# Bumped 4.12.0 -> 5.0.0-alpha.14 app-wide: the vendored Aniyomi source-api/network stack
+# (:extensions) is written against OkHttp 5.x. Retrofit 2.11 + :data's kotlin-ext usage are
+# compatible; matching aniyomi's exact version avoids vendored-code compile drift.
+okhttp = "5.0.0-alpha.14"
 moshi = "1.15.1"
 coil = "2.7.0"
 media3 = "1.4.1"

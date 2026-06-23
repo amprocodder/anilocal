@@ -22,6 +22,9 @@ android {
 
 dependencies {
     implementation(project(":domain"))
+    // Vendored Aniyomi source-api + AniyomiSourceAdapter live here. `implementation` (not `api`)
+    // so the vendored eu.kanade.* types never leak onto :app's classpath — the seam stays intact.
+    implementation(project(":extensions"))
 
     implementation(libs.androidx.core.ktx)
 
