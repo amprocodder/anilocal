@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.cache.CacheDataSource
@@ -67,6 +68,12 @@ class PlayerViewModel @Inject constructor(
     private val _markers = MutableStateFlow<List<SkipMarker>>(emptyList())
     val markers: StateFlow<List<SkipMarker>> = _markers
 
+    // A short, human-readable reason shown over the player when load/resolve/playback fails — so a
+    // failure surfaces as a hint instead of an indistinguishable black screen (matches the app's
+    // "short hint, no dialogs/spinners" convention). null = no error.
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error
+
     private val _position = MutableStateFlow(0L)
     val position: StateFlow<Long> = _position
 
@@ -106,6 +113,12 @@ class PlayerViewModel @Inject constructor(
                 // save on teardown is handled separately in onCleared via appScope).
                 if (!isPlaying) viewModelScope.launch { saveProgress() }
             }
+
+            override fun onPlayerError(e: PlaybackException) {
+                // A transport/decode failure (e.g. the stream URL won't load) would otherwise leave
+                // the surface black with no signal. Surface why so it's diagnosable, not mysterious.
+                _error.value = "Playback failed: ${e.errorCodeName}"
+            }
         })
 
         viewModelScope.launch { load() }
@@ -123,17 +136,21 @@ class PlayerViewModel @Inject constructor(
     }
 
     private suspend fun load() {
-        val cached = downloads.getOffline(animeId, episodeNumber)
+        val cached = runCatching { downloads.getOffline(animeId, episodeNumber) }.getOrNull()
         if (cached != null) {
             _offline.value = true
             playOffline(cached)
             return
         }
         // Online: AniList detail → resolve stream → (AniSkip markers come on STATE_READY).
-        val detail = runCatching { catalog.detail(animeId) }.getOrNull() ?: return
+        // Don't swallow failures into a silent return — a blank surface with no reason is the bug we
+        // keep hitting. Surface a short hint so the failing leg (metadata vs. stream) is obvious.
+        val detail = runCatching { catalog.detail(animeId) }
+            .getOrElse { _error.value = "Couldn't load title details (no connection?)"; return }
         idMal = detail.idMal
         summary = AnimeSummary(detail.id, detail.title, detail.posterUrl, detail.idMal)
-        val stream = runCatching { streams.resolveStream(detail.title, episodeNumber) }.getOrNull() ?: return
+        val stream = runCatching { streams.resolveStream(detail.title, episodeNumber) }
+            .getOrElse { _error.value = "No stream from the selected source for \"${detail.title}\""; return }
         play(stream.url, stream.mimeType, stream.subtitles)
     }
 
