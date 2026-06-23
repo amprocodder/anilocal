@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadRequest
@@ -43,6 +44,9 @@ import javax.inject.Singleton
 class DownloadRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val downloadManager: DownloadManager,
+    // The same HTTP factory the DownloadManager downloads through; we set the source's request
+    // headers on it so header-gated manifests/segments fetch instead of 403'ing (mirrors playback).
+    private val httpDataSourceFactory: DefaultHttpDataSource.Factory,
     private val dao: DownloadDao,
     private val okHttp: OkHttpClient,
     moshi: Moshi,
@@ -124,6 +128,11 @@ class DownloadRepositoryImpl @Inject constructor(
             )
         )
 
+        // Apply the source's request headers to the shared download HTTP factory before enqueuing, so
+        // the manifest and every segment fetch with them. Adaptive (HLS/DASH/SS) requests carry the
+        // mimeType but no stream keys, so the segment downloader pulls every rendition (the
+        // DownloadQuality setting isn't applied to adaptive track selection yet — progressive only).
+        httpDataSourceFactory.setDefaultRequestProperties(stream.headers)
         val request = DownloadRequest.Builder(id, Uri.parse(stream.url))
             .apply { stream.mimeType?.let { setMimeType(it) } }
             .build()

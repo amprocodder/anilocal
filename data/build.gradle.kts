@@ -46,6 +46,11 @@ dependencies {
     // Media3 download + cache stack (DownloadManager, SimpleCache, CacheDataSource, scheduler).
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.hls)
+    // DASH/SmoothStreaming so the DownloadManager's DefaultDownloaderFactory can create the matching
+    // segment downloaders (it loads them reflectively, same as the player's source factory). Without
+    // these an adaptive download fails the way DASH playback used to crash.
+    implementation(libs.media3.exoplayer.dash)
+    implementation(libs.media3.exoplayer.smoothstreaming)
 
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
