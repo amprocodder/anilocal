@@ -12,6 +12,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -44,6 +45,9 @@ class PlayerViewModel @Inject constructor(
     @ApplicationContext context: Context,
     savedState: SavedStateHandle,
     cacheDataSourceFactory: CacheDataSource.Factory,
+    // The shared upstream HTTP factory the player's CacheDataSource reads through; we set
+    // per-stream request headers on it so header-gated sources resolve instead of 403'ing.
+    private val httpDataSourceFactory: DefaultHttpDataSource.Factory,
     private val catalog: CatalogRepository,
     private val streams: StreamRepository,
     private val skip: SkipRepository,
@@ -121,7 +125,13 @@ class PlayerViewModel @Inject constructor(
             }
         })
 
-        viewModelScope.launch { load() }
+        // Crash-proof the whole load+play path: a synchronous throw here (e.g. setMediaItem building
+        // a media source for a format whose Media3 module isn't bundled, like DASH) would otherwise
+        // take down the app. Surface it as a hint instead — the message also names the real cause.
+        viewModelScope.launch {
+            runCatching { load() }
+                .onFailure { _error.value = "Couldn't start playback: ${it.message ?: it.javaClass.simpleName}" }
+        }
 
         viewModelScope.launch {
             var tick = 0
@@ -151,7 +161,7 @@ class PlayerViewModel @Inject constructor(
         summary = AnimeSummary(detail.id, detail.title, detail.posterUrl, detail.idMal)
         val stream = runCatching { streams.resolveStream(detail.title, episodeNumber) }
             .getOrElse { _error.value = "No stream from the selected source for \"${detail.title}\""; return }
-        play(stream.url, stream.mimeType, stream.subtitles)
+        play(stream.url, stream.mimeType, stream.subtitles, stream.headers)
     }
 
     private fun playOffline(ep: OfflineEpisode) {
@@ -161,7 +171,12 @@ class PlayerViewModel @Inject constructor(
         play(ep.streamUri, ep.mimeType, ep.subtitles)
     }
 
-    private fun play(uri: String, mimeType: String?, subtitles: List<Subtitle>) {
+    private fun play(uri: String, mimeType: String?, subtitles: List<Subtitle>, headers: Map<String, String> = emptyMap()) {
+        // Apply the source-provided request headers (Referer/User-Agent/etc.) to the shared upstream
+        // HTTP factory the player reads through. Set every time (empty clears the previous stream's
+        // headers) and before prepare(), since the data source reads these at open() time. Many real
+        // sources 403 without their Referer — this is what lets a header-gated stream resolve.
+        httpDataSourceFactory.setDefaultRequestProperties(headers)
         val subConfigs = subtitles.map { sub ->
             MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
                 .setMimeType(subtitleMime(sub.url))
