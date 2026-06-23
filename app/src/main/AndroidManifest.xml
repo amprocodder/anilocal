@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Lets the JobScheduler-backed download Scheduler persist jobs across reboot. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Enumerate installed Aniyomi extension APKs (by the tachiyomi.animeextension feature) so the
+         source registry can discover and load them. Sideload-only build; not Google Play eligible. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <application
         android:name=".AniLocalApp"
