@@ -4,11 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**AniLocal** — an Android anime player (Kotlin, Compose, single APK) built around a deliberate
-"scraper-shaped hole": all content goes through one abstract `AnimeSource` plugin seam, and the
-only bundled implementation is a lawful Creative-Commons sample clip. There is **no scraper, no
-private backend**. Adding a real source is a single Hilt binding swap (see below). Read `README.md`
-for the product-level feature list and the rationale.
+**AniLocal** — an Android anime player (Kotlin, Compose, single APK). AniList provides the entire
+browse/metadata catalog (no API key); playable streams come from a **user-selected** `AnimeSource`
+behind one plugin seam. Two lawful Creative-Commons sample sources ship in-app, and the app can
+**discover, install, and load Aniyomi/Anikku-style extension APKs** as additional stream sources, so
+the user can "choose any source". Read `README.md` for the product-level feature list and rationale.
+
+> **Posture note.** Earlier revisions framed this as a deliberate "scraper-shaped hole" with no
+> scraper and a single bundled CC clip. That hole has been filled by the extension subsystem (the
+> `:extensions` module, added across Phases 1–4). AniLocal is now a **sideload-only third-party
+> extension host**: it needs `QUERY_ALL_PACKAGES` + `REQUEST_INSTALL_PACKAGES` and is therefore **not
+> Google Play eligible** (it already ships via the CI APK). It still bundles **no** extensions and no
+> default piracy content — the user adds repos and installs sources. AniList browsing is unchanged;
+> extensions only resolve streams.
 
 ## Build & run
 
@@ -35,11 +43,11 @@ and `nonTransitiveRClass`; if a first build trips a config-cache violation, disa
 
 ## Module architecture — the boundary is compile-enforced
 
-Three Gradle modules with a strict, one-way dependency direction:
+Four Gradle modules with a strict, one-way dependency direction:
 
 ```
-:app  ──►  :data  ──►  :domain
-  └────────────────────►─┘
+:app  ──►  :data  ──►  :extensions  ──►  :domain
+  └──────────►─┴─────────────────────────►─┘
 ```
 
 - **`:domain`** — pure Kotlin (`kotlin("jvm")`, **no Android dependency**). Models, repository
@@ -49,9 +57,20 @@ Three Gradle modules with a strict, one-way dependency direction:
   `ProgressRepository` (all in `repo/Repositories.kt`), then **one file each** —
   `DownloadRepository` (`repo/DownloadRepository.kt`), `MalRepository` (`repo/MalRepository.kt`),
   `SettingsRepository` (`repo/SettingsRepository.kt`), and `AuthRepository` (`auth/Auth.kt`).
-- **`:data`** — Android library. *All* implementations live here: AniList/TMDB/MAL APIs, AniSkip,
-  Room, DataStore, Firebase auth, the Media3 download stack, the sample source, and the Hilt wiring
-  (`di/AppModule`). Depends only on `:domain`.
+- **`:data`** — Android library. *All* repository implementations live here: AniList/TMDB/MAL APIs,
+  AniSkip, Room, DataStore, Firebase auth, the Media3 download stack, the built-in sample sources, the
+  extension-repo browse/install impls, and the Hilt wiring (`di/AppModule`). Depends on `:domain` and
+  `:extensions`.
+- **`:extensions`** — Android library that makes AniLocal a host for Aniyomi extensions. Vendors the
+  **real** Aniyomi anime source-api (`eu.kanade.tachiyomi.animesource.*` + a trimmed `network` package,
+  copied from aniyomiorg/aniyomi — see `extensions/VENDORING.md`), plus host code under
+  `com.anilocal.app.extensions`: `AniyomiSourceAdapter` (maps a loaded source onto the domain
+  `AnimeSource` seam), `AniyomiInjektModule`/`AniyomiRuntime` (seed the Injekt singletons loaded
+  sources resolve at construction), and `loader/AnimeExtensionLoader` + `ChildFirstPathClassLoader`
+  (discover installed extension APKs by the `tachiyomi.animeextension` feature, lib-version 12–16, and
+  reflect their source classes in). Depends on `:domain`; `:data` consumes it via `implementation` so
+  the vendored `eu.kanade.*` types never reach `:app`. **OkHttp is pinned app-wide to `5.0.0-alpha.14`**
+  to match the vendored stack, and the module compiles with `-Xcontext-receivers`.
 - **`:app`** — Compose UI, navigation, ViewModels, the Media3 player UI, Google Sign-In UI.
   **References only domain interfaces** — it must not import `com.anilocal.app.data.*` (an injected
   impl reaching into the UI would break the seam). Inject domain repository interfaces instead.
@@ -65,22 +84,28 @@ A single Hilt `@Module` `@Binds` every domain interface to its `:data` impl. Thi
 for the whole app. The most important binding:
 
 ```kotlin
-@Binds @Singleton
-abstract fun bindAnimeSource(impl: SampleLocalSource): AnimeSource
+// Built-in sources are contributed into a Set — NOT bound singly. The user picks one at runtime.
+@Binds @IntoSet abstract fun bindSampleSource(impl: SampleLocalSource): AnimeSource
+@Binds @IntoSet abstract fun bindSintelSource(impl: SampleSintelSource): AnimeSource
+@Binds @Singleton abstract fun bindSourceRegistry(impl: SourceRegistryImpl): SourceRegistry
 ```
 
-**To change where streams come from, change this one line** to bind a different `AnimeSource`
-implementation (e.g. a Jellyfin/Plex/local-files source). Nothing else in the app knows or cares:
-`StreamRepository` is bound to the *source-agnostic* `SourceStreamRepository`, which injects the
-**abstract** `AnimeSource`, so it works with any bound source — leave that binding alone. The
-`AnimeSource` contract is **five suspend methods** — `popular`/`search`/`detail` (catalog-shaped) *and*
-`servers`/`resolve` (stream-shaped) — **plus a `val info: SourceInfo` property**, so a custom source must
-implement all six members even though browsing goes through AniList's `CatalogRepository`.
-`SourceStreamRepository` is the join: per request it runs `search` → `detail` → `servers().first()` →
-`resolve`, sorts variants by height descending, and **throws `error("no match…")` when `search` returns
-an empty list** (the sample source dodges this by returning a fixed demo list for *any* query). It exposes
-two methods consumers pick between — `resolveStream` (single, highest quality → online playback) and
-`resolveStreams` (all variants, highest-first → the download quality picker).
+Streams are **no longer one compile-time binding** (the old `bindAnimeSource` is gone). Built-in
+`AnimeSource`s are contributed via `@IntoSet`; `SourceRegistryImpl` (in `:data`) merges that set with
+the extensions `AnimeExtensionLoader` discovers and exposes a reactive `sources: StateFlow`.
+`SourceStreamRepository` injects the `SourceRegistry` + `SettingsRepository` and routes resolution to
+the **user-selected** source (`selectedSourceId` in DataStore, chosen in the More-screen picker),
+falling back to the sample. **To add a built-in source, add one `@IntoSet` line** — selection, routing,
+and the picker are automatic. The `AnimeSource` contract is **five suspend methods** —
+`popular`/`search`/`detail` (catalog-shaped) *and* `servers`/`resolve` (stream-shaped) — **plus a
+`val info: SourceInfo` property** (`info.id` keys the registry; `info.isExternal` tags extensions in
+the picker), so a source implements all six members even though browsing goes through AniList's
+`CatalogRepository`. `SourceStreamRepository` is the join: per request it runs `search` → `detail` →
+`servers().firstOrNull()` → `resolve`, sorts variants by height descending, and throws when `search`
+finds no match (the sample sources dodge this by matching *any* query, so playback always resolves; a
+real extension that finds nothing throws and the player degrades to a short hint). It exposes
+`resolveStream` (single, highest quality → online playback) and `resolveStreams` (all variants → the
+download quality picker).
 
 The single `@Binds` module is **`AppModule` (in `:data`, package `com.anilocal.app.di`)**, which
 `@Binds` every domain interface → `:data` impl. `:data` additionally has three `@Provides` `object`

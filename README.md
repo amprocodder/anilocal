@@ -1,11 +1,14 @@
 # AniLocal — all-in-one anime player (server-free)
 
-A single-APK anime app with the AniLab-style menu layout, fully local operation, and **no
-bundled scraper**. Stream resolution is an abstract `AnimeSource` plugin seam; a legal
-**SampleLocalSource** (Creative-Commons clip) ships so the app plays video out of the box.
+A single-APK anime app with the AniLab-style menu layout. **AniList** provides the entire browse
+catalog; playable streams come from a **user-selected source** behind one abstract `AnimeSource`
+plugin seam. Two lawful Creative-Commons sample sources ship in-app, and the app can **install and
+load Aniyomi/Anikku-style extension APKs** as additional stream sources — so you can choose any
+source. Sideload-only (not Google Play eligible); it bundles no extensions.
 
-> Status: **authored, not yet compiled** (built outside the dev sandbox). Open in Android
-> Studio (Koala+), let Gradle sync, fix any version nits, run. See "Build" below.
+> Status: builds via CI (`gradle :app:assembleDebug` → the `anilocal-debug-apk` artifact for
+> sideloading). Extension discovery/loading and in-app install are verified on-device by sideloading
+> an extension; the rest builds clean.
 
 ## What works
 - AniLab-style **bottom-nav shell**: Home · Explore · Library · **Downloads** · More.
@@ -31,9 +34,11 @@ bundled scraper**. Stream resolution is an abstract `AnimeSource` plugin seam; a
   progress saved during playback.
 - **Google Sign-In** via **Firebase** (More tab) — guarded so it no-ops until you add your
   own project; then it actually works.
-- **Source seam** (`AnimeSource`) + `SampleLocalSource` (plays a CC Big Buck Bunny clip), so
-  the app streams lawfully with **no scraper**.
-- Hilt DI, Compose + Material3, Coil images, OkHttp/Retrofit/Moshi.
+- **User-selectable stream sources**: a runtime **source registry** + picker (More tab). Two
+  built-in CC sample sources ship; **installed Aniyomi extensions** appear automatically and resolve
+  streams for AniList-browsed titles. **Browse extensions** (More → Browse extensions) lists a
+  pre-seeded repo's `index.min.json` and installs sources via the system installer.
+- Hilt DI, Compose + Material3, Coil images, OkHttp 5/Retrofit/Moshi.
 
 ## Configure optional features (the app builds & runs without these)
 - **TMDB artwork** (optional): get a free v3 key at themoviedb.org, add to
@@ -43,10 +48,15 @@ bundled scraper**. Stream resolution is an abstract `AnimeSource` plugin seam; a
   (the build auto-applies the plugin once it's present), and set the **Web client id**:
   `GOOGLE_WEB_CLIENT_ID=xxxx.apps.googleusercontent.com` in `gradle.properties`.
 
-## Deliberately absent (the "scraper-shaped hole")
-- No pirate scraper, no private backend, no Notix ads, no signature spoofing.
-- `AnimeSource` is the single drop-in point. A lawful implementation (e.g. **your own
-  Jellyfin/Plex/local files**) plugs in here. What you drop in is your responsibility.
+## Extension sources & posture
+- **No backend, no ads, no signature spoofing.** AniList stays the only browse layer; extensions
+  only resolve streams.
+- The app **bundles no extensions** and ships **no default piracy content** — you add a repo and
+  install sources yourself (the community `yuzono/anime-repo` is pre-seeded as a starting point).
+  What you install, and where it streams from, is your responsibility.
+- **Sideload-only.** Loading third-party extension APKs needs `QUERY_ALL_PACKAGES` +
+  `REQUEST_INSTALL_PACKAGES`, so this build is **not Google Play eligible** (it already ships via the
+  CI APK). Trust/signature gating of extensions is a planned follow-up.
 
 ## Build
 1. Open the project root in Android Studio (Koala+); it will generate the Gradle wrapper
@@ -55,23 +65,25 @@ bundled scraper**. Stream resolution is an abstract `AnimeSource` plugin seam; a
 3. Run the `app` config on a device/emulator. The Home tab → a sample title → Play
    demonstrates playback + the skip button with no network and no account.
 
-## Architecture — 3 Gradle modules
+## Architecture — 4 Gradle modules
 The dependency direction is compile-enforced (not just convention):
 
 ```
-:app  ──►  :data  ──►  :domain
-  └────────────────────►─┘
+:app  ──►  :data  ──►  :extensions  ──►  :domain
+  └──────────►─┴─────────────────────────►─┘
 ```
 
 - **`:domain`** — pure Kotlin (`kotlin("jvm")`, no Android dependency). Models, repository
-  interfaces, the `AnimeSource` seam. `import android.*` here won't compile — that's the
-  boundary. Fast JVM unit tests.
-- **`:data`** — Android library (`com.anilocal.app.data`). All implementations: AniList/TMDB,
-  AniSkip, Room, DataStore, Firebase auth, Media3 downloads, the sample source, and the Hilt
-  wiring (`di/AppModule`). Depends only on `:domain`.
+  interfaces, the `AnimeSource` seam. `import android.*` here won't compile — that's the boundary.
+- **`:data`** — Android library. All repository implementations: AniList/TMDB, AniSkip, Room,
+  DataStore, Firebase auth, Media3 downloads, the built-in sample sources, extension-repo
+  browse/install, and the Hilt wiring (`di/AppModule`). Depends on `:domain` + `:extensions`.
+- **`:extensions`** — Android library hosting Aniyomi extensions: the vendored Aniyomi source-api
+  (see `extensions/VENDORING.md`), the `AniyomiSourceAdapter`, the Injekt runtime, and the
+  `AnimeExtensionLoader` (+ child-first classloader). Depends on `:domain`.
 - **`:app`** — Android application. Compose UI, navigation, ViewModels, the Media3 player UI,
-  Google Sign-In UI. Depends on `:domain` + `:data` but references **only domain interfaces**
-  (verified: 0 imports of `com.anilocal.app.data.*`), so features can't reach into impls.
+  Google Sign-In UI. References **only domain interfaces** (no `com.anilocal.app.data.*` /
+  `eu.kanade.*` imports), so the UI can't reach into impls or vendored extension types.
 
 Build files stay small via the version catalog (`gradle/libs.versions.toml`); a `build-logic`
 convention plugin is a sensible later step if more modules are added.
