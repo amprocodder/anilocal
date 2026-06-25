@@ -29,10 +29,15 @@ import eu.kanade.tachiyomi.animesource.AnimeSource as AniyomiSource
  *   and its `Float` `episode_number` so [servers]/[resolve] can rebuild the exact [SEpisode].
  * - Episodes keep AniLocal's Int ordinal: the source list is sorted ascending by `episode_number`
  *   and assigned 1..N, so fractional/recap episodes fold into the ordinal sequence (no Float model).
- * - Both video paths are handled: the classic `getVideoList(episode)` and the ext-lib 16 two-step
- *   `getHosterList(episode)` → `getVideoList(hoster)`. A source without hosters yields one synthetic
- *   server (index −1). Every source call is wrapped so a failing extension degrades to empty, not a
- *   crash (matches the app's silent-degrade convention).
+ * - Both video paths are handled, classic-first: [resolve] tries the ext-lib-14
+ *   `getVideoList(episode)` and only falls back to the ext-lib-16 `getHosterList(episode)` →
+ *   `getVideoList(hoster)` pipeline for sources that implement it. The entire yuzono catalog is
+ *   ext-lib-14, so trying classic first avoids a wasted hoster network round-trip + an
+ *   `AbstractMethodError` (lib-16 abstract `hosterListParse` is unimplemented there) on every resolve.
+ *   [servers] returns one logical server per episode (the consumer only resolves the first, and
+ *   [resolve] already walks every hoster). Every source call is wrapped so a failing or
+ *   lib-mismatched extension degrades to empty, not a crash (matches the app's silent-degrade
+ *   convention; `runCatching` catches `Throwable`, including `AbstractMethodError`).
  */
 class AniyomiSourceAdapter(private val src: AniyomiSource) : AnimeSource {
 
@@ -70,36 +75,39 @@ class AniyomiSourceAdapter(private val src: AniyomiSource) : AnimeSource {
         )
     }
 
-    override suspend fun servers(episode: Episode): List<VideoServer> = withContext(Dispatchers.IO) {
-        val sEpisode = episode.id.toSEpisode()
-        val hosters = runCatching { src.getHosterList(sEpisode) }.getOrDefault(emptyList())
-        if (hosters.isNotEmpty()) {
-            hosters.mapIndexed { i, h ->
-                VideoServer(
-                    id = encodeServer(episode.id, i),
-                    name = h.hosterName.ifBlank { "Server ${i + 1}" },
-                    episodeId = episode.id,
-                )
-            }
-        } else {
-            listOf(VideoServer(id = encodeServer(episode.id, -1), name = src.name, episodeId = episode.id))
-        }
+    override suspend fun servers(episode: Episode): List<VideoServer> {
+        // One logical server per episode. We deliberately don't enumerate lib-16 hosters as separate
+        // servers: SourceStreamRepository only resolves servers().firstOrNull(), and resolve() below
+        // already walks every hoster. This also avoids a wasted hoster network round-trip for the
+        // lib-14 sources that make up the whole yuzono catalog (they have no hoster API). A future
+        // server-picker UI could reintroduce per-hoster servers.
+        return listOf(VideoServer(id = episode.id, name = src.name, episodeId = episode.id))
     }
 
     override suspend fun resolve(server: VideoServer): List<VideoStream> = withContext(Dispatchers.IO) {
         val sEpisode = server.episodeId.toSEpisode()
-        val index = decodeServerIndex(server.id)
-        val videos = if (index >= 0) {
-            val hoster = runCatching { src.getHosterList(sEpisode) }.getOrDefault(emptyList()).getOrNull(index)
-            when {
-                hoster == null -> emptyList()
-                hoster.videoList != null && !hoster.lazy -> hoster.videoList!!
-                else -> runCatching { src.getVideoList(hoster) }.getOrDefault(emptyList())
-            }
-        } else {
-            runCatching { src.getVideoList(sEpisode) }.getOrDefault(emptyList())
-        }
+        // Classic ext-lib-14 path first — the whole yuzono catalog implements only getVideoList(episode),
+        // so this resolves in a single request instead of first throwing AbstractMethodError on the
+        // lib-16 hoster API. Fall back to the lib-16 getHosterList → getVideoList(hoster) pipeline for
+        // sources that implement it. Wrapped so an unimplemented-API AbstractMethodError (lib mismatch)
+        // degrades to empty, never a crash.
+        val videos = runCatching { src.getVideoList(sEpisode) }.getOrNull()?.takeIf { it.isNotEmpty() }
+            ?: resolveViaHosters(sEpisode)
         videos.map { it.toVideoStream() }
+    }
+
+    /** ext-lib-16 fallback: the first hoster that yields videos wins (sources order them by preference). */
+    private suspend fun resolveViaHosters(sEpisode: SEpisode): List<Video> {
+        val hosters = runCatching { src.getHosterList(sEpisode) }.getOrDefault(emptyList())
+        for (hoster in hosters) {
+            val vids = if (hoster.videoList != null && !hoster.lazy) {
+                hoster.videoList!!
+            } else {
+                runCatching { src.getVideoList(hoster) }.getOrDefault(emptyList())
+            }
+            if (vids.isNotEmpty()) return vids
+        }
+        return emptyList()
     }
 
     // ---- model mapping ----
@@ -151,16 +159,9 @@ class AniyomiSourceAdapter(private val src: AniyomiSource) : AnimeSource {
         private const val HLS_MIME = "application/x-mpegURL"
         private const val DASH_MIME = "application/dash+xml"
 
-        // Control-char delimiters that never appear in URLs/episode names.
+        // Control-char delimiter that never appears in URLs/episode names.
         private const val EP = '\u0001' // SEpisode url / episode_number, packed into Episode.id
-        private const val SV = '\u0002' // hoster index / episodeId, packed into VideoServer.id
 
         private fun encodeEpisode(url: String, number: Float): String = "$url$EP$number"
-        private fun encodeServer(episodeId: String, index: Int): String = "$index$SV$episodeId"
-
-        private fun decodeServerIndex(serverId: String): Int {
-            val i = serverId.indexOf(SV)
-            return if (i < 0) -1 else serverId.substring(0, i).toIntOrNull() ?: -1
-        }
     }
 }

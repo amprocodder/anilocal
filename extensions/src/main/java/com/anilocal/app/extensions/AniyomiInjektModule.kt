@@ -4,6 +4,7 @@ import android.app.Application
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.NetworkPreferences
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.protobuf.ProtoBuf
 import uy.kohesive.injekt.api.InjektModule
 import uy.kohesive.injekt.api.InjektRegistrar
 import uy.kohesive.injekt.api.addSingleton
@@ -13,9 +14,10 @@ import uy.kohesive.injekt.api.get
 /**
  * Registers the singletons a loaded Aniyomi [eu.kanade.tachiyomi.animesource.online.AnimeHttpSource]
  * resolves via Injekt at construction (`injectLazy()` / `Injekt.get()`): the [Application] (used by
- * `ConfigurableAnimeSource.getSourcePreferences()`), a lenient [Json], and the [NetworkHelper] that
- * provides the shared OkHttpClient. Seeded once by [AniyomiRuntime]; kept entirely separate from
- * Hilt (Injekt is the DI the vendored source code expects).
+ * `ConfigurableAnimeSource.getSourcePreferences()`), a lenient [Json], a [ProtoBuf] (some
+ * keiyoushi.utils-based sources decode tokens with it), and the [NetworkHelper] that provides the
+ * shared OkHttpClient. Seeded once by [AniyomiRuntime]; kept entirely separate from Hilt (Injekt is
+ * the DI the vendored source code expects).
  */
 class AniyomiInjektModule(private val app: Application) : InjektModule {
     override fun InjektRegistrar.registerInjectables() {
@@ -27,6 +29,7 @@ class AniyomiInjektModule(private val app: Application) : InjektModule {
                 coerceInputValues = true
             }
         }
+        addSingletonFactory { ProtoBuf { encodeDefaults = true } }
         addSingletonFactory { NetworkPreferences() }
         addSingletonFactory { NetworkHelper(app, get()) }
     }

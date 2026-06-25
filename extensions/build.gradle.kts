@@ -41,5 +41,7 @@ dependencies {
     implementation(libs.injekt.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.serialization.jsonOkio)
+    // Some extensions (keiyoushi.utils-based, e.g. AnimePahe) resolve a ProtoBuf singleton via Injekt.
+    implementation(libs.kotlinx.serialization.protobuf)
     implementation(libs.androidx.preference)
 }
