@@ -2,6 +2,7 @@ package com.anilocal.app.ui.player
 
 import android.content.Context
 import android.net.Uri
+import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -14,8 +15,15 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.SingleSampleMediaSource
+import androidx.media3.exoplayer.text.TextOutput
+import androidx.media3.exoplayer.text.TextRenderer
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.OfflineEpisode
 import com.anilocal.app.domain.model.SkipMarker
@@ -44,7 +52,9 @@ import javax.inject.Named
 class PlayerViewModel @Inject constructor(
     @ApplicationContext context: Context,
     savedState: SavedStateHandle,
-    cacheDataSourceFactory: CacheDataSource.Factory,
+    // Stored (not just used at player construction) so [play] can build the per-subtitle
+    // SingleSampleMediaSource from the same cache-backed factory the video reads through.
+    private val cacheDataSourceFactory: CacheDataSource.Factory,
     // The shared upstream HTTP factory the player's CacheDataSource reads through; we set
     // per-stream request headers on it so header-gated sources resolve instead of 403'ing.
     private val httpDataSourceFactory: DefaultHttpDataSource.Factory,
@@ -64,9 +74,36 @@ class PlayerViewModel @Inject constructor(
     // Optional resume point (ms) passed from Continue Watching; 0 means start from the beginning.
     private val startMs: Long = savedState["startMs"] ?: 0L
 
+    // Subtitle parsing is kept OFF the extraction path: a sideloaded caption is decoded at render
+    // time by the TextRenderer instead, so a malformed/mis-typed sidecar fails *there* (logged, the
+    // track just yields no cues) rather than aborting the whole media source with
+    // ERROR_CODE_PARSING_CONTAINER_MALFORMED. That needs BOTH halves of Media3 1.4.1's transitional
+    // toggle — parse-during-extraction OFF here, and legacy decoding ON in the renderer below.
+    private val mediaSourceFactory: DefaultMediaSourceFactory =
+        DefaultMediaSourceFactory(cacheDataSourceFactory)
+            .experimentalParseSubtitlesDuringExtraction(false)
+
     // Player reads downloaded bytes from the offline cache, falling through to network online.
-    val player: ExoPlayer = ExoPlayer.Builder(context)
-        .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
+    // 1.4.1 has no DefaultRenderersFactory shortcut to enable legacy (render-time) text decoding, so
+    // override buildTextRenderers to flip it on the TextRenderer it builds.
+    val player: ExoPlayer = ExoPlayer.Builder(
+        context,
+        object : DefaultRenderersFactory(context) {
+            @Suppress("DEPRECATION") // transitional in Media3 1.4.x; revisit on a Media3 bump
+            override fun buildTextRenderers(
+                context: Context,
+                output: TextOutput,
+                outputLooper: Looper,
+                extensionRendererMode: Int,
+                out: ArrayList<Renderer>,
+            ) {
+                out.add(TextRenderer(output, outputLooper).apply {
+                    experimentalSetLegacyDecodingEnabled(true)
+                })
+            }
+        },
+    )
+        .setMediaSourceFactory(mediaSourceFactory)
         .build()
 
     private val _markers = MutableStateFlow<List<SkipMarker>>(emptyList())
@@ -182,29 +219,14 @@ class PlayerViewModel @Inject constructor(
         // sources 403 without their Referer — this is what lets a header-gated stream resolve.
         httpDataSourceFactory.setDefaultRequestProperties(headers)
         currentUri = uri
-        // Auto-enable a track on load. ExoPlayer's DefaultTrackSelector NEVER reads
-        // SELECTION_FLAG_AUTOSELECT for text — a side-loaded subtitle only renders by default if it
-        // carries SELECTION_FLAG_DEFAULT (or matches a preferred text language, which we don't set).
-        // So flag the first track DEFAULT and the rest AUTOSELECT: captions show immediately, while the
-        // player's subtitle button (enabled in PlayerScreen) still lets the user switch or turn them
-        // off. Only ONE track may be DEFAULT — multiple defaults in a group is an undefined pick.
-        // setLabel carries the source's human name ("English", "Spanish - sub") into the CC menu.
-        val subConfigs = subtitles.mapIndexed { index, sub ->
-            val flags = if (index == 0) {
-                C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_AUTOSELECT
-            } else {
-                C.SELECTION_FLAG_AUTOSELECT
-            }
-            MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
-                .setMimeType(subtitleMime(sub.url))
-                .setLanguage(sub.language)
-                .setLabel(sub.label)
-                .setSelectionFlags(flags)
-                .build()
-        }
-        val item = MediaItem.Builder()
+
+        // Build the video item WITHOUT subtitle configs. If subs rode on the MediaItem, Media3's
+        // DefaultMediaSourceFactory would auto-merge and prepare them *eagerly* (independent of track
+        // selection) — and a sideloaded sub that 404s (ERROR_CODE_IO_BAD_HTTP_STATUS) or whose bytes
+        // don't match its declared mime (ERROR_CODE_PARSING_CONTAINER_MALFORMED) would then abort the
+        // whole playback. So we attach each sub ourselves below as a fault-isolated source instead.
+        val videoItem = MediaItem.Builder()
             .setUri(uri)
-            .setSubtitleConfigurations(subConfigs)
             .apply {
                 when {
                     mimeType != null -> setMimeType(mimeType)
@@ -212,7 +234,39 @@ class PlayerViewModel @Inject constructor(
                 }
             }
             .build()
-        if (startMs > 0) player.setMediaItem(item, startMs) else player.setMediaItem(item)
+        val videoSource: MediaSource = mediaSourceFactory.createMediaSource(videoItem)
+
+        // Each sidecar subtitle as its own SingleSampleMediaSource with load errors treated as
+        // end-of-stream: a 404/403/timeout fetching a caption degrades that one track to empty
+        // instead of failing the video. (Parse errors are made non-fatal separately, by the
+        // render-time decoding enabled on the player's renderers factory.) Auto-enable a track on
+        // load: DefaultTrackSelector honours SELECTION_FLAG_DEFAULT for text but NEVER reads
+        // AUTOSELECT for text, so the first track is DEFAULT (it auto-shows) and the rest AUTOSELECT
+        // (the CC button can switch to them). Only ONE track may be DEFAULT. setLabel carries the
+        // source's human name ("English", "Spanish - sub") into the CC menu.
+        val subFactory = SingleSampleMediaSource.Factory(cacheDataSourceFactory)
+            .setTreatLoadErrorsAsEndOfStream(true)
+        val subSources = subtitles.mapIndexed { index, sub ->
+            val flags = if (index == 0) {
+                C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_AUTOSELECT
+            } else {
+                C.SELECTION_FLAG_AUTOSELECT
+            }
+            val subConfig = MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
+                .setMimeType(subtitleMime(sub.url))
+                .setLanguage(sub.language)
+                .setLabel(sub.label)
+                .setSelectionFlags(flags)
+                .build()
+            // C.TIME_UNSET = a full-file sidecar; cues carry their own timestamps.
+            subFactory.createMediaSource(subConfig, C.TIME_UNSET)
+        }
+
+        val media: MediaSource =
+            if (subSources.isEmpty()) videoSource
+            else MergingMediaSource(*(listOf(videoSource) + subSources).toTypedArray())
+
+        if (startMs > 0) player.setMediaSource(media, startMs) else player.setMediaSource(media)
         player.prepare()
         player.playWhenReady = true
     }
