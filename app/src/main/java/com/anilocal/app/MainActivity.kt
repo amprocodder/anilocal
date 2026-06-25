@@ -33,6 +33,7 @@ import com.anilocal.app.ui.more.MoreScreen
 import com.anilocal.app.ui.navigation.Routes
 import com.anilocal.app.ui.navigation.TopTab
 import com.anilocal.app.ui.player.PlayerScreen
+import com.anilocal.app.ui.source.SourcePreferencesScreen
 import com.anilocal.app.ui.theme.AniLocalTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -109,10 +110,19 @@ private fun AppRoot() {
                 DownloadsScreen(onPlay = { animeId, ep -> nav.navigate(Routes.player(animeId, ep)) })
             }
             composable(TopTab.More.route) {
-                MoreScreen(onBrowseExtensions = { nav.navigate(Routes.EXTENSIONS) })
+                MoreScreen(
+                    onBrowseExtensions = { nav.navigate(Routes.EXTENSIONS) },
+                    onConfigureSource = { nav.navigate(Routes.sourcePreferences(it)) },
+                )
             }
             composable(Routes.EXTENSIONS) {
                 ExtensionsScreen(onBack = { nav.popBackStack() })
+            }
+            composable(
+                Routes.SOURCE_PREFERENCES,
+                arguments = listOf(navArgument("sourceId") { type = NavType.StringType }),
+            ) {
+                SourcePreferencesScreen(onBack = { nav.popBackStack() })
             }
 
             composable(

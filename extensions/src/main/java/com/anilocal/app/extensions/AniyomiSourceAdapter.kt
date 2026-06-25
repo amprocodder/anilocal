@@ -1,5 +1,16 @@
 package com.anilocal.app.extensions
 
+import android.annotation.SuppressLint
+import android.app.Application
+import android.content.Context
+import android.view.ContextThemeWrapper
+import androidx.preference.EditTextPreference
+import androidx.preference.ListPreference
+import androidx.preference.MultiSelectListPreference
+import androidx.preference.Preference
+import androidx.preference.PreferenceManager
+import androidx.preference.PreferenceScreen
+import androidx.preference.TwoStatePreference
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.Episode
@@ -8,13 +19,18 @@ import com.anilocal.app.domain.model.VideoServer
 import com.anilocal.app.domain.model.VideoStream
 import com.anilocal.app.domain.source.AnimeSource
 import com.anilocal.app.domain.source.SourceInfo
+import com.anilocal.app.domain.source.SourcePreference
 import eu.kanade.tachiyomi.animesource.AnimeCatalogueSource
+import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
+import eu.kanade.tachiyomi.animesource.preferenceKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import eu.kanade.tachiyomi.animesource.AnimeSource as AniyomiSource
 
 /**
@@ -46,6 +62,7 @@ class AniyomiSourceAdapter(private val src: AniyomiSource) : AnimeSource {
         name = src.name,
         lang = src.lang.ifEmpty { "en" },
         isExternal = true,
+        configurable = src is ConfigurableAnimeSource,
     )
 
     override suspend fun popular(page: Int): List<AnimeSummary> = withContext(Dispatchers.IO) {
@@ -109,6 +126,87 @@ class AniyomiSourceAdapter(private val src: AniyomiSource) : AnimeSource {
         }
         return emptyList()
     }
+
+    override suspend fun preferences(): List<SourcePreference> = withContext(Dispatchers.IO) {
+        val configurable = src as? ConfigurableAnimeSource ?: return@withContext emptyList()
+        // Build a real PreferenceScreen, let the source populate it, then read each preference's
+        // metadata + currently-persisted value. The screen is backed by the SAME SharedPreferences
+        // (source_$id) the source reads, so values reflect what's stored. Whole thing is wrapped:
+        // a source that misbehaves in setupPreferenceScreen degrades to "no settings", never crashes.
+        val screen = runCatching { buildPreferenceScreen(configurable) }.getOrNull()
+            ?: return@withContext emptyList()
+        (0 until screen.preferenceCount).mapNotNull { screen.getPreference(it).toSourcePreference() }
+    }
+
+    override suspend fun setPreference(key: String, value: Any?) {
+        withContext(Dispatchers.IO) {
+            val configurable = src as? ConfigurableAnimeSource ?: return@withContext
+            // Write straight to the source's own SharedPreferences (source_$id) with the type the
+            // androidx Preference persists, which is exactly what the source reads back on its next
+            // request (most extensions read preferences lazily, so the change applies immediately).
+            runCatching {
+                val editor = configurable.getSourcePreferences().edit()
+                when (value) {
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                    is String -> editor.putString(key, value)
+                    null -> editor.remove(key)
+                    else -> editor.putString(key, value.toString())
+                }
+                editor.apply()
+            }
+        }
+    }
+
+    @SuppressLint("RestrictedApi") // PreferenceManager(ctx)+createPreferenceScreen are the only way to
+    // build a PreferenceScreen outside a PreferenceFragmentCompat; public, just @RestrictTo.
+    private fun buildPreferenceScreen(configurable: ConfigurableAnimeSource): PreferenceScreen {
+        // Wrap the app context in androidx.preference's theme overlay so the widgets a source creates
+        // (EditTextPreference/ListPreference/…) can resolve their style attrs off any base app theme.
+        val context: Context = ContextThemeWrapper(
+            Injekt.get<Application>(),
+            androidx.preference.R.style.PreferenceThemeOverlay,
+        )
+        val manager = PreferenceManager(context).apply {
+            sharedPreferencesName = configurable.preferenceKey() // "source_$id" — same store the source uses
+            sharedPreferencesMode = Context.MODE_PRIVATE
+        }
+        val screen = manager.createPreferenceScreen(context)
+        configurable.setupPreferenceScreen(screen)
+        return screen
+    }
+
+    /** Maps the four androidx preference kinds Aniyomi extensions use; unknown kinds are dropped. */
+    private fun Preference.toSourcePreference(): SourcePreference? {
+        val prefKey = key ?: return null
+        val prefTitle = title?.toString() ?: prefKey
+        val prefSummary = summary?.toString()
+        return when (this) {
+            is TwoStatePreference ->
+                SourcePreference.Toggle(prefKey, prefTitle, prefSummary, isChecked)
+            // MultiSelectListPreference extends DialogPreference (NOT ListPreference) — check it first.
+            is MultiSelectListPreference ->
+                SourcePreference.MultiSelect(
+                    prefKey, prefTitle, prefSummary,
+                    values ?: emptySet(),
+                    entries.orEmptyStrings(),
+                    entryValues.orEmptyStrings(),
+                )
+            is ListPreference ->
+                SourcePreference.Select(
+                    prefKey, prefTitle, prefSummary,
+                    value ?: "",
+                    entries.orEmptyStrings(),
+                    entryValues.orEmptyStrings(),
+                )
+            is EditTextPreference ->
+                SourcePreference.EditText(prefKey, prefTitle, prefSummary, text ?: "")
+            else -> null
+        }
+    }
+
+    private fun Array<CharSequence>?.orEmptyStrings(): List<String> =
+        this?.map(CharSequence::toString) ?: emptyList()
 
     // ---- model mapping ----
 

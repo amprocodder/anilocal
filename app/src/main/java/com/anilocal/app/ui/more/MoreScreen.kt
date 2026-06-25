@@ -16,9 +16,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -44,7 +46,11 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 
 @Composable
-fun MoreScreen(onBrowseExtensions: () -> Unit, vm: MoreViewModel = hiltViewModel()) {
+fun MoreScreen(
+    onBrowseExtensions: () -> Unit,
+    onConfigureSource: (String) -> Unit,
+    vm: MoreViewModel = hiltViewModel(),
+) {
     val context = LocalContext.current
     val user by vm.user.collectAsStateWithLifecycle()
     val autoSkip by vm.autoSkip.collectAsStateWithLifecycle()
@@ -217,13 +223,18 @@ fun MoreScreen(onBrowseExtensions: () -> Unit, vm: MoreViewModel = hiltViewModel
                     selected = selectedSourceId == src.id,
                     onClick = { vm.setSelectedSource(src.id) },
                 )
-                Column(Modifier.padding(start = 8.dp)) {
+                Column(Modifier.weight(1f).padding(start = 8.dp)) {
                     Text(src.name, style = MaterialTheme.typography.bodyLarge)
                     Text(
                         if (src.isExternal) "Extension · ${src.lang}" else "Built-in",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                if (src.configurable) {
+                    IconButton(onClick = { onConfigureSource(src.id) }) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Source settings")
+                    }
                 }
             }
         }

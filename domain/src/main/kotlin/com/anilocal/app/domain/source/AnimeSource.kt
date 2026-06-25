@@ -12,6 +12,8 @@ data class SourceInfo(
     val lang: String = "en",
     /** false = a built-in source that ships in-app; true = user-installed extension. */
     val isExternal: Boolean = false,
+    /** true = the source exposes user-configurable preferences (see [AnimeSource.preferences]). */
+    val configurable: Boolean = false,
 )
 
 /**
@@ -32,4 +34,17 @@ interface AnimeSource {
 
     /** Resolve a server to its available quality variants (highest first is conventional). */
     suspend fun resolve(server: VideoServer): List<VideoStream>
+
+    /**
+     * The source's user-configurable preferences, or empty when it has none (the default). Read fresh
+     * each call so the returned values reflect what is currently persisted.
+     */
+    suspend fun preferences(): List<SourcePreference> = emptyList()
+
+    /**
+     * Persist one changed preference. [value] matches the [SourcePreference] kind: a `Boolean`
+     * ([SourcePreference.Toggle]), a `String` ([SourcePreference.EditText] / [SourcePreference.Select]),
+     * or a `Set<String>` ([SourcePreference.MultiSelect]). No-op for sources without preferences.
+     */
+    suspend fun setPreference(key: String, value: Any?) {}
 }
