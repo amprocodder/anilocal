@@ -13,6 +13,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -37,6 +38,10 @@ import com.anilocal.app.domain.repo.StreamRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -44,6 +49,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Named
 
@@ -205,14 +211,14 @@ class PlayerViewModel @Inject constructor(
         play(stream.url, stream.mimeType, stream.subtitles, stream.headers)
     }
 
-    private fun playOffline(ep: OfflineEpisode) {
+    private suspend fun playOffline(ep: OfflineEpisode) {
         idMal = ep.idMal
         summary = AnimeSummary(animeId, ep.title, ep.posterUrl, ep.idMal)
         _markers.value = ep.markers
         play(ep.streamUri, ep.mimeType, ep.subtitles)
     }
 
-    private fun play(uri: String, mimeType: String?, subtitles: List<Subtitle>, headers: Map<String, String> = emptyMap()) {
+    private suspend fun play(uri: String, mimeType: String?, subtitles: List<Subtitle>, headers: Map<String, String> = emptyMap()) {
         // Apply the source-provided request headers (Referer/User-Agent/etc.) to the shared upstream
         // HTTP factory the player reads through. Set every time (empty clears the previous stream's
         // headers) and before prepare(), since the data source reads these at open() time. Many real
@@ -244,6 +250,11 @@ class PlayerViewModel @Inject constructor(
         // AUTOSELECT for text, so the first track is DEFAULT (it auto-shows) and the rest AUTOSELECT
         // (the CC button can switch to them). Only ONE track may be DEFAULT. setLabel carries the
         // source's human name ("English", "Spanish - sub") into the CC menu.
+        // Resolve each subtitle's real format BEFORE attaching it. Many sources (AnimeOnsen) serve a
+        // sidecar at an extension-less URL; declaring it VTT by default makes the WebVTT decoder drop
+        // every cue. resolveSubtitleMime sniffs the content when the path has no known suffix. Sniffed
+        // in parallel (tiny files), so it adds at most one round-trip to playback start.
+        val subMimes = coroutineScope { subtitles.map { sub -> async { resolveSubtitleMime(sub.url) } }.awaitAll() }
         val subFactory = SingleSampleMediaSource.Factory(cacheDataSourceFactory)
             .setTreatLoadErrorsAsEndOfStream(true)
         val subSources = subtitles.mapIndexed { index, sub ->
@@ -253,7 +264,7 @@ class PlayerViewModel @Inject constructor(
                 C.SELECTION_FLAG_AUTOSELECT
             }
             val subConfig = MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
-                .setMimeType(subtitleMime(sub.url))
+                .setMimeType(subMimes[index])
                 .setLanguage(sub.language)
                 .setLabel(sub.label)
                 .setSelectionFlags(flags)
@@ -307,17 +318,64 @@ class PlayerViewModel @Inject constructor(
         const val END_THRESHOLD_MS = 5_000L
     }
 
-    // Classify by the URL *path* only. Many sources serve sidecars behind a query/proxy
-    // ("…/sub.srt?token=…"), so matching the raw URL string would leave a real SubRip in the VTT
-    // fallback and the WebVTT parser would silently drop every cue. VTT stays the last-resort fallback
-    // (a SubtitleConfiguration requires a non-null mime), but only after the path has no known suffix.
-    private fun subtitleMime(url: String): String {
+    // Resolve a subtitle's MIME: trust a known file extension on the URL path, else sniff the actual
+    // bytes (some sources — e.g. AnimeOnsen — serve ASS at an extension-less API URL, and declaring it
+    // VTT makes the WebVTT decoder silently drop every cue). VTT is the last-resort fallback, since a
+    // SubtitleConfiguration requires a non-null mime.
+    private suspend fun resolveSubtitleMime(url: String): String =
+        subtitleMimeByPath(url) ?: sniffSubtitleMime(url) ?: MimeTypes.TEXT_VTT
+
+    // Classify by the URL *path* only (ignoring any "?token=…" query), or null if the suffix is unknown.
+    private fun subtitleMimeByPath(url: String): String? {
         val path = (Uri.parse(url).path ?: url).lowercase()
         return when {
+            path.endsWith(".vtt") -> MimeTypes.TEXT_VTT
             path.endsWith(".srt") -> MimeTypes.APPLICATION_SUBRIP
             path.endsWith(".ass") || path.endsWith(".ssa") -> MimeTypes.TEXT_SSA
             path.endsWith(".ttml") || path.endsWith(".dfxp") -> MimeTypes.APPLICATION_TTML
-            else -> MimeTypes.TEXT_VTT
+            else -> null
+        }
+    }
+
+    // Read the subtitle's first bytes and classify by signature. Goes through the cache-backed factory
+    // so it works for both http(s) and offline file:// subs and reuses the stream's request headers.
+    // Returns null on any failure (→ caller falls back to VTT).
+    private suspend fun sniffSubtitleMime(url: String): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val ds = cacheDataSourceFactory.createDataSource()
+            try {
+                ds.open(DataSpec(Uri.parse(url)))
+                val buf = ByteArray(1024)
+                var total = 0
+                while (total < buf.size) {
+                    val n = ds.read(buf, total, buf.size - total)
+                    if (n <= 0) break // RESULT_END_OF_INPUT (-1) or no more bytes
+                    total += n
+                }
+                sniffSubtitleFormat(String(buf, 0, total, Charsets.UTF_8))
+            } finally {
+                runCatching { ds.close() }
+            }
+        }.getOrNull()
+    }
+
+    private fun sniffSubtitleFormat(raw: String): String? {
+        val head = raw.trimStart('﻿').trimStart()
+        return when {
+            head.startsWith("WEBVTT", ignoreCase = true) -> MimeTypes.TEXT_VTT
+            head.startsWith("[Script Info]", ignoreCase = true) ||
+                head.contains("[V4+ Styles]", ignoreCase = true) ||
+                head.contains("[V4 Styles]", ignoreCase = true) -> MimeTypes.TEXT_SSA
+            head.startsWith("<?xml", ignoreCase = true) || head.contains("<tt", ignoreCase = true) ->
+                MimeTypes.APPLICATION_TTML
+            // Cue-based: SRT uses comma millis ("…,000 -->"), WebVTT uses a dot — distinguish on that.
+            head.contains("-->") ->
+                if (Regex("\\d{2}:\\d{2}:\\d{2},\\d{3}\\s*-->").containsMatchIn(head)) {
+                    MimeTypes.APPLICATION_SUBRIP
+                } else {
+                    MimeTypes.TEXT_VTT
+                }
+            else -> null
         }
     }
 }
