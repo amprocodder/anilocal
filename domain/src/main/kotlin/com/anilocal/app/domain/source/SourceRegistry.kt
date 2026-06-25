@@ -4,8 +4,12 @@ import kotlinx.coroutines.flow.StateFlow
 
 /** Well-known source ids the app references directly. */
 object Sources {
-    /** The always-present, lawful built-in sample source — the default selection. */
-    const val SAMPLE_ID = "sample-local"
+    /**
+     * Default "no source selected" — the app ships no built-in sources, so until the user picks an
+     * installed extension this is persisted, and [SourceRegistry] resolution falls back to the first
+     * available source (if any).
+     */
+    const val NONE = ""
 }
 
 /**

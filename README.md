@@ -2,9 +2,9 @@
 
 A single-APK anime app with the AniLab-style menu layout. **AniList** provides the entire browse
 catalog; playable streams come from a **user-selected source** behind one abstract `AnimeSource`
-plugin seam. Two lawful Creative-Commons sample sources ship in-app, and the app can **install and
-load Aniyomi/Anikku-style extension APKs** as additional stream sources — so you can choose any
-source. Sideload-only (not Google Play eligible); it bundles no extensions.
+plugin seam. The app ships **no** built-in stream sources; it can **install and load
+Aniyomi/Anikku-style extension APKs** as the stream sources — so you can choose any source.
+Sideload-only (not Google Play eligible); it bundles no extensions.
 
 > Status: builds via CI (`gradle :app:assembleDebug` → the `anilocal-debug-apk` artifact for
 > sideloading). Extension discovery/loading and in-app install are verified on-device by sideloading
@@ -28,14 +28,14 @@ source. Sideload-only (not Google Play eligible); it bundles no extensions.
 - **Real catalog** via **AniList** GraphQL (trending on Home, search in Explore, full detail
   pages). No API key needed. *(TMDB wired as optional artwork enrichment — see config.)*
 - **Player** (Media3/ExoPlayer) with the **Skip-Intro/Outro button** (`FreakIntroButton`
-  equivalent), fed by **AniSkip** (real op/ed times by MAL id) — demo markers for the
-  keyless sample so the control always demonstrates.
+  equivalent), fed by **AniSkip** (real op/ed times by MAL id) — demo markers for titles with
+  no MAL id so the control always demonstrates.
 - **Room persistence**: "My List" (Library tab) + "Continue Watching" (Home), with watch
   progress saved during playback.
 - **Google Sign-In** via **Firebase** (More tab) — guarded so it no-ops until you add your
   own project; then it actually works.
-- **User-selectable stream sources**: a runtime **source registry** + picker (More tab). Two
-  built-in CC sample sources ship; **installed Aniyomi extensions** appear automatically and resolve
+- **User-selectable stream sources**: a runtime **source registry** + picker (More tab). No
+  built-in sources ship; **installed Aniyomi extensions** appear automatically and resolve
   streams for AniList-browsed titles. **Browse extensions** (More → Browse extensions) lists a
   pre-seeded repo's `index.min.json` and installs sources via the system installer.
 - Hilt DI, Compose + Material3, Coil images, OkHttp 5/Retrofit/Moshi.
@@ -62,8 +62,8 @@ source. Sideload-only (not Google Play eligible); it bundles no extensions.
 1. Open the project root in Android Studio (Koala+); it will generate the Gradle wrapper
    scripts (`gradlew`) and sync. (Wrapper pinned to Gradle 8.9 for AGP 8.7.)
 2. JDK 17, Android SDK 35 installed. `minSdk 24`.
-3. Run the `app` config on a device/emulator. The Home tab → a sample title → Play
-   demonstrates playback + the skip button with no network and no account.
+3. Run the `app` config on a device/emulator. Browse works immediately (AniList); to **play**,
+   install an extension first (More → Browse extensions), then pick it in the source picker.
 
 ## Architecture — 4 Gradle modules
 The dependency direction is compile-enforced (not just convention):
@@ -76,7 +76,7 @@ The dependency direction is compile-enforced (not just convention):
 - **`:domain`** — pure Kotlin (`kotlin("jvm")`, no Android dependency). Models, repository
   interfaces, the `AnimeSource` seam. `import android.*` here won't compile — that's the boundary.
 - **`:data`** — Android library. All repository implementations: AniList/TMDB, AniSkip, Room,
-  DataStore, Firebase auth, Media3 downloads, the built-in sample sources, extension-repo
+  DataStore, Firebase auth, Media3 downloads, the source registry, extension-repo
   browse/install, and the Hilt wiring (`di/AppModule`). Depends on `:domain` + `:extensions`.
 - **`:extensions`** — Android library hosting Aniyomi extensions: the vendored Aniyomi source-api
   (see `extensions/VENDORING.md`), the `AniyomiSourceAdapter`, the Injekt runtime, and the

@@ -52,7 +52,7 @@ class MoreViewModel @Inject constructor(
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val selectedSourceId: StateFlow<String> =
-        settings.selectedSourceId.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Sources.SAMPLE_ID)
+        settings.selectedSourceId.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Sources.NONE)
 
     val malUsername: StateFlow<String> =
         settings.malUsername.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")

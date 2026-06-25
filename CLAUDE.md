@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **AniLocal** — an Android anime player (Kotlin, Compose, single APK). AniList provides the entire
 browse/metadata catalog (no API key); playable streams come from a **user-selected** `AnimeSource`
-behind one plugin seam. Two lawful Creative-Commons sample sources ship in-app, and the app can
-**discover, install, and load Aniyomi/Anikku-style extension APKs** as additional stream sources, so
-the user can "choose any source". Read `README.md` for the product-level feature list and rationale.
+behind one plugin seam. The app ships **no** built-in stream sources; it can **discover, install, and
+load Aniyomi/Anikku-style extension APKs** as the stream sources, so the user can "choose any source".
+Read `README.md` for the product-level feature list and rationale.
 
 > **Posture note.** Earlier revisions framed this as a deliberate "scraper-shaped hole" with no
 > scraper and a single bundled CC clip. That hole has been filled by the extension subsystem (the
@@ -58,7 +58,7 @@ Four Gradle modules with a strict, one-way dependency direction:
   `DownloadRepository` (`repo/DownloadRepository.kt`), `MalRepository` (`repo/MalRepository.kt`),
   `SettingsRepository` (`repo/SettingsRepository.kt`), and `AuthRepository` (`auth/Auth.kt`).
 - **`:data`** — Android library. *All* repository implementations live here: AniList/TMDB/MAL APIs,
-  AniSkip, Room, DataStore, Firebase auth, the Media3 download stack, the built-in sample sources, the
+  AniSkip, Room, DataStore, Firebase auth, the Media3 download stack, the source registry, the
   extension-repo browse/install impls, and the Hilt wiring (`di/AppModule`). Depends on `:domain` and
   `:extensions`.
 - **`:extensions`** — Android library that makes AniLocal a host for Aniyomi extensions. Vendors the
@@ -84,26 +84,27 @@ A single Hilt `@Module` `@Binds` every domain interface to its `:data` impl. Thi
 for the whole app. The most important binding:
 
 ```kotlin
-// Built-in sources are contributed into a Set — NOT bound singly. The user picks one at runtime.
-@Binds @IntoSet abstract fun bindSampleSource(impl: SampleLocalSource): AnimeSource
-@Binds @IntoSet abstract fun bindSintelSource(impl: SampleSintelSource): AnimeSource
+// Built-in sources are a multibound Set the registry merges with extensions — NOT bound singly.
+// The app ships NONE, so the set is empty; @Multibinds keeps it injectable with zero contributions.
+@Multibinds abstract fun animeSources(): Set<@JvmSuppressWildcards AnimeSource>
 @Binds @Singleton abstract fun bindSourceRegistry(impl: SourceRegistryImpl): SourceRegistry
 ```
 
 Streams are **no longer one compile-time binding** (the old `bindAnimeSource` is gone). Built-in
-`AnimeSource`s are contributed via `@IntoSet`; `SourceRegistryImpl` (in `:data`) merges that set with
-the extensions `AnimeExtensionLoader` discovers and exposes a reactive `sources: StateFlow`.
+`AnimeSource`s would be contributed via `@Binds @IntoSet` (the app currently ships none, so the set is
+empty — `@Multibinds` declares it); `SourceRegistryImpl` (in `:data`) merges that set with the
+extensions `AnimeExtensionLoader` discovers and exposes a reactive `sources: StateFlow`.
 `SourceStreamRepository` injects the `SourceRegistry` + `SettingsRepository` and routes resolution to
 the **user-selected** source (`selectedSourceId` in DataStore, chosen in the More-screen picker),
-falling back to the sample. **To add a built-in source, add one `@IntoSet` line** — selection, routing,
-and the picker are automatic. The `AnimeSource` contract is **five suspend methods** —
+falling back to the first available source. **To add a built-in source, add one `@Binds @IntoSet`
+line** — selection, routing, and the picker are automatic. The `AnimeSource` contract is **five suspend methods** —
 `popular`/`search`/`detail` (catalog-shaped) *and* `servers`/`resolve` (stream-shaped) — **plus a
 `val info: SourceInfo` property** (`info.id` keys the registry; `info.isExternal` tags extensions in
 the picker), so a source implements all six members even though browsing goes through AniList's
 `CatalogRepository`. `SourceStreamRepository` is the join: per request it runs `search` → `detail` →
 `servers().firstOrNull()` → `resolve`, sorts variants by height descending, and throws when `search`
-finds no match (the sample sources dodge this by matching *any* query, so playback always resolves; a
-real extension that finds nothing throws and the player degrades to a short hint). It exposes
+finds no match (an extension that finds nothing throws and the player degrades to a short hint —
+there is no longer a built-in source that matched *any* query to keep playback always-resolving). It exposes
 `resolveStream` (single, highest quality → online playback) and `resolveStreams` (all variants → the
 download quality picker).
 
@@ -148,8 +149,8 @@ for the old MAL client id).
   checks `downloads.getOffline(...)`. Offline → skip markers and subtitles come from the cached Room
   record. Online → AniList resolves the title, the bound `AnimeSource` resolves the stream, and AniSkip
   markers are fetched once on `STATE_READY` (gated on `markers.isEmpty() && !offline`, so the fetch never
-  re-runs or overrides offline markers). When a title has **no MAL id** (the keyless sample, or anything
-  AniSkip can't key), `AniSkipRepository` returns **hard-coded demo markers** instead of an empty list so
+  re-runs or overrides offline markers). When a title has **no MAL id** (anything AniSkip can't key),
+  `AniSkipRepository` returns **hard-coded demo markers** instead of an empty list so
   the Skip control always demonstrates — that `idMal == null` branch is intentional, not a bug. Auto-skip
   fires at most once per marker.
 
@@ -184,10 +185,9 @@ for the old MAL client id).
   `topAiring`, `allTimePopular`, `upcoming`), the Explore grid `browse(genre, sort, page)`, and
   `anilistIdForMal(malId)`. `AniListCatalogRepository` builds **raw GraphQL strings inline** (no
   Apollo/codegen) through a shared `mediaPage()` helper and computes the current season locally — copy that
-  pattern when adding a row or query. They are deliberately decoupled — the sample source matches any query
-  so playback always resolves against AniList-browsed titles (that "always resolves" is a property of
-  `SampleLocalSource` returning a fixed list for *any* query, **not** of the seam; a real source that
-  returns no match throws in `SourceStreamRepository`). The join happens in
+  pattern when adding a row or query. They are deliberately decoupled — a source must find its own match
+  for an AniList-browsed title; resolution is **not** guaranteed (a source that returns no match throws in
+  `SourceStreamRepository` and the player shows a short hint). The join happens in
   `data/.../source/SourceStreamRepository.kt`, while `AppModule.bindAnimeSource` chooses *which* source it
   talks to.
 

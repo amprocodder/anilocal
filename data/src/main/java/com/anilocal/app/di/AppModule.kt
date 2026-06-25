@@ -9,8 +9,6 @@ import com.anilocal.app.data.metadata.extension.ExtensionRepositoryImpl
 import com.anilocal.app.data.metadata.mal.MalRepositoryImpl
 import com.anilocal.app.data.settings.DataStoreSettingsRepository
 import com.anilocal.app.data.skip.AniSkipRepository
-import com.anilocal.app.data.source.SampleLocalSource
-import com.anilocal.app.data.source.SampleSintelSource
 import com.anilocal.app.data.source.SourceRegistryImpl
 import com.anilocal.app.data.source.SourceStreamRepository
 import com.anilocal.app.domain.auth.AuthRepository
@@ -28,7 +26,7 @@ import com.anilocal.app.domain.source.SourceRegistry
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
-import dagger.multibindings.IntoSet
+import dagger.multibindings.Multibinds
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
@@ -42,15 +40,14 @@ import javax.inject.Singleton
 abstract class AppModule {
 
     /**
-     * Built-in stream sources, contributed into a set. The active source is chosen at runtime from
-     * [SourceRegistry] by the user's selected-source setting (see [SourceStreamRepository]);
-     * dynamically loaded extensions get added to the same set later. Each impl is `@Singleton`.
+     * The built-in stream-source set [SourceRegistryImpl] merges with the user's installed
+     * extensions. The app ships NO built-in sources, so this set is empty by default — `@Multibinds`
+     * declares it so it stays injectable with zero `@IntoSet` contributions (add `@Binds @IntoSet`
+     * here to reintroduce a built-in). The active source is chosen at runtime from [SourceRegistry]
+     * by the user's selected-source setting (see [SourceStreamRepository]).
      */
-    @Binds @IntoSet
-    abstract fun bindSampleSource(impl: SampleLocalSource): AnimeSource
-
-    @Binds @IntoSet
-    abstract fun bindSintelSource(impl: SampleSintelSource): AnimeSource
+    @Multibinds
+    abstract fun animeSources(): Set<@JvmSuppressWildcards AnimeSource>
 
     @Binds @Singleton
     abstract fun bindSourceRegistry(impl: SourceRegistryImpl): SourceRegistry

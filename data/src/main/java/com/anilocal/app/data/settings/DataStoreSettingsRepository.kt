@@ -75,7 +75,7 @@ class DataStoreSettingsRepository @Inject constructor(
     }
 
     override val selectedSourceId: Flow<String> =
-        context.dataStore.data.map { it[Keys.SELECTED_SOURCE] ?: Sources.SAMPLE_ID }
+        context.dataStore.data.map { it[Keys.SELECTED_SOURCE] ?: Sources.NONE }
 
     override suspend fun setSelectedSourceId(id: String) {
         context.dataStore.edit { it[Keys.SELECTED_SOURCE] = id }

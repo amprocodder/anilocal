@@ -10,18 +10,17 @@ data class SourceInfo(
     val id: String,
     val name: String,
     val lang: String = "en",
-    /** false = ships in-app (e.g. the sample/local source); true = user-installed extension. */
+    /** false = a built-in source that ships in-app; true = user-installed extension. */
     val isExternal: Boolean = false,
 )
 
 /**
  * THE PLUGIN SEAM.
  *
- * Everything content-related goes through this interface. The app itself bundles only the
- * lawful [com.anilocal.app.data.source.SampleLocalSource]. Any other implementation — a
- * personal media server (Jellyfin/Plex), local files, or a third-party extension — is a
- * drop-in here and is the integrator's responsibility. The rest of the app neither knows
- * nor cares where streams come from.
+ * Everything content-related goes through this interface. The app bundles no built-in sources;
+ * implementations are user-installed Aniyomi/Anikku extensions (mapped onto this seam by the
+ * `:extensions` module) — or, as a drop-in, a personal media server (Jellyfin/Plex) or local
+ * files. The rest of the app neither knows nor cares where streams come from.
  */
 interface AnimeSource {
     val info: SourceInfo
