@@ -3,15 +3,21 @@ package com.anilocal.app.ui.more
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
@@ -35,15 +41,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.text.Cue
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.CaptionStyleCompat
+import androidx.media3.ui.SubtitleView
 import com.anilocal.app.BuildConfig
 import com.anilocal.app.domain.model.DownloadQuality
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
+import kotlin.math.roundToInt
 
 @Composable
 fun MoreScreen(
@@ -125,13 +140,19 @@ fun MoreScreen(
         HorizontalDivider()
 
         Text("Subtitles", style = MaterialTheme.typography.titleMedium)
-        Text("Text size: ${(subtitleScale * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
         var sliderScale by remember(subtitleScale) { mutableStateOf(subtitleScale) }
+        // Live preview — reflects the in-progress slider value and the background toggle so the
+        // effect is visible before leaving the screen. Mirrors the player's white-text /
+        // black-outline / optional translucent-box styling (see PlayerScreen).
+        SubtitlePreview(scale = sliderScale, background = subtitleBackground)
+        Text("Text size: ${(sliderScale * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium)
         Slider(
             value = sliderScale,
             onValueChange = { sliderScale = it },
             onValueChangeFinished = { vm.setSubtitleScale(sliderScale) },
             valueRange = 0.6f..2.0f,
+            // 0.6→2.0 in 0.05 (5%) increments: 28 intervals ⇒ 27 inner step ticks.
+            steps = 27,
         )
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Subtitle background", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
@@ -240,6 +261,58 @@ fun MoreScreen(
         }
         OutlinedButton(onClick = onBrowseExtensions, modifier = Modifier.padding(top = 4.dp)) {
             Text("Browse extensions")
+        }
+    }
+}
+
+/**
+ * A scaled-down video frame that renders a sample caption with the EXACT styling and sizing the
+ * player uses: a real [SubtitleView] driven by the same [SubtitleView.setFractionalTextSize]
+ * (DEFAULT_TEXT_SIZE_FRACTION * [scale]) and [CaptionStyleCompat] as PlayerScreen. Because the
+ * caption is sized as a fraction of this frame's height — just as the player sizes it as a fraction
+ * of the video view's height — the preview is to-scale: the caption fills the same proportion of the
+ * frame here that it will on screen. The 16:9 frame is a stand-in for the player surface.
+ */
+@OptIn(UnstableApi::class)
+@Composable
+private fun SubtitlePreview(scale: Float, background: Boolean) {
+    // Centered, capped-width 16:9 frame standing in for the player surface. Width is capped so the
+    // frame stays a thumbnail on wide/landscape screens instead of filling the page; the caption is
+    // still sized as a fraction of THIS frame's height, so its proportion matches the real player.
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .widthIn(max = 460.dp)
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF455A64), Color(0xFF1C242A), Color(0xFF000000)),
+                    )
+                ),
+        ) {
+            AndroidView(
+                factory = { ctx -> SubtitleView(ctx).apply { setApplyEmbeddedStyles(false) } },
+                update = { sv ->
+                    // Mirror PlayerScreen exactly so the preview matches the rendered subtitle 1:1.
+                    sv.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale)
+                    val bg = if (background) android.graphics.Color.argb(160, 0, 0, 0)
+                    else android.graphics.Color.TRANSPARENT
+                    sv.setStyle(
+                        CaptionStyleCompat(
+                            android.graphics.Color.WHITE,
+                            bg,
+                            android.graphics.Color.TRANSPARENT,
+                            CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                            android.graphics.Color.BLACK,
+                            null,
+                        )
+                    )
+                    sv.setCues(listOf(Cue.Builder().setText("Sample subtitle text").build()))
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
