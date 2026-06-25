@@ -1,5 +1,6 @@
 package com.anilocal.app.ui.more
 
+import android.util.TypedValue
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -44,7 +45,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -266,23 +269,32 @@ fun MoreScreen(
 }
 
 /**
- * A scaled-down video frame that renders a sample caption with the EXACT styling and sizing the
- * player uses: a real [SubtitleView] driven by the same [SubtitleView.setFractionalTextSize]
- * (DEFAULT_TEXT_SIZE_FRACTION * [scale]) and [CaptionStyleCompat] as PlayerScreen. Because the
- * caption is sized as a fraction of this frame's height — just as the player sizes it as a fraction
- * of the video view's height — the preview is to-scale: the caption fills the same proportion of the
- * frame here that it will on screen. The 16:9 frame is a stand-in for the player surface.
+ * A scaled-down video frame that previews a sample caption at the SAME PHYSICAL SIZE it will render
+ * on the player. PlayerScreen sizes captions as [SubtitleView.DEFAULT_TEXT_SIZE_FRACTION] * [scale]
+ * of the *full-screen* PlayerView's height. This thumbnail is far shorter than the screen, so sizing
+ * the caption as a fraction of THIS frame would be proportionally correct but physically tiny (~1/4
+ * the on-screen size) — which read as "too small". Instead we compute the caption's absolute pixel
+ * size from the real screen height and pin it with [SubtitleView.setFixedTextSize], so the preview
+ * text is the same physical size the user will see during playback: a true "this is how big your
+ * subtitles will be" preview. Styling (white text, black outline, optional translucent box) mirrors
+ * PlayerScreen exactly.
  */
 @OptIn(UnstableApi::class)
 @Composable
 private fun SubtitlePreview(scale: Float, background: Boolean) {
-    // Centered, capped-width 16:9 frame standing in for the player surface. Width is capped so the
-    // frame stays a thumbnail on wide/landscape screens instead of filling the page; the caption is
-    // still sized as a fraction of THIS frame's height, so its proportion matches the real player.
+    // The player's SubtitleView fills the screen, so its caption height in px is
+    // DEFAULT_TEXT_SIZE_FRACTION * scale * screenHeight. Reproduce that absolute size here (using the
+    // current orientation's height — the same orientation the user previews & plays in).
+    val density = LocalDensity.current
+    val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
+    val captionPx = SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale * screenHeightPx
+    // Centered, capped-width 16:9 frame standing in for the player surface. Capped so it stays a
+    // thumbnail on wide/landscape screens, but wide enough that a player-sized caption has room
+    // instead of wrapping unrealistically in a narrow box.
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Box(
             Modifier
-                .widthIn(max = 460.dp)
+                .widthIn(max = 600.dp)
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
                 .clip(RoundedCornerShape(12.dp))
@@ -295,8 +307,9 @@ private fun SubtitlePreview(scale: Float, background: Boolean) {
             AndroidView(
                 factory = { ctx -> SubtitleView(ctx).apply { setApplyEmbeddedStyles(false) } },
                 update = { sv ->
-                    // Mirror PlayerScreen exactly so the preview matches the rendered subtitle 1:1.
-                    sv.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale)
+                    // Pin the caption to the player's ABSOLUTE on-screen size (px), not a fraction of
+                    // this small frame — so the preview matches the player 1:1 in physical size.
+                    sv.setFixedTextSize(TypedValue.COMPLEX_UNIT_PX, captionPx)
                     val bg = if (background) android.graphics.Color.argb(160, 0, 0, 0)
                     else android.graphics.Color.TRANSPARENT
                     sv.setStyle(
