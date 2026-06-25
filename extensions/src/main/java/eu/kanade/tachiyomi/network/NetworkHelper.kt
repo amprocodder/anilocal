@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.network
 
 import android.content.Context
+import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
 import eu.kanade.tachiyomi.network.interceptor.IgnoreGzipInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UncaughtExceptionInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UserAgentInterceptor
@@ -10,13 +11,11 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * Trimmed vendored NetworkHelper (see VENDORING.md). Upstream also wires a Cloudflare/WebView
- * interceptor, DoH providers, Brotli and HTTP-logging — all dropped here: none are on the
- * stream-resolve path and each drags in code the host deliberately omits (androidx.webkit,
- * okhttp-brotli, a preference framework). Keeps the public surface that AnimeHttpSource and
- * extensions reference: [client] / [cloudflareClient] / [nonCloudflareClient] / [cookieJar] /
- * [defaultUserAgentProvider]. Cloudflare-gated sources simply fail to resolve for now, which the
- * app surfaces as a short hint (its silent-degrade convention); re-add a WebView interceptor later.
+ * Trimmed vendored NetworkHelper (see VENDORING.md). DoH providers, Brotli and HTTP-logging are
+ * dropped (each drags in code the host omits), but the Cloudflare/WebView bypass IS wired back in
+ * via [CloudflareInterceptor] (plain android.webkit, no androidx.webkit) so CF-gated sources can
+ * resolve. Keeps the public surface that AnimeHttpSource and extensions reference: [client] /
+ * [cloudflareClient] / [nonCloudflareClient] / [cookieJar] / [defaultUserAgentProvider].
  */
 class NetworkHelper(
     context: Context,
@@ -37,6 +36,9 @@ class NetworkHelper(
         )
         .addInterceptor(UncaughtExceptionInterceptor())
         .addInterceptor(UserAgentInterceptor(::defaultUserAgentProvider))
+        // After UserAgentInterceptor so it sees the applied User-Agent (cf_clearance is UA-bound and
+        // the WebView must solve under the same UA the retried request will send).
+        .addInterceptor(CloudflareInterceptor(context, cookieJar, ::defaultUserAgentProvider))
         .addNetworkInterceptor(IgnoreGzipInterceptor())
         .build()
 

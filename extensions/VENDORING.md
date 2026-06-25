@@ -13,10 +13,13 @@ these classes via the child-first class loader (Phase 3).
 
 ## What was trimmed / adapted (not on the stream-resolve path)
 - **`source/*` (manga API)** — not fetched; anime extensions implement `animesource.*` only.
-- **`NetworkHelper`** — rewritten minimal: dropped the Cloudflare/WebView interceptor, DoH providers,
-  Brotli and HTTP logging. Keeps `client` / `cloudflareClient` / `nonCloudflareClient` / `cookieJar` /
-  `defaultUserAgentProvider`. (Cloudflare-gated sources won't resolve until a WebView interceptor is
-  re-added.)
+- **`NetworkHelper`** — rewritten minimal: dropped DoH providers, Brotli and HTTP logging. Keeps
+  `client` / `cloudflareClient` / `nonCloudflareClient` / `cookieJar` / `defaultUserAgentProvider`.
+  The **Cloudflare/WebView bypass is re-added** (`network/interceptor/CloudflareInterceptor.kt` +
+  `WebViewInterceptor.kt` + `util/system/WebViewUtil.kt`), ported to plain `android.webkit` (no
+  androidx.webkit) and `android.util.Log` (no logcat); it solves the JS challenge in a headless
+  WebView and re-supplies the fresh `cf_clearance` cookie via [AndroidCookieJar]. On failure/timeout
+  or when WebView is unavailable it degrades silently (never throws past the host's runCatching).
 - **`NetworkPreferences`** — rewritten to drop the `tachiyomi.core.common.preference` framework.
 - **`PreferenceScreen`** — KMP `expect`/`actual` flattened to a single typealias.
 - **`AnimeFilterList`** — dropped the `@androidx.compose.runtime.Stable` annotation (no Compose here).
