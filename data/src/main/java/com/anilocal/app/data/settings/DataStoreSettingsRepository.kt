@@ -25,6 +25,7 @@ class DataStoreSettingsRepository @Inject constructor(
 
     private object Keys {
         val AUTO_SKIP = booleanPreferencesKey("auto_skip")
+        val AUTO_PLAY_NEXT = booleanPreferencesKey("auto_play_next")
         val WIFI_ONLY = booleanPreferencesKey("wifi_only_downloads")
         val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality")
         val SUBTITLE_SCALE = floatPreferencesKey("subtitle_scale")
@@ -41,6 +42,13 @@ class DataStoreSettingsRepository @Inject constructor(
 
     override suspend fun setAutoSkip(enabled: Boolean) {
         context.dataStore.edit { it[Keys.AUTO_SKIP] = enabled }
+    }
+
+    override val autoPlayNext: Flow<Boolean> =
+        context.dataStore.data.map { it[Keys.AUTO_PLAY_NEXT] ?: true }
+
+    override suspend fun setAutoPlayNext(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.AUTO_PLAY_NEXT] = enabled }
     }
 
     override val wifiOnlyDownloads: Flow<Boolean> =

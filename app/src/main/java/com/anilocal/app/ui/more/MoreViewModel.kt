@@ -34,6 +34,9 @@ class MoreViewModel @Inject constructor(
     val autoSkip: StateFlow<Boolean> =
         settings.autoSkip.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    val autoPlayNext: StateFlow<Boolean> =
+        settings.autoPlayNext.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
     val wifiOnly: StateFlow<Boolean> =
         settings.wifiOnlyDownloads.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
@@ -62,6 +65,8 @@ class MoreViewModel @Inject constructor(
     val syncStatus: StateFlow<String?> = _syncStatus
 
     fun setAutoSkip(enabled: Boolean) = viewModelScope.launch { settings.setAutoSkip(enabled) }
+
+    fun setAutoPlayNext(enabled: Boolean) = viewModelScope.launch { settings.setAutoPlayNext(enabled) }
 
     fun setWifiOnly(enabled: Boolean) = viewModelScope.launch { settings.setWifiOnlyDownloads(enabled) }
 

@@ -72,6 +72,7 @@ fun MoreScreen(
     val context = LocalContext.current
     val user by vm.user.collectAsStateWithLifecycle()
     val autoSkip by vm.autoSkip.collectAsStateWithLifecycle()
+    val autoPlayNext by vm.autoPlayNext.collectAsStateWithLifecycle()
     val wifiOnly by vm.wifiOnly.collectAsStateWithLifecycle()
     val downloadQuality by vm.downloadQuality.collectAsStateWithLifecycle()
     val subtitleScale by vm.subtitleScale.collectAsStateWithLifecycle()
@@ -116,6 +117,17 @@ fun MoreScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Switch(checked = autoSkip, onCheckedChange = vm::setAutoSkip)
+        }
+        HorizontalDivider()
+
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Auto-play next episode", style = MaterialTheme.typography.bodyLarge)
+                Text("Start the next episode automatically when one ends",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = autoPlayNext, onCheckedChange = vm::setAutoPlayNext)
         }
         HorizontalDivider()
 

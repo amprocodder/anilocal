@@ -8,6 +8,10 @@ interface SettingsRepository {
     val autoSkip: Flow<Boolean>
     suspend fun setAutoSkip(enabled: Boolean)
 
+    /** When true, the next episode auto-plays when the current one ends. */
+    val autoPlayNext: Flow<Boolean>
+    suspend fun setAutoPlayNext(enabled: Boolean)
+
     /** When true, downloads only run on unmetered (WiFi) networks. */
     val wifiOnlyDownloads: Flow<Boolean>
     suspend fun setWifiOnlyDownloads(enabled: Boolean)

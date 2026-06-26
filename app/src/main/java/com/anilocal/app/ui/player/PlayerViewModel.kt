@@ -57,7 +57,7 @@ import javax.inject.Named
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     @ApplicationContext context: Context,
-    savedState: SavedStateHandle,
+    private val savedState: SavedStateHandle,
     // Stored (not just used at player construction) so [play] can build the per-subtitle
     // SingleSampleMediaSource from the same cache-backed factory the video reads through.
     private val cacheDataSourceFactory: CacheDataSource.Factory,
@@ -75,10 +75,13 @@ class PlayerViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val animeId: String = checkNotNull(savedState["animeId"])
-    private val episodeNumber: Int = checkNotNull(savedState["episodeNumber"])
+    // Mutable so auto-play-next can advance through a season in place (same player/surface). Mirrored
+    // back into the SavedStateHandle on each advance so a process-death restore resumes the right episode.
+    private var episodeNumber: Int = checkNotNull(savedState["episodeNumber"])
 
-    // Optional resume point (ms) passed from Continue Watching; 0 means start from the beginning.
-    private val startMs: Long = savedState["startMs"] ?: 0L
+    // Resume point (ms) for the CURRENT episode. Seeded from the Continue-Watching arg for the first
+    // episode; reset to 0 when we auto-advance so each subsequent episode starts from the beginning.
+    private var resumeFromMs: Long = savedState["startMs"] ?: 0L
 
     // Subtitle parsing is kept OFF the extraction path: a sideloaded caption is decoded at render
     // time by the TextRenderer instead, so a malformed/mis-typed sidecar fails *there* (logged, the
@@ -139,9 +142,15 @@ class PlayerViewModel @Inject constructor(
     private var currentUri: String? = null
     private var autoSkipEnabled = true
     private val autoSkipped = mutableSetOf<Long>()
+    // Auto-play-next state: the season's episode count (from AniList detail, null until known), the user
+    // toggle, and a re-entrancy guard so a single STATE_ENDED advances exactly once.
+    private var totalEpisodes: Int? = null
+    private var autoPlayNextEnabled = true
+    private var advancing = false
 
     init {
         viewModelScope.launch { settings.autoSkip.collect { autoSkipEnabled = it } }
+        viewModelScope.launch { settings.autoPlayNext.collect { autoPlayNextEnabled = it } }
 
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
@@ -152,9 +161,15 @@ class PlayerViewModel @Inject constructor(
                         _markers.value = runCatching { skip.markers(idMal, episodeNumber, lengthSec) }
                             .getOrDefault(emptyList())
                     }
-                } else if (state == Player.STATE_ENDED) {
-                    // Finished — drop it from Continue Watching so it doesn't linger near 100%.
-                    summary?.let { s -> viewModelScope.launch { progress.remove(s.id) } }
+                } else if (state == Player.STATE_ENDED && !advancing) {
+                    // Finished — auto-play the next episode if there is one (and the user wants it),
+                    // otherwise drop it from Continue Watching so it doesn't linger near 100%. The guard
+                    // stops a repeated STATE_ENDED from kicking off two advances.
+                    advancing = true
+                    viewModelScope.launch {
+                        runCatching { advanceToNextOrFinish() }
+                        advancing = false
+                    }
                 }
             }
 
@@ -205,6 +220,7 @@ class PlayerViewModel @Inject constructor(
         val detail = runCatching { catalog.detail(animeId) }
             .getOrElse { _error.value = "Couldn't load title details (no connection?)"; return }
         idMal = detail.idMal
+        detail.episodes.size.takeIf { it > 0 }?.let { totalEpisodes = it }
         summary = AnimeSummary(detail.id, detail.title, detail.posterUrl, detail.idMal)
         val stream = runCatching { streams.resolveStream(detail.title, episodeNumber) }
             .getOrElse { _error.value = "No stream from the selected source for \"${detail.title}\""; return }
@@ -277,9 +293,47 @@ class PlayerViewModel @Inject constructor(
             if (subSources.isEmpty()) videoSource
             else MergingMediaSource(*(listOf(videoSource) + subSources).toTypedArray())
 
-        if (startMs > 0) player.setMediaSource(media, startMs) else player.setMediaSource(media)
+        if (resumeFromMs > 0) player.setMediaSource(media, resumeFromMs) else player.setMediaSource(media)
         player.prepare()
         player.playWhenReady = true
+    }
+
+    // Advance to the next episode in place (reusing the same player) when the current one ends, or end
+    // the session by dropping it from Continue Watching when there's nothing after it.
+    private suspend fun advanceToNextOrFinish() {
+        val next = episodeNumber + 1
+        if (autoPlayNextEnabled && hasEpisode(next)) {
+            playEpisode(next)
+        } else {
+            summary?.let { progress.remove(it.id) }
+        }
+    }
+
+    // Reset per-episode state and (re)resolve the given episode's stream into the existing player.
+    // load() itself re-picks offline vs online, so a downloaded next episode plays from cache.
+    private suspend fun playEpisode(number: Int) {
+        episodeNumber = number
+        savedState["episodeNumber"] = number
+        resumeFromMs = 0L
+        _markers.value = emptyList()
+        autoSkipped.clear()
+        _position.value = 0L
+        _error.value = null
+        _offline.value = false
+        currentUri = null
+        runCatching { load() }
+            .onFailure { _error.value = "Couldn't start episode $number: ${it.message ?: it.javaClass.simpleName}" }
+    }
+
+    // Is there an episode [number] to advance into? A downloaded copy always counts; otherwise it must
+    // be within the title's AniList episode count (fetched once, lazily, then cached).
+    private suspend fun hasEpisode(number: Int): Boolean {
+        if (number < 1) return false
+        if (runCatching { downloads.getOffline(animeId, number) }.getOrNull() != null) return true
+        val total = totalEpisodes
+            ?: runCatching { catalog.detail(animeId).episodes.size }.getOrNull()
+                ?.takeIf { it > 0 }?.also { totalEpisodes = it }
+        return total != null && number <= total
     }
 
     private fun maybeAutoSkip(pos: Long) {
