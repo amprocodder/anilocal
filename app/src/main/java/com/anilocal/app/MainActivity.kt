@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.NavigationBar
@@ -55,6 +57,9 @@ private fun AppRoot() {
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val showBottomBar = TopTab.entries.any { it.route == currentRoute }
+    // The player is fullscreen/immersive — it must bleed under where the system bars were, so it gets
+    // no Scaffold content padding (deterministic, vs. relying on bar-hiding to collapse the insets).
+    val isPlayer = currentRoute == Routes.PLAYER
 
     Scaffold(
         bottomBar = {
@@ -92,7 +97,7 @@ private fun AppRoot() {
         NavHost(
             navController = nav,
             startDestination = TopTab.Home.route,
-            modifier = Modifier.padding(padding),
+            modifier = if (isPlayer) Modifier else Modifier.padding(padding),
         ) {
             composable(TopTab.Home.route) {
                 HomeScreen(
@@ -141,6 +146,12 @@ private fun AppRoot() {
                     navArgument("episodeNumber") { type = NavType.IntType },
                     navArgument("startMs") { type = NavType.LongType; defaultValue = 0L },
                 ),
+                // Instant cut in/out — the video SurfaceView can't alpha-fade with the Compose chrome,
+                // so a default fade desyncs (UI fades while the frame lingers). No transition = no desync.
+                enterTransition = { EnterTransition.None },
+                exitTransition = { ExitTransition.None },
+                popEnterTransition = { EnterTransition.None },
+                popExitTransition = { ExitTransition.None },
             ) {
                 PlayerScreen(onBack = { nav.popBackStack() })
             }

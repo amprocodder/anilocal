@@ -3,6 +3,7 @@ package com.anilocal.app.ui.player
 import android.content.Context
 import android.net.Uri
 import android.os.Looper
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -12,6 +13,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackGroup
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -25,10 +29,12 @@ import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.SingleSampleMediaSource
 import androidx.media3.exoplayer.text.TextOutput
 import androidx.media3.exoplayer.text.TextRenderer
+import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.OfflineEpisode
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.Subtitle
+import com.anilocal.app.domain.model.VideoStream
 import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.ProgressRepository
@@ -38,6 +44,7 @@ import com.anilocal.app.domain.repo.StreamRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -50,8 +57,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Named
+
+/** A selectable subtitle (text) track surfaced to the UI — no Media3 types cross into Compose. */
+data class PlayerTextTrack(val label: String, val selected: Boolean)
 
 @OptIn(UnstableApi::class)
 @HiltViewModel
@@ -94,7 +105,8 @@ class PlayerViewModel @Inject constructor(
 
     // Player reads downloaded bytes from the offline cache, falling through to network online.
     // 1.4.1 has no DefaultRenderersFactory shortcut to enable legacy (render-time) text decoding, so
-    // override buildTextRenderers to flip it on the TextRenderer it builds.
+    // override buildTextRenderers to flip it on the TextRenderer it builds. The seek increments back
+    // the overlay's rewind/forward buttons (defaults are 5s/15s, so they're set explicitly to 10s).
     val player: ExoPlayer = ExoPlayer.Builder(
         context,
         object : DefaultRenderersFactory(context) {
@@ -112,6 +124,8 @@ class PlayerViewModel @Inject constructor(
             }
         },
     )
+        .setSeekBackIncrementMs(10_000L)
+        .setSeekForwardIncrementMs(10_000L)
         .setMediaSourceFactory(mediaSourceFactory)
         .build()
 
@@ -127,14 +141,46 @@ class PlayerViewModel @Inject constructor(
     private val _position = MutableStateFlow(0L)
     val position: StateFlow<Long> = _position
 
+    // Secondary "buffered ahead" position for the seek bar's buffered fill (no Flow on the player).
+    private val _bufferedPosition = MutableStateFlow(0L)
+    val bufferedPosition: StateFlow<Long> = _bufferedPosition
+
+    // Coerced episode duration (0 until known / for live), shared by the seek bar range and seek clamps.
+    private val _duration = MutableStateFlow(0L)
+    val duration: StateFlow<Long> = _duration
+
+    private val _isPlaying = MutableStateFlow(false)
+    val isPlaying: StateFlow<Boolean> = _isPlaying
+
     private val _offline = MutableStateFlow(false)
     val offline: StateFlow<Boolean> = _offline
+
+    // Episode title (e.g. "My Title · E3") shown in the overlay's top bar.
+    private val _title = MutableStateFlow("")
+    val title: StateFlow<String> = _title
+
+    // Prev/next-episode button enablement.
+    private val _hasPrev = MutableStateFlow(episodeNumber > 1)
+    val hasPrev: StateFlow<Boolean> = _hasPrev
+    private val _hasNext = MutableStateFlow(false)
+    val hasNext: StateFlow<Boolean> = _hasNext
+
+    // Subtitle (CC) tracks for the overlay's caption menu, plus whether captions are currently Off.
+    private val _textTracks = MutableStateFlow<List<PlayerTextTrack>>(emptyList())
+    val textTracks: StateFlow<List<PlayerTextTrack>> = _textTracks
+    private val _textDisabled = MutableStateFlow(false)
+    val textDisabled: StateFlow<Boolean> = _textDisabled
+    // Index-aligned with [_textTracks]: the real (TrackGroup, trackIndex) each UI row selects.
+    private var textGroups: List<Pair<TrackGroup, Int>> = emptyList()
 
     val subtitleScale: StateFlow<Float> =
         settings.subtitleScale.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 1f)
     val subtitleBackground: StateFlow<Boolean> =
         settings.subtitleBackground.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    // Title metadata, memoized: animeId is fixed for the VM's whole life, so AniList detail need run
+    // at most once — auto-advance and hasEpisode() reuse it instead of re-fetching per episode.
+    private var detail: AnimeDetail? = null
     private var summary: AnimeSummary? = null
     private var idMal: Int? = null
     // Last URI handed to the player, appended to playback errors so an unparseable/odd stream URL is
@@ -148,19 +194,32 @@ class PlayerViewModel @Inject constructor(
     private var autoPlayNextEnabled = true
     private var advancing = false
 
+    // Background-resolved next episode (keyed by number; a Deferred so a racing advance joins it
+    // instead of restarting the multi-second source resolve). Consumed/cancelled in load().
+    private var prefetched: Pair<Int, Deferred<VideoStream?>>? = null
+
+    // AniSkip markers are fetched once per episode, but only after a RELIABLE duration is known — at
+    // the first STATE_READY the duration is often still TIME_UNSET, which would disable AniSkip's
+    // length filter and return a wrong-cut variant (the "skips 30s in" bug). Drive the fetch from the
+    // tick loop instead of a single STATE_READY edge so a first empty result can still retry.
+    private var markersFetched = false
+    private var firstReadyAtMs = 0L
+
+    // True once play() has attached the CURRENT episode's media. Background progress saves (the tick
+    // loop, the pause handler, onCleared) are gated on this so they never write the player's position
+    // against a mismatched episodeNumber during an episode switch / resolve window.
+    private var episodeLoaded = false
+
     init {
         viewModelScope.launch { settings.autoSkip.collect { autoSkipEnabled = it } }
         viewModelScope.launch { settings.autoPlayNext.collect { autoPlayNextEnabled = it } }
 
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
-                // Online path resolves skip windows once duration is known.
-                if (state == Player.STATE_READY && _markers.value.isEmpty() && !_offline.value) {
-                    val lengthSec = player.duration.coerceAtLeast(0) / 1000
-                    viewModelScope.launch {
-                        _markers.value = runCatching { skip.markers(idMal, episodeNumber, lengthSec) }
-                            .getOrDefault(emptyList())
-                    }
+                if (state == Player.STATE_READY && !_offline.value) {
+                    // Online: once playing, resolve the next episode's stream in the background so the
+                    // auto-advance / Next button transition isn't stalled on a fresh source resolve.
+                    prefetchNext()
                 } else if (state == Player.STATE_ENDED && !advancing) {
                     // Finished — auto-play the next episode if there is one (and the user wants it),
                     // otherwise drop it from Continue Watching so it doesn't linger near 100%. The guard
@@ -174,10 +233,13 @@ class PlayerViewModel @Inject constructor(
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                _isPlaying.value = isPlaying
                 // Capture the resume point when the user pauses (scope still alive here; the final
                 // save on teardown is handled separately in onCleared via appScope).
                 if (!isPlaying) viewModelScope.launch { saveProgress() }
             }
+
+            override fun onTracksChanged(tracks: Tracks) = rebuildTextTracks(tracks)
 
             override fun onPlayerError(e: PlaybackException) {
                 // A transport/decode failure (e.g. the stream URL won't load) would otherwise leave
@@ -198,11 +260,13 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             var tick = 0
             while (isActive) {
-                val pos = player.currentPosition
-                _position.value = pos
-                maybeAutoSkip(pos)
-                if (++tick % 15 == 0) saveProgress()   // ~ every 6s
-                delay(400)
+                _position.value = player.currentPosition
+                _bufferedPosition.value = player.bufferedPosition
+                _duration.value = player.duration.let { if (it == C.TIME_UNSET || it < 0) 0L else it }
+                maybeAutoSkip(player.currentPosition)
+                maybeFetchMarkers()
+                if (++tick % 20 == 0) saveProgress()   // ~ every 6s
+                delay(300)
             }
         }
     }
@@ -214,23 +278,42 @@ class PlayerViewModel @Inject constructor(
             playOffline(cached)
             return
         }
-        // Online: AniList detail → resolve stream → (AniSkip markers come on STATE_READY).
-        // Don't swallow failures into a silent return — a blank surface with no reason is the bug we
-        // keep hitting. Surface a short hint so the failing leg (metadata vs. stream) is obvious.
-        val detail = runCatching { catalog.detail(animeId) }
-            .getOrElse { _error.value = "Couldn't load title details (no connection?)"; return }
-        idMal = detail.idMal
-        detail.episodes.size.takeIf { it > 0 }?.let { totalEpisodes = it }
-        summary = AnimeSummary(detail.id, detail.title, detail.posterUrl, detail.idMal)
-        val stream = runCatching { streams.resolveStream(detail.title, episodeNumber) }
-            .getOrElse { _error.value = "No stream from the selected source for \"${detail.title}\""; return }
+        // Online: AniList detail (once) → resolve stream (prefetched if available) → markers on the tick
+        // loop. Don't swallow failures into a silent return — a blank surface with no reason is the bug
+        // we keep hitting. Surface a short hint so the failing leg (metadata vs. stream) is obvious.
+        val d = ensureTitle()
+            ?: run { _error.value = "Couldn't load title details (no connection?)"; return }
+        // Consume a prefetch resolved for THIS episode; cancel a stale one (e.g. a manual non-adjacent
+        // jump where the prefetched ep+1 no longer matches). Read before nulling.
+        val pre = prefetched?.takeIf { it.first == episodeNumber }?.second
+        prefetched?.let { if (it.first != episodeNumber) it.second.cancel() }
+        prefetched = null
+        val stream = pre?.let { runCatching { it.await() }.getOrNull() }
+            ?: runCatching { streams.resolveStream(d.title, episodeNumber) }
+                .getOrElse { _error.value = "No stream from the selected source for \"${d.title}\""; return }
         play(stream.url, stream.mimeType, stream.subtitles, stream.headers)
+    }
+
+    // Resolve the title's AniList detail at most once; populate idMal/totalEpisodes/summary/title.
+    private suspend fun ensureTitle(): AnimeDetail? {
+        detail?.let { return it }
+        val d = runCatching { catalog.detail(animeId) }.getOrNull() ?: return null
+        detail = d
+        idMal = d.idMal
+        d.episodes.size.takeIf { it > 0 }?.let { totalEpisodes = it }
+        summary = AnimeSummary(d.id, d.title, d.posterUrl, d.idMal)
+        _title.value = "${d.title} · E$episodeNumber"
+        updateNavState()
+        return d
     }
 
     private suspend fun playOffline(ep: OfflineEpisode) {
         idMal = ep.idMal
         summary = AnimeSummary(animeId, ep.title, ep.posterUrl, ep.idMal)
+        _title.value = "${ep.title} · E$episodeNumber"
+        updateNavState()
         _markers.value = ep.markers
+        markersFetched = true   // offline markers come from the cached record; don't re-fetch online.
         play(ep.streamUri, ep.mimeType, ep.subtitles)
     }
 
@@ -269,7 +352,7 @@ class PlayerViewModel @Inject constructor(
         // Resolve each subtitle's real format BEFORE attaching it. Many sources (AnimeOnsen) serve a
         // sidecar at an extension-less URL; declaring it VTT by default makes the WebVTT decoder drop
         // every cue. resolveSubtitleMime sniffs the content when the path has no known suffix. Sniffed
-        // in parallel (tiny files), so it adds at most one round-trip to playback start.
+        // in parallel (tiny files) and bounded by a timeout, so it adds at most one short round-trip.
         val subMimes = coroutineScope { subtitles.map { sub -> async { resolveSubtitleMime(sub.url) } }.awaitAll() }
         val subFactory = SingleSampleMediaSource.Factory(cacheDataSourceFactory)
             .setTreatLoadErrorsAsEndOfStream(true)
@@ -296,6 +379,22 @@ class PlayerViewModel @Inject constructor(
         if (resumeFromMs > 0) player.setMediaSource(media, resumeFromMs) else player.setMediaSource(media)
         player.prepare()
         player.playWhenReady = true
+        episodeLoaded = true   // re-enable background progress saves now that the new media is attached.
+    }
+
+    // Resolve the next episode's stream in the background so the advance/Next transition isn't stalled
+    // on a fresh source resolve. One-shot per next-episode (STATE_READY fires repeatedly after seeks).
+    private fun prefetchNext() {
+        val next = episodeNumber + 1
+        if (prefetched?.first == next) return
+        prefetched?.second?.cancel()
+        val titleText = detail?.title ?: run { prefetched = null; return }
+        prefetched = next to viewModelScope.async(Dispatchers.IO) {
+            // MUST runCatching: an unawaited Deferred that throws is still an uncaught exception.
+            if (!hasEpisode(next)) return@async null
+            if (runCatching { downloads.getOffline(animeId, next) }.getOrNull() != null) return@async null
+            runCatching { streams.resolveStream(titleText, next) }.getOrNull()
+        }
     }
 
     // Advance to the next episode in place (reusing the same player) when the current one ends, or end
@@ -310,30 +409,47 @@ class PlayerViewModel @Inject constructor(
     }
 
     // Reset per-episode state and (re)resolve the given episode's stream into the existing player.
-    // load() itself re-picks offline vs online, so a downloaded next episode plays from cache.
+    // load() itself re-picks offline vs online (and consumes/cancels any prefetch), so a downloaded
+    // next episode plays from cache. The memoized title (detail/summary) is NOT reset — same title.
     private suspend fun playEpisode(number: Int) {
+        // Persist the OUTGOING episode first — episodeNumber still points at it and the player still
+        // holds its media, so this records the right (anime, episode, position). Then stop background
+        // saves and pause the old stream so it doesn't keep playing / keep getting saved against the
+        // new number during the (possibly multi-second) resolve.
+        saveProgress()
+        episodeLoaded = false
+        player.pause()
         episodeNumber = number
         savedState["episodeNumber"] = number
         resumeFromMs = 0L
         _markers.value = emptyList()
+        markersFetched = false
+        firstReadyAtMs = 0L
         autoSkipped.clear()
         _position.value = 0L
+        _bufferedPosition.value = 0L
+        _duration.value = 0L
         _error.value = null
         _offline.value = false
         currentUri = null
+        detail?.let { _title.value = "${it.title} · E$number" }
+        updateNavState()
         runCatching { load() }
             .onFailure { _error.value = "Couldn't start episode $number: ${it.message ?: it.javaClass.simpleName}" }
     }
 
     // Is there an episode [number] to advance into? A downloaded copy always counts; otherwise it must
-    // be within the title's AniList episode count (fetched once, lazily, then cached).
+    // be within the title's AniList episode count (via the memoized detail, not a fresh fetch).
     private suspend fun hasEpisode(number: Int): Boolean {
         if (number < 1) return false
         if (runCatching { downloads.getOffline(animeId, number) }.getOrNull() != null) return true
-        val total = totalEpisodes
-            ?: runCatching { catalog.detail(animeId).episodes.size }.getOrNull()
-                ?.takeIf { it > 0 }?.also { totalEpisodes = it }
+        val total = totalEpisodes ?: run { ensureTitle(); totalEpisodes }
         return total != null && number <= total
+    }
+
+    private fun updateNavState() {
+        _hasPrev.value = episodeNumber > 1
+        _hasNext.value = totalEpisodes?.let { episodeNumber < it } ?: false
     }
 
     private fun maybeAutoSkip(pos: Long) {
@@ -342,7 +458,43 @@ class PlayerViewModel @Inject constructor(
         if (autoSkipped.add(active.startMs)) player.seekTo(active.endMs)
     }
 
+    // Fetch AniSkip markers exactly once per episode, but only after a RELIABLE (>0) duration is known
+    // (so the length-matched query pins us to the same cut). After a short grace, accept a still-unknown
+    // duration (length=0, best-effort) so the Skip control never wedges to "never appears".
+    private fun maybeFetchMarkers() {
+        if (markersFetched || _offline.value) return
+        if (player.playbackState != Player.STATE_READY) return
+        if (firstReadyAtMs == 0L) firstReadyAtMs = SystemClock.elapsedRealtime()
+        val durMs = player.duration
+        val durKnown = durMs > 0
+        if (!durKnown && SystemClock.elapsedRealtime() - firstReadyAtMs < MARKER_GRACE_MS) return
+        markersFetched = true   // set before the suspend fetch so the next tick doesn't double-fire.
+        val lengthSec = durMs.coerceAtLeast(0) / 1000
+        val ep = episodeNumber
+        viewModelScope.launch {
+            val m = runCatching { skip.markers(idMal, ep, lengthSec) }.getOrDefault(emptyList())
+            if (episodeNumber == ep && !_offline.value) _markers.value = m
+        }
+    }
+
+    private fun rebuildTextTracks(tracks: Tracks) {
+        val ui = mutableListOf<PlayerTextTrack>()
+        val groups = mutableListOf<Pair<TrackGroup, Int>>()
+        tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEach { g ->
+            for (i in 0 until g.length) {
+                if (!g.isTrackSupported(i)) continue
+                val f = g.getTrackFormat(i)
+                ui.add(PlayerTextTrack(f.label ?: f.language ?: "Track ${i + 1}", g.isTrackSelected(i)))
+                groups.add(g.mediaTrackGroup to i)
+            }
+        }
+        textGroups = groups
+        _textTracks.value = ui
+        _textDisabled.value = player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
+    }
+
     private suspend fun saveProgress() {
+        if (!episodeLoaded) return   // mid-switch: player position doesn't match episodeNumber yet.
         val s = summary ?: return
         persist(s, player.currentPosition, player.duration.coerceAtLeast(0))
     }
@@ -356,7 +508,59 @@ class PlayerViewModel @Inject constructor(
         progress.save(s, episodeNumber, pos, dur)
     }
 
-    fun seekPast(marker: SkipMarker) = player.seekTo(marker.endMs)
+    // ---- Overlay control surface --------------------------------------------------------------
+
+    fun togglePlay() { if (player.isPlaying) player.pause() else player.play() }
+
+    fun seekBack() = player.seekBack()
+
+    fun seekForward() = player.seekForward()
+
+    fun seekTo(positionMs: Long) {
+        val target = positionMs.coerceIn(0L, player.duration.coerceAtLeast(0L))
+        // Treat a window the user deliberately seeks into as already consumed, so auto-skip doesn't
+        // immediately yank them straight back out of it.
+        _markers.value.firstOrNull { target in it.startMs until it.endMs }?.let { autoSkipped.add(it.startMs) }
+        player.seekTo(target)
+        _position.value = target
+    }
+
+    // 'advancing' serializes every episode switch (manual prev/next AND the STATE_ENDED auto-advance),
+    // so a double-tap or a tap-then-STATE_ENDED can't launch two concurrent playEpisode/load passes.
+    fun goNext() {
+        if (advancing || !_hasNext.value) return
+        advancing = true
+        viewModelScope.launch { try { playEpisode(episodeNumber + 1) } finally { advancing = false } }
+    }
+
+    fun goPrev() {
+        if (advancing || episodeNumber <= 1) return
+        advancing = true
+        viewModelScope.launch { try { playEpisode(episodeNumber - 1) } finally { advancing = false } }
+    }
+
+    fun selectTextTrack(index: Int) {
+        val (group, trackIndex) = textGroups.getOrNull(index) ?: return
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .setOverrideForType(TrackSelectionOverride(group, trackIndex))
+            .build()
+        _textDisabled.value = false
+    }
+
+    fun disableTextTrack() {
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+        _textDisabled.value = true
+    }
+
+    /** Manual Skip-Intro/Outro button — jump past the active window. */
+    fun seekPast(marker: SkipMarker) {
+        autoSkipped.add(marker.startMs)
+        player.seekTo(marker.endMs)
+    }
 
     override fun onCleared() {
         // viewModelScope is already cancelled here, so persist the final position on the app scope
@@ -364,20 +568,27 @@ class PlayerViewModel @Inject constructor(
         val s = summary
         val pos = player.currentPosition
         val dur = player.duration.coerceAtLeast(0)
-        if (s != null) appScope.launch { persist(s, pos, dur) }
+        // Only persist if the current media matches episodeNumber (not mid-switch) — the outgoing
+        // episode was already saved at the top of playEpisode().
+        if (s != null && episodeLoaded) appScope.launch { persist(s, pos, dur) }
         player.release()
     }
 
     private companion object {
         const val END_THRESHOLD_MS = 5_000L
+        const val MARKER_GRACE_MS = 2_500L
+        const val SNIFF_TIMEOUT_MS = 1_500L
     }
 
     // Resolve a subtitle's MIME: trust a known file extension on the URL path, else sniff the actual
     // bytes (some sources — e.g. AnimeOnsen — serve ASS at an extension-less API URL, and declaring it
-    // VTT makes the WebVTT decoder silently drop every cue). VTT is the last-resort fallback, since a
-    // SubtitleConfiguration requires a non-null mime.
+    // VTT makes the WebVTT decoder silently drop every cue). The sniff is bounded by a timeout so a
+    // slow/hung sidecar can't stall playback start; VTT is the last-resort fallback (a
+    // SubtitleConfiguration requires a non-null mime).
     private suspend fun resolveSubtitleMime(url: String): String =
-        subtitleMimeByPath(url) ?: sniffSubtitleMime(url) ?: MimeTypes.TEXT_VTT
+        subtitleMimeByPath(url)
+            ?: withTimeoutOrNull(SNIFF_TIMEOUT_MS) { sniffSubtitleMime(url) }
+            ?: MimeTypes.TEXT_VTT
 
     // Classify by the URL *path* only (ignoring any "?token=…" query), or null if the suffix is unknown.
     private fun subtitleMimeByPath(url: String): String? {
