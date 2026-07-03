@@ -42,7 +42,8 @@ fun SeekBar(
     onScrubFinished: (Long) -> Unit,
     onScrubCancel: () -> Unit = {},
     modifier: Modifier = Modifier,
-    accent: Color = Color(0xFFE5256B),
+    // No default: callers pass the theme accent (a hex default here would drift from Theme.kt).
+    accent: Color,
 ) {
     val density = LocalDensity.current
     val trackH = with(density) { 4.dp.toPx() }
@@ -52,8 +53,10 @@ fun SeekBar(
     var scrubMs by remember { mutableStateOf<Long?>(null) }
     val shown = (scrubMs ?: positionMs).coerceIn(0L, if (known) durationMs else 0L)
 
-    val cTrack = Color.White.copy(alpha = 0.25f)
-    val cBuffer = Color.White.copy(alpha = 0.45f)
+    // AniLab track palette: dark unplayed, lighter buffered, accent fill, white scrubber.
+    val cTrack = Color(0xFF3C3F4A)
+    val cBuffer = Color(0xFF4E5160)
+    val cThumb = Color.White
     val cIntro = Color(0xFF4CAF50).copy(alpha = 0.65f)
     val cOutro = Color(0xFFFF9800).copy(alpha = 0.65f)
 
@@ -106,8 +109,8 @@ fun SeekBar(
             // 4) played fill
             val px = fx(shown).coerceIn(0f, w)
             drawRoundRect(accent, Offset(0f, top), Size(px, trackH), corner)
-            // 5) thumb
-            drawCircle(accent, thumbR, Offset(px, cy))
+            // 5) thumb (white, AniLab-style)
+            drawCircle(cThumb, thumbR, Offset(px, cy))
         }
     }
 }

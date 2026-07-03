@@ -31,6 +31,7 @@ import androidx.media3.exoplayer.text.TextOutput
 import androidx.media3.exoplayer.text.TextRenderer
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
+import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.OfflineEpisode
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.Subtitle
@@ -53,6 +54,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -86,9 +88,16 @@ class PlayerViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val animeId: String = checkNotNull(savedState["animeId"])
-    // Mutable so auto-play-next can advance through a season in place (same player/surface). Mirrored
-    // back into the SavedStateHandle on each advance so a process-death restore resumes the right episode.
-    private var episodeNumber: Int = checkNotNull(savedState["episodeNumber"])
+
+    // The episode currently loaded — the single source of truth, observable by the UI (the overlay's
+    // "Episode N" label and the episode picker's highlighted row). Mutable so auto-play-next can
+    // advance through a season in place (same player/surface); mirrored back into the
+    // SavedStateHandle on each advance so a process-death restore resumes the right episode.
+    private val _currentEpisode = MutableStateFlow<Int>(checkNotNull(savedState["episodeNumber"]))
+    val currentEpisode: StateFlow<Int> = _currentEpisode
+    private var episodeNumber: Int
+        get() = _currentEpisode.value
+        set(value) { _currentEpisode.value = value }
 
     // Resume point (ms) for the CURRENT episode. Seeded from the Continue-Watching arg for the first
     // episode; reset to 0 when we auto-advance so each subsequent episode starts from the beginning.
@@ -152,12 +161,25 @@ class PlayerViewModel @Inject constructor(
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying
 
+    // True while the player is rebuffering — drives the centered spinner in the overlay.
+    private val _isBuffering = MutableStateFlow(false)
+    val isBuffering: StateFlow<Boolean> = _isBuffering
+
     private val _offline = MutableStateFlow(false)
     val offline: StateFlow<Boolean> = _offline
 
-    // Episode title (e.g. "My Title · E3") shown in the overlay's top bar.
+    // Series title (top bar line 1); the episode number below renders line 2 ("Episode N").
     private val _title = MutableStateFlow("")
     val title: StateFlow<String> = _title
+
+    // The season's episode list for the in-player picker: AniList detail online, or stubs built
+    // from the downloaded episodes offline.
+    private val _episodes = MutableStateFlow<List<Episode>>(emptyList())
+    val episodes: StateFlow<List<Episode>> = _episodes
+
+    // Current playback speed (sticky across episode switches — the player keeps its parameters).
+    private val _speed = MutableStateFlow(1f)
+    val speed: StateFlow<Float> = _speed
 
     // Prev/next-episode button enablement.
     private val _hasPrev = MutableStateFlow(episodeNumber > 1)
@@ -263,6 +285,7 @@ class PlayerViewModel @Inject constructor(
                 _position.value = player.currentPosition
                 _bufferedPosition.value = player.bufferedPosition
                 _duration.value = player.duration.let { if (it == C.TIME_UNSET || it < 0) 0L else it }
+                _isBuffering.value = player.playbackState == Player.STATE_BUFFERING
                 maybeAutoSkip(player.currentPosition)
                 maybeFetchMarkers()
                 if (++tick % 20 == 0) saveProgress()   // ~ every 6s
@@ -302,7 +325,8 @@ class PlayerViewModel @Inject constructor(
         idMal = d.idMal
         d.episodes.size.takeIf { it > 0 }?.let { totalEpisodes = it }
         summary = AnimeSummary(d.id, d.title, d.posterUrl, d.idMal)
-        _title.value = "${d.title} · E$episodeNumber"
+        _title.value = d.title
+        _episodes.value = d.episodes
         updateNavState()
         return d
     }
@@ -310,8 +334,22 @@ class PlayerViewModel @Inject constructor(
     private suspend fun playOffline(ep: OfflineEpisode) {
         idMal = ep.idMal
         summary = AnimeSummary(animeId, ep.title, ep.posterUrl, ep.idMal)
-        _title.value = "${ep.title} · E$episodeNumber"
+        _title.value = ep.title
         updateNavState()
+        // Offline the AniList detail may be unreachable, but the downloaded set is knowable from
+        // Room — feed the episode picker and the prev/next enablement from it so a binge of
+        // downloaded episodes doesn't require backing out to the Downloads tab between episodes.
+        val downloadedNumbers =
+            runCatching { downloads.downloadedEpisodes(animeId).first() }.getOrDefault(emptySet())
+        if (downloadedNumbers.isNotEmpty()) {
+            if (_episodes.value.isEmpty()) {
+                _episodes.value = downloadedNumbers.sorted().map { n ->
+                    Episode(id = "offline-$n", number = n, title = "Episode $n (downloaded)")
+                }
+            }
+            if (!_hasNext.value) _hasNext.value = downloadedNumbers.any { it > episodeNumber }
+            if (!_hasPrev.value) _hasPrev.value = downloadedNumbers.any { it < episodeNumber }
+        }
         _markers.value = ep.markers
         markersFetched = true   // offline markers come from the cached record; don't re-fetch online.
         play(ep.streamUri, ep.mimeType, ep.subtitles)
@@ -432,7 +470,6 @@ class PlayerViewModel @Inject constructor(
         _error.value = null
         _offline.value = false
         currentUri = null
-        detail?.let { _title.value = "${it.title} · E$number" }
         updateNavState()
         runCatching { load() }
             .onFailure { _error.value = "Couldn't start episode $number: ${it.message ?: it.javaClass.simpleName}" }
@@ -537,6 +574,23 @@ class PlayerViewModel @Inject constructor(
         if (advancing || episodeNumber <= 1) return
         advancing = true
         viewModelScope.launch { try { playEpisode(episodeNumber - 1) } finally { advancing = false } }
+    }
+
+    /**
+     * Jump straight to an episode from the in-player picker (same in-place switch as prev/next).
+     * No lower bound: the picker only offers episodes that exist, and some series expose an
+     * episode 0 (specials) that a `< 1` guard would silently swallow.
+     */
+    fun jumpTo(number: Int) {
+        if (advancing || number == episodeNumber) return
+        advancing = true
+        viewModelScope.launch { try { playEpisode(number) } finally { advancing = false } }
+    }
+
+    fun setSpeed(speed: Float) {
+        val s = speed.coerceIn(0.25f, 3f)
+        player.setPlaybackSpeed(s)
+        _speed.value = s
     }
 
     fun selectTextTrack(index: Int) {

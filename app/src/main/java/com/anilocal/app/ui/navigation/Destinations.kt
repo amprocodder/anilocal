@@ -13,7 +13,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 enum class TopTab(val route: String, val label: String, val icon: ImageVector) {
     Home("home", "Home", Icons.Outlined.Home),
     Explore("explore", "Explore", Icons.Outlined.Explore),
-    Library("library", "Library", Icons.Outlined.VideoLibrary),
+    Library("library", "My List", Icons.Outlined.VideoLibrary),
     Downloads("downloads", "Downloads", Icons.Outlined.Download),
     More("more", "More", Icons.Outlined.MoreHoriz),
 }

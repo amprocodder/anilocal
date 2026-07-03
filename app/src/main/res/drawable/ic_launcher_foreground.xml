@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher glyph: a white ring with a filled play triangle — "press play to get onboard".
+     Drawn inside the adaptive-icon safe zone (66/108 centered). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Ring -->
+    <path
+        android:pathData="M54,54m-26,0a26,26 0,1 1,52 0a26,26 0,1 1,-52 0"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="6"
+        android:fillColor="#00000000" />
+    <!-- Play triangle -->
+    <path
+        android:pathData="M48,42 L68,54 L48,66 Z"
+        android:fillColor="#FFFFFF" />
+</vector>

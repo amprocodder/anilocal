@@ -1,4 +1,7 @@
-# AniLocal — all-in-one anime player (server-free)
+# Onboard — all-in-one anime player (server-free)
+
+> Branded **Onboard** in the launcher/UI (midnight-blue accent); the codebase, package
+> (`com.anilocal.app`), repo, and CI artifact keep the original **AniLocal** name.
 
 A single-APK anime app with the AniLab-style menu layout. **AniList** provides the entire browse
 catalog; playable streams come from a **user-selected source** behind one abstract `AnimeSource`

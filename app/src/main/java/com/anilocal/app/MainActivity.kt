@@ -7,7 +7,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -61,7 +67,14 @@ private fun AppRoot() {
     // no Scaffold content padding (deterministic, vs. relying on bar-hiding to collapse the insets).
     val isPlayer = currentRoute == Routes.PLAYER
 
+    // Vertical insets are handled per-screen so edge-to-edge art (Home hero, Details header) can
+    // draw under the status bar while other screens use statusBarsPadding() (or their own
+    // Scaffold). Horizontal bars/cutouts (landscape 3-button nav, corner cutouts) stay padded here
+    // for every route — no screen wants content under those.
     Scaffold(
+        contentWindowInsets = WindowInsets.systemBars
+            .union(WindowInsets.displayCutout)
+            .only(WindowInsetsSides.Horizontal),
         bottomBar = {
             if (showBottomBar) {
                 Column {
@@ -103,6 +116,13 @@ private fun AppRoot() {
                 HomeScreen(
                     onOpen = { nav.navigate(Routes.detail(it)) },
                     onResume = { id, ep, pos -> nav.navigate(Routes.player(id, ep, pos)) },
+                    onExplore = {
+                        nav.navigate(TopTab.Explore.route) {
+                            popUpTo(TopTab.Home.route) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                 )
             }
             composable(TopTab.Explore.route) {

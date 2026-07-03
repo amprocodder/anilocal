@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**AniLocal** — an Android anime player (Kotlin, Compose, single APK). AniList provides the entire
+**AniLocal** — an Android anime player (Kotlin, Compose, single APK), **branded "Onboard" to the
+user** (launcher label/icon, Home wordmark) with a midnight-blue accent on near-black surfaces —
+code, packages, and CI names remain AniLocal. AniList provides the entire
 browse/metadata catalog (no API key); playable streams come from a **user-selected** `AnimeSource`
 behind one plugin seam. The app ships **no** built-in stream sources; it can **discover, install, and
 load Aniyomi/Anikku-style extension APKs** as the stream sources, so the user can "choose any source".
@@ -32,14 +34,21 @@ gradle :domain:test                # JVM unit tests for the pure-Kotlin domain m
 gradle :data:testDebugUnitTest     # Android-library unit tests
 ```
 
-There is **no committed test suite yet**. The pure-JVM `:domain` module is the fast, dependency-free
-place to add unit tests. CI (`.github/workflows/android.yml`) runs `gradle :app:assembleDebug` on every
-push and uploads the APK (artifact `anilocal-debug-apk`) for sideloading — it provisions Gradle 8.9 via
-`gradle/actions/setup-gradle`, **not** a committed wrapper, so don't "fix" CI by adding one.
+**No test suite is committed** and CI only assembles: CI (`.github/workflows/android.yml`) runs
+`gradle :app:assembleDebug` on every push and uploads the APK (artifact `anilocal-debug-apk`) for
+sideloading — it provisions Gradle 8.9 via `gradle/actions/setup-gradle`, **not** a committed wrapper,
+so don't "fix" CI by adding one. The pure-JVM `:domain` module is the fast, dependency-free place to add
+unit tests.
 
-This codebase was **authored but not yet compiled** (see `README.md`) — don't assume a clean first build;
-the version catalog may have nits to settle. `gradle.properties` turns on `org.gradle.configuration-cache`
-and `nonTransitiveRClass`; if a first build trips a config-cache violation, disabling it is a fair triage step.
+**The repo is app-only by design — the GitHub side ships the app and nothing else.** Local dev tooling
+(an on-device build/test chain, its test sources, IDE scratch) is intentionally kept out of git via
+`.gitignore` and is **not** part of the project: never commit it, nor the working-tree edits that wire
+it in (e.g. uncommitted `sourceSets` srcDir pointers in the module `build.gradle.kts` files). So a fresh
+checkout has no tests and no test wiring — that's expected. The code **builds clean** (CI proves it on
+every push), so don't assume an uncompiled first build.
+
+`gradle.properties` turns on `org.gradle.configuration-cache` and `nonTransitiveRClass`; if a first
+build trips a config-cache violation, disabling it is a fair triage step.
 
 ## Module architecture — the boundary is compile-enforced
 
@@ -56,7 +65,11 @@ Four Gradle modules with a strict, one-way dependency direction:
   `:data`'s `AppModule`): `CatalogRepository`, `StreamRepository`, `SkipRepository`, `LibraryRepository`,
   `ProgressRepository` (all in `repo/Repositories.kt`), then **one file each** —
   `DownloadRepository` (`repo/DownloadRepository.kt`), `MalRepository` (`repo/MalRepository.kt`),
-  `SettingsRepository` (`repo/SettingsRepository.kt`), and `AuthRepository` (`auth/Auth.kt`).
+  `SettingsRepository` (`repo/SettingsRepository.kt`), `ExtensionRepository` (`repo/ExtensionRepository.kt`
+  — lists extensions from each configured `index.min.json` repo and downloads an APK for the system
+  installer), and `AuthRepository` (`auth/Auth.kt`). The `AnimeSource` seam (`source/`) also defines
+  `SourcePreference` (sealed: Toggle/EditText/Select/MultiSelect) — a UI-agnostic mapping of an
+  extension's settings so `:app` can render/persist them without touching `androidx.preference`/`eu.kanade.*`.
 - **`:data`** — Android library. *All* repository implementations live here: AniList/TMDB/MAL APIs,
   AniSkip, Room, DataStore, Firebase auth, the Media3 download stack, the source registry, the
   extension-repo browse/install impls, and the Hilt wiring (`di/AppModule`). Depends on `:domain` and
@@ -71,6 +84,15 @@ Four Gradle modules with a strict, one-way dependency direction:
   reflect their source classes in). Depends on `:domain`; `:data` consumes it via `implementation` so
   the vendored `eu.kanade.*` types never reach `:app`. **OkHttp is pinned app-wide to `5.0.0-alpha.14`**
   to match the vendored stack, and the module compiles with `-Xcontext-receivers`.
+  `AniyomiSourceAdapter.resolve()` tries the ext-lib-14 `getVideoList(episode)` path **first**, falling
+  back to the lib-16 `getHosterList → getVideoList(hoster)` pipeline — classic-first avoids an
+  `AbstractMethodError` on lib-14 sources, and every source call is `runCatching`-wrapped so a
+  lib-mismatched extension degrades to empty. The adapter also implements `preferences()`/`setPreference()`
+  by building a real androidx `PreferenceScreen` and reading/writing the source's own `source_<id>`
+  SharedPreferences. The vendored `network/interceptor/CloudflareInterceptor` (+ `WebViewInterceptor`,
+  `util/system/WebViewUtil`) is wired into NetworkHelper's single client, so the **Cloudflare bypass is
+  always on** (solves the JS challenge in a headless `android.webkit` WebView, re-supplies `cf_clearance`;
+  degrades silently if no WebView).
 - **`:app`** — Compose UI, navigation, ViewModels, the Media3 player UI, Google Sign-In UI.
   **References only domain interfaces** — it must not import `com.anilocal.app.data.*` (an injected
   impl reaching into the UI would break the seam). Inject domain repository interfaces instead.
@@ -97,21 +119,25 @@ extensions `AnimeExtensionLoader` discovers and exposes a reactive `sources: Sta
 `SourceStreamRepository` injects the `SourceRegistry` + `SettingsRepository` and routes resolution to
 the **user-selected** source (`selectedSourceId` in DataStore, chosen in the More-screen picker),
 falling back to the first available source. **To add a built-in source, add one `@Binds @IntoSet`
-line** — selection, routing, and the picker are automatic. The `AnimeSource` contract is **five suspend methods** —
+line** — selection, routing, and the picker are automatic. The `AnimeSource` contract is **five required suspend methods** —
 `popular`/`search`/`detail` (catalog-shaped) *and* `servers`/`resolve` (stream-shaped) — **plus a
 `val info: SourceInfo` property** (`info.id` keys the registry; `info.isExternal` tags extensions in
-the picker), so a source implements all six members even though browsing goes through AniList's
-`CatalogRepository`. `SourceStreamRepository` is the join: per request it runs `search` → `detail` →
+the picker; `info.configurable` flags sources with settings) **and two more suspend methods with default
+impls** for per-source settings, `preferences()` and `setPreference()` (no-ops unless overridden). So a
+minimal source implements six members and a configurable one eight, even though browsing goes through
+AniList's `CatalogRepository`. `SourceStreamRepository` is the join: per request it runs `search` → `detail` →
 `servers().firstOrNull()` → `resolve`, sorts variants by height descending, and throws when `search`
 finds no match (an extension that finds nothing throws and the player degrades to a short hint —
 there is no longer a built-in source that matched *any* query to keep playback always-resolving). It exposes
-`resolveStream` (single, highest quality → online playback) and `resolveStreams` (all variants → the
-download quality picker).
+`resolveStream` (single, highest quality — but carrying the de-duped **union of every variant's
+subtitles**, so captions on lower renditions aren't lost to the height sort → online playback) and
+`resolveStreams` (all variants → the download quality picker).
 
 The single `@Binds` module is **`AppModule` (in `:data`, package `com.anilocal.app.di`)**, which
 `@Binds` every domain interface → `:data` impl. `:data` additionally has three `@Provides` `object`
-modules under `com.anilocal.app.data.*`: `NetworkModule` (Retrofit/Moshi/OkHttp + the four APIs),
-`DatabaseModule` (Room), and `DownloadModule` (the Media3 cache/manager stack). Adding a new repo/source
+modules under `com.anilocal.app.data.*`: `NetworkModule` (Retrofit/Moshi/OkHttp + the five APIs —
+AniList/AniSkip/TMDB/MAL/extension-repo), `DatabaseModule` (Room), and `DownloadModule` (the Media3
+cache/manager stack). Adding a new repo/source
 impl → add a `@Binds` in `AppModule`. **`:app` has no DI module:** build-time keys like
 `GOOGLE_WEB_CLIENT_ID` are read straight from `BuildConfig` in the UI, and nothing bridges `:app`'s
 `BuildConfig` into `:data`. If a future data-layer impl needs an `:app` build-time key, add a small
@@ -152,7 +178,14 @@ for the old MAL client id).
   re-runs or overrides offline markers). When a title has **no MAL id** (anything AniSkip can't key),
   `AniSkipRepository` returns **hard-coded demo markers** instead of an empty list so
   the Skip control always demonstrates — that `idMal == null` branch is intentional, not a bug. Auto-skip
-  fires at most once per marker.
+  fires at most once per marker. AniSkip is queried with the player's real `episodeLengthSec` first and
+  **retried with `episodeLength=0`** if that finds nothing (a length mismatch >~±25s makes AniSkip answer
+  `found:false`; `0` disables its length filter and still returns absolute op/ed times — keep the retry).
+  On `STATE_ENDED` the player **auto-advances to the next episode in place** (reuses the same ExoPlayer,
+  resets per-episode state, re-runs `load()` so a downloaded next ep plays from cache), gated on the
+  `autoPlayNext` setting and `hasEpisode()`; an `advancing` guard fires it exactly once, and with no next
+  episode it `progress.remove()`s the title from Continue Watching. The player's built-in next/prev
+  buttons are disabled.
 
 - **Optional features no-op when unconfigured.** TMDB artwork and Google Sign-In are gated on build-time
   config that defaults to blank; **MAL sync needs no config at all** (username only). Build-time keys flow
@@ -188,26 +221,38 @@ for the old MAL client id).
   pattern when adding a row or query. They are deliberately decoupled — a source must find its own match
   for an AniList-browsed title; resolution is **not** guaranteed (a source that returns no match throws in
   `SourceStreamRepository` and the player shows a short hint). The join happens in
-  `data/.../source/SourceStreamRepository.kt`, while `AppModule.bindAnimeSource` chooses *which* source it
-  talks to.
+  `data/.../source/SourceStreamRepository.kt`, which picks *which* source to talk to **at runtime** from
+  the `SourceRegistry` by the persisted `selectedSourceId` (falling back to the first available source) —
+  there is no compile-time `bindAnimeSource` binding (it was removed).
 
 ## Conventions
 
 - Navigation is a single Compose `NavHost` in `MainActivity.kt`; routes live in
-  `app/.../ui/navigation/Destinations.kt` (`TopTab` enum = bottom nav, `Routes` = detail/player). The
-  bottom `NavigationBar` shows only when the current route is a `TopTab` route, so detail/player have none;
-  adding a tab = a new `TopTab` entry **plus** a `composable(tab.route)` in `MainActivity`'s `NavHost`.
+  `app/.../ui/navigation/Destinations.kt` (`TopTab` enum = bottom nav = Home/Explore/Library/Downloads/More;
+  `Routes` = the non-tab routes: `detail`, `player`, `extensions` (Browse extensions → install via the
+  system installer), and `source/{sourceId}/preferences` (per-source settings, shown when
+  `SourceInfo.configurable`)). The bottom `NavigationBar` shows only when the current route is a `TopTab`
+  route, so the non-tab routes have none; adding a tab = a new `TopTab` entry **plus** a
+  `composable(tab.route)` in `MainActivity`'s `NavHost`.
 - ViewModels are `@HiltViewModel`, obtained via `hiltViewModel()`, and inject only domain interfaces/models
   (plus framework types — `SavedStateHandle`, `@ApplicationContext Context`, the Hilt-provided Media3
-  `CacheDataSource.Factory`) — never `:data` types. There are only a handful, and most are **co-located in
-  their screen file** (`DetailsViewModel` in `DetailsScreen.kt`, `HomeViewModel` in `HomeScreen.kt`,
-  `LibraryViewModel` in `LibraryScreen.kt`); only `MoreViewModel` and `PlayerViewModel` get their own file.
-  Look inside the screen file before assuming a missing `*ViewModel.kt`.
+  `CacheDataSource.Factory`; `PlayerViewModel` also takes a `DefaultHttpDataSource.Factory` for per-stream
+  request headers and a `@Named("appScope")` `CoroutineScope` to persist final position after
+  `viewModelScope` is cancelled) — never `:data` types. Most are **co-located in their screen file**
+  (`DetailsViewModel`/`HomeViewModel`/`LibraryViewModel`/`ExploreViewModel`/`DownloadsViewModel`/
+  `ExtensionsViewModel`/`SourcePreferencesViewModel`, each in its `*Screen.kt`); only `AppViewModel`
+  (app-open MAL sync + the resume bar), `MoreViewModel`, and `PlayerViewModel` get their own file. Look
+  inside the screen file before assuming a missing `*ViewModel.kt`.
 - Error/empty states degrade **silently**: repo calls are wrapped in `runCatching { … }.getOrDefault/
   getOrNull`, and screens render blank or a short hint (Home drops rows whose loader fails or returns empty;
-  Details just returns from the `Scaffold` when `detail` is null) — there are **no spinners or error
-  dialogs**. Match that pattern rather than adding loading/error UI that clashes with it.
+  Details renders nothing but its floating back button until `detail` is non-null) — there are **no
+  spinners or error dialogs** for load/error states. The one deliberate exception is the player's
+  transient center rebuffer spinner (playback stall feedback, not a load state). Match that pattern
+  rather than adding loading/error UI that clashes with it.
 - Networking: Retrofit + Moshi + OkHttp, wired in `data/.../remote/NetworkModule.kt`.
-- Settings persist via DataStore (`DataStoreSettingsRepository`) exposed as Kotlin `Flow`s.
+- Settings persist via DataStore (`DataStoreSettingsRepository`) exposed as Kotlin `Flow`s — including
+  `autoPlayNext`, `autoSkip`, `wifiOnlyDownloads`, default download quality, and **subtitle
+  scale/background** (the player applies these live to the `SubtitleView`; More shows a to-scale preview
+  that reproduces the caption's true on-screen px).
 - Source-dir quirk: `:domain` keeps sources under `src/main/kotlin/`, while `:data` and `:app` use
   `src/main/java/` (still Kotlin). Put new files in the directory the module already uses.

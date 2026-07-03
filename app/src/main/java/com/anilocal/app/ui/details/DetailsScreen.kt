@@ -1,39 +1,55 @@
 package com.anilocal.app.ui.details
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BookmarkAdded
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.SavedStateHandle
@@ -130,7 +146,6 @@ private fun pickForQuality(options: List<VideoStream>, quality: DownloadQuality)
         ?: options.minByOrNull { it.height ?: Int.MAX_VALUE }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DetailsScreen(
     onPlay: (animeId: String, episodeNumber: Int) -> Unit,
@@ -144,58 +159,100 @@ fun DetailsScreen(
     val defaultQuality by vm.defaultQuality.collectAsStateWithLifecycle()
     val d = detail
 
-    Scaffold(topBar = {
-        TopAppBar(
-            title = { Text(d?.title ?: "Loading…") },
-            navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            },
-        )
-    }) { padding ->
-        if (d == null) return@Scaffold
-        LazyColumn(
-            Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                AsyncImage(
-                    model = d.bannerUrl ?: d.posterUrl,
-                    contentDescription = d.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxWidth().height(200.dp),
-                )
-            }
-            item { Text(d.title, style = MaterialTheme.typography.headlineSmall) }
-            item {
-                Button(onClick = { onPlay(d.id, d.episodes.firstOrNull()?.number ?: 1) }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Filled.PlayArrow, null); Text("  Play")
-                }
-            }
-            item {
-                OutlinedButton(onClick = vm::toggleSaved, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (saved) "Remove from My List" else "Add to My List")
-                }
-            }
-            item { Text(d.synopsis, style = MaterialTheme.typography.bodyMedium) }
-            item { Text("Episodes", style = MaterialTheme.typography.titleMedium) }
-            items(d.episodes, key = { it.id }) { ep ->
-                ListItem(
-                    headlineContent = { Text(ep.title ?: "Episode ${ep.number}") },
-                    leadingContent = { Text("${ep.number}") },
-                    trailingContent = {
-                        if (ep.number in downloaded) {
-                            Icon(Icons.Filled.DownloadDone, "Downloaded",
-                                tint = MaterialTheme.colorScheme.primary)
-                        } else {
-                            IconButton(onClick = { vm.download(ep) }) {
-                                Icon(Icons.Filled.Download, "Download")
-                            }
+    Box(Modifier.fillMaxSize()) {
+        if (d != null) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item { HeaderArt(d) }
+                item {
+                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(d.title, style = MaterialTheme.typography.headlineSmall)
+                        if (d.genres.isNotEmpty()) {
+                            Text(
+                                d.genres.joinToString("  •  "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onPlay(d.id, ep.number) },
-                )
+                    }
+                }
+                item {
+                    Row(
+                        Modifier.padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Button(
+                            onClick = { onPlay(d.id, d.episodes.firstOrNull()?.number ?: 1) },
+                            shape = RoundedCornerShape(100.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ),
+                            modifier = Modifier.weight(1f).height(46.dp),
+                        ) {
+                            Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
+                            Text("  Watch", fontWeight = FontWeight.Bold)
+                        }
+                        FilledTonalIconButton(
+                            onClick = vm::toggleSaved,
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            ),
+                            modifier = Modifier.size(46.dp),
+                        ) {
+                            Icon(
+                                if (saved) Icons.Filled.BookmarkAdded else Icons.Outlined.BookmarkAdd,
+                                if (saved) "Remove from My List" else "Add to My List",
+                                tint = if (saved) MaterialTheme.colorScheme.tertiary
+                                else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+                if (d.synopsis.isNotBlank()) {
+                    item { ExpandableSynopsis(d.synopsis) }
+                }
+                item {
+                    Row(
+                        Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Episodes", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        if (d.episodes.isNotEmpty()) {
+                            Text(
+                                "${d.episodes.size}",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                items(d.episodes, key = { it.id }) { ep ->
+                    EpisodeCard(
+                        episode = ep,
+                        downloaded = ep.number in downloaded,
+                        onClick = { onPlay(d.id, ep.number) },
+                        onDownload = { vm.download(ep) },
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+                item { Box(Modifier.navigationBarsPadding().height(8.dp)) }
+            }
+        }
+
+        // Floating back button (over the header art; also the only chrome while loading).
+        Box(
+            Modifier
+                .statusBarsPadding()
+                .padding(8.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.45f)),
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
             }
         }
     }
@@ -227,5 +284,97 @@ fun DetailsScreen(
             confirmButton = {},
             dismissButton = { TextButton(onClick = vm::dismissPicker) { Text("Cancel") } },
         )
+    }
+}
+
+/** Edge-to-edge header art with a bottom scrim fading into the page background. */
+@Composable
+private fun HeaderArt(d: AnimeDetail) {
+    val bg = MaterialTheme.colorScheme.background
+    Box(Modifier.fillMaxWidth().height(240.dp)) {
+        AsyncImage(
+            model = d.bannerUrl ?: d.posterUrl,
+            contentDescription = d.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(120.dp)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, bg)))
+        )
+    }
+}
+
+@Composable
+private fun ExpandableSynopsis(synopsis: String) {
+    var expanded by remember { mutableStateOf(false) }
+    Text(
+        synopsis,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = if (expanded) Int.MAX_VALUE else 4,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .padding(horizontal = 16.dp)
+            .animateContentSize()
+            .clickable { expanded = !expanded },
+    )
+}
+
+/** AniLab-style episode row: dark rounded card, bold number badge, download state trailing. */
+@Composable
+private fun EpisodeCard(
+    episode: Episode,
+    downloaded: Boolean,
+    onClick: () -> Unit,
+    onDownload: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
+    ) {
+        Row(
+            Modifier.padding(start = 10.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            ) {
+                Box(Modifier.size(width = 44.dp, height = 32.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        "${episode.number}",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+            Text(
+                episode.title ?: "Episode ${episode.number}",
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+            )
+            if (downloaded) {
+                Icon(
+                    Icons.Filled.DownloadDone, "Downloaded",
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.padding(12.dp).size(22.dp),
+                )
+            } else {
+                IconButton(onClick = onDownload) {
+                    Icon(
+                        Icons.Filled.Download, "Download",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }

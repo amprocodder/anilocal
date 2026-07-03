@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Default (pre-26) resolution of @mipmap/ic_launcher; API 26+ picks the adaptive icon in
+         mipmap-anydpi-v26 instead. -->
+    <item name="ic_launcher" type="mipmap">@drawable/ic_launcher_legacy</item>
+</resources>

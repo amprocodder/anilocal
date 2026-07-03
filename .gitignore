@@ -13,6 +13,12 @@ local.properties
 .idea/
 .DS_Store
 
+# On-device dev/test chain — local-only, not committed (see devenv/scripts/README.md)
+devenv/
+
+# Kotlin compiler session metadata
+.kotlin/
+
 # Secrets / signing (never commit these)
 google-services.json
 app/google-services.json
