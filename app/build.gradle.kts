@@ -23,6 +23,19 @@ android {
         buildConfigField("String", "TMDB_API_KEY", "\"${project.findProperty("TMDB_API_KEY") ?: ""}\"")
     }
 
+    // Debug builds are signed with the COMMITTED app/debug.keystore (a standard, non-secret
+    // debug key — storepass/keypass "android"). Without this, every CI run mints a fresh
+    // ephemeral debug key, so no sideloaded APK can ever update another install channel
+    // (INSTALL_FAILED_UPDATE_INCOMPATIBLE / "App not installed" + full data wipe each time).
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

@@ -40,6 +40,13 @@ sideloading — it provisions Gradle 8.9 via `gradle/actions/setup-gradle`, **no
 so don't "fix" CI by adding one. The pure-JVM `:domain` module is the fast, dependency-free place to add
 unit tests.
 
+**Debug signing is pinned to the committed `app/debug.keystore`** (a standard, non-secret debug key;
+storepass/keypass `android`, alias `androiddebugkey`; `signingConfigs.debug` in `app/build.gradle.kts`,
+with a `!app/debug.keystore` exception under `.gitignore`'s `*.keystore` rule). This keeps every debug
+APK — CI artifact or local build — on ONE signing identity so they update-install over each other.
+Don't delete or regenerate it: a new key makes every sideload collide with
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE` and forces an uninstall + data wipe.
+
 **The repo is app-only by design — the GitHub side ships the app and nothing else.** Local dev tooling
 (an on-device build/test chain, its test sources, IDE scratch) is intentionally kept out of git via
 `.gitignore` and is **not** part of the project: never commit it, nor the working-tree edits that wire

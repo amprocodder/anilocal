@@ -25,3 +25,6 @@ app/google-services.json
 *.keystore
 *.jks
 keystore.properties
+# …except the DEBUG keystore: deliberately committed (standard non-secret debug key) so local
+# and CI debug APKs share one signing identity and can update-install over each other.
+!app/debug.keystore
