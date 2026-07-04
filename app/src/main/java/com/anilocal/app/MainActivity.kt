@@ -165,6 +165,7 @@ private fun AppRoot() {
             ) {
                 DetailsScreen(
                     onPlay = { animeId, ep -> nav.navigate(Routes.player(animeId, ep)) },
+                    onOpenDetail = { nav.navigate(Routes.detail(it)) },
                     onBack = { nav.popBackStack() },
                 )
             }

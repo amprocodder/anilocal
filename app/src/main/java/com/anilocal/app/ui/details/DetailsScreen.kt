@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -80,6 +81,8 @@ import com.anilocal.app.domain.repo.LibraryRepository
 import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.repo.SkipRepository
 import com.anilocal.app.domain.repo.StreamRepository
+import com.anilocal.app.ui.common.PosterCard
+import com.anilocal.app.ui.common.SectionHeader
 import com.anilocal.app.ui.common.scoreLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -221,6 +224,7 @@ private const val EPISODES_PER_ROW = 5
 @Composable
 fun DetailsScreen(
     onPlay: (animeId: String, episodeNumber: Int) -> Unit,
+    onOpenDetail: (animeId: String) -> Unit,
     onBack: () -> Unit,
     vm: DetailsViewModel = hiltViewModel(),
 ) {
@@ -398,6 +402,27 @@ fun DetailsScreen(
                         }
                         repeat(EPISODES_PER_ROW - episodeRows[rowIndex].size) {
                             Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+                // Franchise neighbors (prequels/sequels/seasons/movies), already in watch-order.
+                if (d.related.isNotEmpty()) {
+                    item(key = "related-header") {
+                        SectionHeader("Related", Modifier.padding(top = 8.dp))
+                    }
+                    item(key = "related-row") {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            items(d.related, key = { it.anime.id }) { rel ->
+                                PosterCard(
+                                    item = rel.anime,
+                                    badge = rel.relation,
+                                    onClick = { onOpenDetail(rel.anime.id) },
+                                    modifier = Modifier.testTag("related-${rel.anime.id}"),
+                                )
+                            }
                         }
                     }
                 }

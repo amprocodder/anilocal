@@ -40,6 +40,17 @@ data class AnimeDetail(
     val seasonYear: Int? = null,
     val duration: Int? = null,             // minutes per episode
     val studio: String? = null,            // first main studio name
+    val related: List<RelatedAnime> = emptyList(),   // franchise neighbors, chronological
+)
+
+/**
+ * A franchise neighbor of a title (previous/next season, movie, side story…), tagged with how it
+ * relates. Lists come pre-sorted chronologically: prequels first, then sequels, then the rest,
+ * each group ordered by release date.
+ */
+data class RelatedAnime(
+    val relation: String,                  // prettified, e.g. "Prequel", "Sequel", "Side story"
+    val anime: AnimeSummary,
 )
 
 data class Episode(

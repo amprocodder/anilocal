@@ -45,6 +45,7 @@ fun PosterCard(
     progress: Float? = null,
     onRemove: (() -> Unit)? = null,
     rank: Int? = null,
+    badge: String? = null,
 ) {
     Column(modifier = modifier.width(130.dp).clickable { onClick() }) {
         Box {
@@ -137,6 +138,22 @@ fun PosterCard(
                         modifier = Modifier.size(14.dp),
                     )
                 }
+            }
+            // Relation tick (e.g. "Sequel"), top-right; the downloaded chip owns that corner when present.
+            if (badge != null && !downloaded) {
+                Text(
+                    text = badge,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .background(
+                            MaterialTheme.colorScheme.primary,
+                            RoundedCornerShape(bottomStart = 6.dp),
+                        )
+                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                )
             }
             if (downloaded) {
                 Box(

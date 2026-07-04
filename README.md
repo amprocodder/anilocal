@@ -30,6 +30,8 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   each intro/outro window automatically (once per marker).
 - **Real catalog** via **AniList** GraphQL (trending on Home, search in Explore, full detail
   pages). No API key needed. *(TMDB wired as optional artwork enrichment — see config.)*
+- **Related titles** on every detail page: the franchise's prequels, sequels, seasons, movies
+  and side stories in watch-order (AniList relations), each tagged and one tap away.
 - **Player** (Media3/ExoPlayer) with the **Skip-Intro/Outro button** (`FreakIntroButton`
   equivalent), fed by **AniSkip** (real op/ed times by MAL id) — demo markers for titles with
   no MAL id so the control always demonstrates.

@@ -4,6 +4,7 @@ import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.BrowseSort
 import com.anilocal.app.domain.model.Episode
+import com.anilocal.app.domain.model.RelatedAnime
 import com.anilocal.app.domain.repo.CatalogRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -53,6 +54,10 @@ class AniListCatalogRepository @Inject constructor(
               description(asHtml:false) genres episodes
               format averageScore status seasonYear duration
               studios(isMain: true) { nodes { name } } nextAiringEpisode { episode }
+              relations { edges { relationType(version: 2) node {
+                id idMal type format isAdult title{romaji english} coverImage{large}
+                episodes averageScore startDate{year month}
+              } } }
             } }
         """.trimIndent()
         val m = api.query(body(q, JSONObject().put("id", animeId.toInt()))).data?.media
@@ -80,8 +85,28 @@ class AniListCatalogRepository @Inject constructor(
             seasonYear = m.seasonYear,
             duration = m.duration,
             studio = m.studios?.nodes?.firstOrNull()?.name,
+            related = m.relations?.edges.orEmpty().toRelated(),
         )
     }
+
+    /**
+     * Franchise neighbors in watch-order: prequels, then sequels, then surrounding content
+     * (parent/side stories/movies…), each group sorted by release date. Manga/novel sources,
+     * character-only links, and the OTHER grab-bag (music videos, commercials) are dropped.
+     */
+    private fun List<RelationEdgeDto>.toRelated(): List<RelatedAnime> = mapNotNull { edge ->
+        val node = edge.node ?: return@mapNotNull null
+        if (node.type != "ANIME" || node.isAdult == true) return@mapNotNull null
+        val rank = RELATION_RANK[edge.relationType] ?: return@mapNotNull null
+        Triple(rank, node, edge.relationType!!)
+    }.sortedWith(
+        compareBy(
+            { it.first },
+            { it.second.startDate?.year ?: Int.MAX_VALUE },
+            { it.second.startDate?.month ?: Int.MAX_VALUE },
+        )
+    ).map { (_, node, type) -> RelatedAnime(relation = type.prettyRelation(), anime = node.toSummary()) }
+        .distinctBy { it.anime.id }   // a node can appear under two edges; the UI keys rows by id
 
     override suspend fun trending(page: Int) = mediaPage("sort: TRENDING_DESC", page)
     override suspend fun allTimePopular(page: Int) = mediaPage("sort: POPULARITY_DESC", page)
@@ -159,5 +184,31 @@ class AniListCatalogRepository @Inject constructor(
         "CANCELLED" -> "Cancelled"
         "HIATUS" -> "Hiatus"
         else -> this
+    }
+
+    private fun String.prettyRelation() = when (this) {
+        "PREQUEL" -> "Prequel"
+        "SEQUEL" -> "Sequel"
+        "PARENT" -> "Parent story"
+        "SIDE_STORY" -> "Side story"
+        "SPIN_OFF" -> "Spin-off"
+        "ALTERNATIVE" -> "Alternative"
+        "SUMMARY" -> "Recap"
+        "COMPILATION" -> "Compilation"
+        else -> this
+    }
+
+    private companion object {
+        /** Watch-order rank per AniList relationType (v2); types not listed are dropped. */
+        val RELATION_RANK = mapOf(
+            "PREQUEL" to 0,
+            "SEQUEL" to 1,
+            "PARENT" to 2,
+            "SIDE_STORY" to 3,
+            "SPIN_OFF" to 4,
+            "ALTERNATIVE" to 5,
+            "SUMMARY" to 6,
+            "COMPILATION" to 7,
+        )
     }
 }

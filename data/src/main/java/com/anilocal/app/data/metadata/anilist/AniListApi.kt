@@ -42,7 +42,18 @@ data class MediaDto(
     val duration: Int?,
     val studios: StudiosDto?,
     val nextAiringEpisode: NextAiringEpisodeDto?,
+    // Only requested for relation nodes (detail query); null elsewhere.
+    val type: String?,
+    val isAdult: Boolean?,
+    val startDate: FuzzyDateDto?,
+    val relations: RelationsDto?,
 )
+
+data class RelationsDto(val edges: List<RelationEdgeDto>?)
+
+data class RelationEdgeDto(val relationType: String?, val node: MediaDto?)
+
+data class FuzzyDateDto(val year: Int?, val month: Int?)
 
 data class TitleDto(val romaji: String?, val english: String?, val native: String?)
 
