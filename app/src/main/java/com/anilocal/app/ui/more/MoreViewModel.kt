@@ -2,8 +2,6 @@ package com.anilocal.app.ui.more
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.anilocal.app.domain.auth.AuthRepository
-import com.anilocal.app.domain.auth.AuthUser
 import com.anilocal.app.domain.model.DownloadQuality
 import com.anilocal.app.domain.repo.MalRepository
 import com.anilocal.app.domain.repo.SettingsRepository
@@ -22,14 +20,10 @@ import javax.inject.Inject
 
 @HiltViewModel
 class MoreViewModel @Inject constructor(
-    private val authRepo: AuthRepository,
     private val settings: SettingsRepository,
     private val mal: MalRepository,
     private val sourceRegistry: SourceRegistry,
 ) : ViewModel() {
-
-    val user: StateFlow<AuthUser?> =
-        authRepo.currentUser.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val autoSkip: StateFlow<Boolean> =
         settings.autoSkip.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
@@ -84,8 +78,4 @@ class MoreViewModel @Inject constructor(
         _syncStatus.value = "Syncing…"
         _syncStatus.value = mal.sync().fold({ "Synced $it titles" }, { "Sync failed: ${it.message}" })
     }
-
-    fun signInWithGoogle(idToken: String) = viewModelScope.launch { authRepo.signInWithGoogle(idToken) }
-
-    fun signOut() = authRepo.signOut()
 }

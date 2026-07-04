@@ -19,7 +19,6 @@ android {
         vectorDrawables { useSupportLibrary = true }
 
         // Optional features (blank = no-op). See README. (MAL sync is keyless — username only.)
-        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty("GOOGLE_WEB_CLIENT_ID") ?: ""}\"")
         buildConfigField("String", "TMDB_API_KEY", "\"${project.findProperty("TMDB_API_KEY") ?: ""}\"")
     }
 
@@ -51,11 +50,6 @@ android {
         compose = true
         buildConfig = true
     }
-}
-
-// Apply Google Services only after you drop in your own app/google-services.json.
-if (file("google-services.json").exists()) {
-    apply(plugin = "com.google.gms.google-services")
 }
 
 dependencies {
@@ -91,7 +85,4 @@ dependencies {
     implementation(libs.media3.exoplayer.smoothstreaming)
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
-
-    // Google Sign-In UI (the Firebase exchange lives in :data).
-    implementation(libs.play.services.auth)
 }

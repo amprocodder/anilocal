@@ -35,8 +35,6 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   no MAL id so the control always demonstrates.
 - **Room persistence**: "My List" (Library tab) + "Continue Watching" (Home), with watch
   progress saved during playback.
-- **Google Sign-In** via **Firebase** (More tab) — guarded so it no-ops until you add your
-  own project; then it actually works.
 - **User-selectable stream sources**: a runtime **source registry** + picker (More tab). No
   built-in sources ship; **installed Aniyomi extensions** appear automatically and resolve
   streams for AniList-browsed titles. **Browse extensions** (More → Browse extensions) lists a
@@ -46,10 +44,6 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
 ## Configure optional features (the app builds & runs without these)
 - **TMDB artwork** (optional): get a free v3 key at themoviedb.org, add to
   `~/.gradle/gradle.properties` or the project `gradle.properties`: `TMDB_API_KEY=xxxx`.
-- **Google Sign-In**: create a Firebase project, add an Android app with your package
-  (`com.anilocal.app`) and your signing **SHA-1**, download **`app/google-services.json`**
-  (the build auto-applies the plugin once it's present), and set the **Web client id**:
-  `GOOGLE_WEB_CLIENT_ID=xxxx.apps.googleusercontent.com` in `gradle.properties`.
 
 ## Extension sources & posture
 - **No backend, no ads, no signature spoofing.** AniList stays the only browse layer; extensions
@@ -79,13 +73,13 @@ The dependency direction is compile-enforced (not just convention):
 - **`:domain`** — pure Kotlin (`kotlin("jvm")`, no Android dependency). Models, repository
   interfaces, the `AnimeSource` seam. `import android.*` here won't compile — that's the boundary.
 - **`:data`** — Android library. All repository implementations: AniList/TMDB, AniSkip, Room,
-  DataStore, Firebase auth, Media3 downloads, the source registry, extension-repo
+  DataStore, Media3 downloads, the source registry, extension-repo
   browse/install, and the Hilt wiring (`di/AppModule`). Depends on `:domain` + `:extensions`.
 - **`:extensions`** — Android library hosting Aniyomi extensions: the vendored Aniyomi source-api
   (see `extensions/VENDORING.md`), the `AniyomiSourceAdapter`, the Injekt runtime, and the
   `AnimeExtensionLoader` (+ child-first classloader). Depends on `:domain`.
-- **`:app`** — Android application. Compose UI, navigation, ViewModels, the Media3 player UI,
-  Google Sign-In UI. References **only domain interfaces** (no `com.anilocal.app.data.*` /
+- **`:app`** — Android application. Compose UI, navigation, ViewModels, the Media3 player UI.
+  References **only domain interfaces** (no `com.anilocal.app.data.*` /
   `eu.kanade.*` imports), so the UI can't reach into impls or vendored extension types.
 
 Build files stay small via the version catalog (`gradle/libs.versions.toml`); a `build-logic`

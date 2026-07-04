@@ -51,8 +51,4 @@ dependencies {
     // these an adaptive download fails the way DASH playback used to crash.
     implementation(libs.media3.exoplayer.dash)
     implementation(libs.media3.exoplayer.smoothstreaming)
-
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.auth)
-    implementation(libs.coroutines.play.services)
 }

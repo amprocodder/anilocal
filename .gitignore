@@ -20,8 +20,6 @@ devenv/
 .kotlin/
 
 # Secrets / signing (never commit these)
-google-services.json
-app/google-services.json
 *.keystore
 *.jks
 keystore.properties

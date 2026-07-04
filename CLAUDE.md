@@ -72,13 +72,13 @@ Four Gradle modules with a strict, one-way dependency direction:
   `:data`'s `AppModule`): `CatalogRepository`, `StreamRepository`, `SkipRepository`, `LibraryRepository`,
   `ProgressRepository` (all in `repo/Repositories.kt`), then **one file each** —
   `DownloadRepository` (`repo/DownloadRepository.kt`), `MalRepository` (`repo/MalRepository.kt`),
-  `SettingsRepository` (`repo/SettingsRepository.kt`), `ExtensionRepository` (`repo/ExtensionRepository.kt`
+  `SettingsRepository` (`repo/SettingsRepository.kt`), and `ExtensionRepository` (`repo/ExtensionRepository.kt`
   — lists extensions from each configured `index.min.json` repo and downloads an APK for the system
-  installer), and `AuthRepository` (`auth/Auth.kt`). The `AnimeSource` seam (`source/`) also defines
+  installer). The `AnimeSource` seam (`source/`) also defines
   `SourcePreference` (sealed: Toggle/EditText/Select/MultiSelect) — a UI-agnostic mapping of an
   extension's settings so `:app` can render/persist them without touching `androidx.preference`/`eu.kanade.*`.
 - **`:data`** — Android library. *All* repository implementations live here: AniList/TMDB/MAL APIs,
-  AniSkip, Room, DataStore, Firebase auth, the Media3 download stack, the source registry, the
+  AniSkip, Room, DataStore, the Media3 download stack, the source registry, the
   extension-repo browse/install impls, and the Hilt wiring (`di/AppModule`). Depends on `:domain` and
   `:extensions`.
 - **`:extensions`** — Android library that makes AniLocal a host for Aniyomi extensions. Vendors the
@@ -100,7 +100,7 @@ Four Gradle modules with a strict, one-way dependency direction:
   `util/system/WebViewUtil`) is wired into NetworkHelper's single client, so the **Cloudflare bypass is
   always on** (solves the JS challenge in a headless `android.webkit` WebView, re-supplies `cf_clearance`;
   degrades silently if no WebView).
-- **`:app`** — Compose UI, navigation, ViewModels, the Media3 player UI, Google Sign-In UI.
+- **`:app`** — Compose UI, navigation, ViewModels, the Media3 player UI.
   **References only domain interfaces** — it must not import `com.anilocal.app.data.*` (an injected
   impl reaching into the UI would break the seam). Inject domain repository interfaces instead.
 
@@ -145,8 +145,8 @@ The single `@Binds` module is **`AppModule` (in `:data`, package `com.anilocal.a
 modules under `com.anilocal.app.data.*`: `NetworkModule` (Retrofit/Moshi/OkHttp + the five APIs —
 AniList/AniSkip/TMDB/MAL/extension-repo), `DatabaseModule` (Room), and `DownloadModule` (the Media3
 cache/manager stack). Adding a new repo/source
-impl → add a `@Binds` in `AppModule`. **`:app` has no DI module:** build-time keys like
-`GOOGLE_WEB_CLIENT_ID` are read straight from `BuildConfig` in the UI, and nothing bridges `:app`'s
+impl → add a `@Binds` in `AppModule`. **`:app` has no DI module:** build-time keys (currently just
+`TMDB_API_KEY`) live only in `:app`'s `BuildConfig`, and nothing bridges `:app`'s
 `BuildConfig` into `:data`. If a future data-layer impl needs an `:app` build-time key, add a small
 `@Provides @Named(...)` Hilt module in `:app` to surface it (the now-removed `AppConfigModule` did this
 for the old MAL client id).
@@ -194,7 +194,7 @@ for the old MAL client id).
   episode it `progress.remove()`s the title from Continue Watching. The player's built-in next/prev
   buttons are disabled.
 
-- **Optional features no-op when unconfigured.** TMDB artwork and Google Sign-In are gated on build-time
+- **Optional features no-op when unconfigured.** TMDB artwork is gated on build-time
   config that defaults to blank; **MAL sync needs no config at all** (username only). Build-time keys flow
   `gradle.properties` (or `~/.gradle/gradle.properties`) → `app/build.gradle.kts` `buildConfigField` →
   `BuildConfig` — which **only `:app` generates** (`buildConfig = true` is set there, not in `:data`).
@@ -210,12 +210,6 @@ for the old MAL client id).
     MAL mirror (deduped by MAL id, local wins); MAL-only rows get a synthetic `mal-<malId>` id, so opening
     one must first resolve `catalog.anilistIdForMal(malId)` before navigating — the detail route is keyed by
     **AniList id** (`DetailsScreen` does `animeId.toInt()`), and a miss shows a "not found" Toast.
-  - **`GOOGLE_WEB_CLIENT_ID`** is read directly in `:app` UI (`ui/more/MoreScreen.kt`); blank → the
-    `GoogleSignInClient` is null, so tapping "Sign in with Google" shows a Toast prompting you to configure
-    it (the button is **not** hidden). `app/google-services.json` is git-ignored and the Google Services
-    plugin self-applies only when that file exists. `FirebaseAuthRepository` is *always* bound but reaches
-    Firebase lazily via `runCatching { FirebaseAuth.getInstance() }.getOrNull()`, so a missing
-    `google-services.json` degrades gracefully instead of crashing at startup — keep that lazy/guarded pattern.
   - **TMDB** is a documented *scaffold* (`data/.../metadata/tmdb/TmdbApi.kt`) — it doesn't consume its key
     yet (AniList already supplies artwork). Code paths must stay functional with all of these absent.
 

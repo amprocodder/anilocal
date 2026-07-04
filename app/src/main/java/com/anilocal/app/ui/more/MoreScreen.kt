@@ -1,9 +1,6 @@
 package com.anilocal.app.ui.more
 
 import android.util.TypedValue
-import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -49,7 +46,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -60,11 +56,7 @@ import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
-import com.anilocal.app.BuildConfig
 import com.anilocal.app.domain.model.DownloadQuality
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
 import kotlin.math.roundToInt
 
 @Composable
@@ -73,8 +65,6 @@ fun MoreScreen(
     onConfigureSource: (String) -> Unit,
     vm: MoreViewModel = hiltViewModel(),
 ) {
-    val context = LocalContext.current
-    val user by vm.user.collectAsStateWithLifecycle()
     val autoSkip by vm.autoSkip.collectAsStateWithLifecycle()
     val autoPlayNext by vm.autoPlayNext.collectAsStateWithLifecycle()
     val wifiOnly by vm.wifiOnly.collectAsStateWithLifecycle()
@@ -83,27 +73,6 @@ fun MoreScreen(
     val subtitleBackground by vm.subtitleBackground.collectAsStateWithLifecycle()
 
     val switchColors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary)
-
-    val webClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
-    val signInClient = remember(webClientId) {
-        if (webClientId.isBlank()) null else {
-            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestIdToken(webClientId)
-                .requestEmail()
-                .build()
-            GoogleSignIn.getClient(context, gso)
-        }
-    }
-
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        runCatching {
-            val account = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-                .getResult(ApiException::class.java)
-            account.idToken?.let(vm::signInWithGoogle)
-        }.onFailure {
-            Toast.makeText(context, "Sign-in failed: ${it.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
 
     Column(
         Modifier
@@ -226,31 +195,6 @@ fun MoreScreen(
                 }
                 Text("Enter your MAL username to mirror your PUBLIC list (read-only) — no API key " +
                     "needed. Make sure your list privacy is Public on MAL, then filter it on the Library tab.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-
-        SectionCard {
-            Text("Account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            if (user != null) {
-                Text(user?.displayName ?: user?.email ?: "Signed in",
-                    style = MaterialTheme.typography.bodyLarge)
-                OutlinedButton(onClick = vm::signOut) { Text("Sign out") }
-            } else {
-                Button(onClick = {
-                    val client = signInClient
-                    if (client == null) {
-                        Toast.makeText(
-                            context,
-                            "Add your Firebase project (GOOGLE_WEB_CLIENT_ID) to enable sign-in.",
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    } else {
-                        launcher.launch(client.signInIntent)
-                    }
-                }) { Text("Sign in with Google") }
-                Text("Sign-in uses YOUR Firebase project, so it actually works (unlike a re-signed mod).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
