@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,7 +27,6 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,7 +34,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -49,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -78,6 +81,8 @@ fun MoreScreen(
     val downloadQuality by vm.downloadQuality.collectAsStateWithLifecycle()
     val subtitleScale by vm.subtitleScale.collectAsStateWithLifecycle()
     val subtitleBackground by vm.subtitleBackground.collectAsStateWithLifecycle()
+
+    val switchColors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary)
 
     val webClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
     val signInClient = remember(webClientId) {
@@ -111,174 +116,198 @@ fun MoreScreen(
     ) {
         Text("More", style = MaterialTheme.typography.titleLarge)
 
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Auto-skip intro/outro", style = MaterialTheme.typography.bodyLarge)
-                Text("Skip automatically when a marker is reached",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+        SectionCard {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Auto-skip intro/outro", style = MaterialTheme.typography.bodyLarge)
+                    Text("Skip automatically when a marker is reached",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = autoSkip, onCheckedChange = vm::setAutoSkip, colors = switchColors)
             }
-            Switch(checked = autoSkip, onCheckedChange = vm::setAutoSkip)
-        }
-        HorizontalDivider()
 
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Auto-play next episode", style = MaterialTheme.typography.bodyLarge)
-                Text("Start the next episode automatically when one ends",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Auto-play next episode", style = MaterialTheme.typography.bodyLarge)
+                    Text("Start the next episode automatically when one ends",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = autoPlayNext, onCheckedChange = vm::setAutoPlayNext, colors = switchColors)
             }
-            Switch(checked = autoPlayNext, onCheckedChange = vm::setAutoPlayNext)
-        }
-        HorizontalDivider()
 
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Download over WiFi only", style = MaterialTheme.typography.bodyLarge)
-                Text("Pause downloads on mobile data; resume on WiFi",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Switch(checked = wifiOnly, onCheckedChange = vm::setWifiOnly)
-        }
-        HorizontalDivider()
-
-        Text("Default download quality", style = MaterialTheme.typography.bodyLarge)
-        DownloadQuality.entries.forEach { q ->
-            Row(
-                Modifier.fillMaxWidth().clickable { vm.setDownloadQuality(q) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                RadioButton(selected = downloadQuality == q, onClick = { vm.setDownloadQuality(q) })
-                Text(q.label, modifier = Modifier.padding(start = 8.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Download over WiFi only", style = MaterialTheme.typography.bodyLarge)
+                    Text("Pause downloads on mobile data; resume on WiFi",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = wifiOnly, onCheckedChange = vm::setWifiOnly, colors = switchColors)
             }
         }
-        HorizontalDivider()
 
-        Text("Subtitles", style = MaterialTheme.typography.titleMedium)
-        var sliderScale by remember(subtitleScale) { mutableStateOf(subtitleScale) }
-        // Live preview — reflects the in-progress slider value and the background toggle so the
-        // effect is visible before leaving the screen. Mirrors the player's white-text /
-        // black-outline / optional translucent-box styling (see PlayerScreen).
-        SubtitlePreview(scale = sliderScale, background = subtitleBackground)
-        Text("Text size: ${(sliderScale * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium)
-        Slider(
-            value = sliderScale,
-            onValueChange = { sliderScale = it },
-            onValueChangeFinished = { vm.setSubtitleScale(sliderScale) },
-            valueRange = 0.6f..2.0f,
-            // 0.6→2.0 in 0.05 (5%) increments: 28 intervals ⇒ 27 inner step ticks.
-            steps = 27,
-        )
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Subtitle background", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-            Switch(checked = subtitleBackground, onCheckedChange = vm::setSubtitleBackground)
+        SectionCard {
+            Text("Default download quality", style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold)
+            DownloadQuality.entries.forEach { q ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { vm.setDownloadQuality(q) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = downloadQuality == q, onClick = { vm.setDownloadQuality(q) })
+                    Text(q.label, modifier = Modifier.padding(start = 8.dp))
+                }
+            }
         }
-        HorizontalDivider()
 
-        // MyAnimeList Sync — expandable subsection.
-        var malExpanded by remember { mutableStateOf(false) }
-        val malUsername by vm.malUsername.collectAsStateWithLifecycle()
-        val malSyncEnabled by vm.malSyncEnabled.collectAsStateWithLifecycle()
-        val syncStatus by vm.syncStatus.collectAsStateWithLifecycle()
-        Row(
-            Modifier.fillMaxWidth().clickable { malExpanded = !malExpanded },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("MyAnimeList Sync", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            Icon(if (malExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, "Toggle")
-        }
-        if (malExpanded) {
-            var usernameField by remember(malUsername) { mutableStateOf(malUsername) }
-            OutlinedTextField(
-                value = usernameField,
-                onValueChange = { usernameField = it },
-                label = { Text("MAL username") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+        SectionCard {
+            Text("Subtitles", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            var sliderScale by remember(subtitleScale) { mutableStateOf(subtitleScale) }
+            // Live preview — reflects the in-progress slider value and the background toggle so the
+            // effect is visible before leaving the screen. Mirrors the player's white-text /
+            // black-outline / optional translucent-box styling (see PlayerScreen).
+            SubtitlePreview(scale = sliderScale, background = subtitleBackground)
+            Text("Text size: ${(sliderScale * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = sliderScale,
+                onValueChange = { sliderScale = it },
+                onValueChangeFinished = { vm.setSubtitleScale(sliderScale) },
+                valueRange = 0.6f..2.0f,
+                // 0.6→2.0 in 0.05 (5%) increments: 28 intervals ⇒ 27 inner step ticks.
+                steps = 27,
             )
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Active sync (on app open)", style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f))
-                Switch(checked = malSyncEnabled, onCheckedChange = vm::setMalSyncEnabled)
+                Text("Subtitle background", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                Switch(checked = subtitleBackground, onCheckedChange = vm::setSubtitleBackground, colors = switchColors)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
-                    vm.setMalUsername(usernameField.trim())
-                }) { Text("Save") }
-                OutlinedButton(onClick = {
-                    vm.setMalUsername(usernameField.trim()); vm.syncMalNow()
-                }) { Text("Sync now") }
-            }
-            syncStatus?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Text("Enter your MAL username to mirror your PUBLIC list (read-only) — no API key " +
-                "needed. Make sure your list privacy is Public on MAL, then filter it on the Library tab.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        HorizontalDivider()
 
-        Text("Account", style = MaterialTheme.typography.titleMedium)
-        if (user != null) {
-            Text(user?.displayName ?: user?.email ?: "Signed in",
-                style = MaterialTheme.typography.bodyLarge)
-            OutlinedButton(onClick = vm::signOut) { Text("Sign out") }
-        } else {
-            Button(onClick = {
-                val client = signInClient
-                if (client == null) {
-                    Toast.makeText(
-                        context,
-                        "Add your Firebase project (GOOGLE_WEB_CLIENT_ID) to enable sign-in.",
-                        Toast.LENGTH_LONG,
-                    ).show()
-                } else {
-                    launcher.launch(client.signInIntent)
-                }
-            }) { Text("Sign in with Google") }
-            Text("Sign-in uses YOUR Firebase project, so it actually works (unlike a re-signed mod).",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        HorizontalDivider()
-
-        val sources by vm.sources.collectAsStateWithLifecycle()
-        val selectedSourceId by vm.selectedSourceId.collectAsStateWithLifecycle()
-        Text("Streaming source", style = MaterialTheme.typography.titleMedium)
-        Text("Where video is resolved from. Browsing and metadata always come from AniList.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        sources.forEach { src ->
+        SectionCard {
+            // MyAnimeList Sync — expandable subsection.
+            var malExpanded by remember { mutableStateOf(false) }
+            val malUsername by vm.malUsername.collectAsStateWithLifecycle()
+            val malSyncEnabled by vm.malSyncEnabled.collectAsStateWithLifecycle()
+            val syncStatus by vm.syncStatus.collectAsStateWithLifecycle()
             Row(
-                Modifier.fillMaxWidth().clickable { vm.setSelectedSource(src.id) },
+                Modifier.fillMaxWidth().clickable { malExpanded = !malExpanded },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                RadioButton(
-                    selected = selectedSourceId == src.id,
-                    onClick = { vm.setSelectedSource(src.id) },
+                Text("MyAnimeList Sync", style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Icon(if (malExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, "Toggle")
+            }
+            if (malExpanded) {
+                var usernameField by remember(malUsername) { mutableStateOf(malUsername) }
+                OutlinedTextField(
+                    value = usernameField,
+                    onValueChange = { usernameField = it },
+                    label = { Text("MAL username") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                    Text(src.name, style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        if (src.isExternal) "Extension · ${src.lang}" else "Built-in",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Active sync (on app open)", style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f))
+                    Switch(checked = malSyncEnabled, onCheckedChange = vm::setMalSyncEnabled, colors = switchColors)
                 }
-                if (src.configurable) {
-                    IconButton(onClick = { onConfigureSource(src.id) }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Source settings")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        vm.setMalUsername(usernameField.trim())
+                    }) { Text("Save") }
+                    OutlinedButton(onClick = {
+                        vm.setMalUsername(usernameField.trim()); vm.syncMalNow()
+                    }) { Text("Sync now") }
+                }
+                syncStatus?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text("Enter your MAL username to mirror your PUBLIC list (read-only) — no API key " +
+                    "needed. Make sure your list privacy is Public on MAL, then filter it on the Library tab.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        SectionCard {
+            Text("Account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            if (user != null) {
+                Text(user?.displayName ?: user?.email ?: "Signed in",
+                    style = MaterialTheme.typography.bodyLarge)
+                OutlinedButton(onClick = vm::signOut) { Text("Sign out") }
+            } else {
+                Button(onClick = {
+                    val client = signInClient
+                    if (client == null) {
+                        Toast.makeText(
+                            context,
+                            "Add your Firebase project (GOOGLE_WEB_CLIENT_ID) to enable sign-in.",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    } else {
+                        launcher.launch(client.signInIntent)
+                    }
+                }) { Text("Sign in with Google") }
+                Text("Sign-in uses YOUR Firebase project, so it actually works (unlike a re-signed mod).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        SectionCard {
+            val sources by vm.sources.collectAsStateWithLifecycle()
+            val selectedSourceId by vm.selectedSourceId.collectAsStateWithLifecycle()
+            Text("Streaming source", style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold)
+            Text("Where video is resolved from. Browsing and metadata always come from AniList.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            sources.forEach { src ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { vm.setSelectedSource(src.id) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = selectedSourceId == src.id,
+                        onClick = { vm.setSelectedSource(src.id) },
+                    )
+                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                        Text(src.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (src.isExternal) "Extension · ${src.lang}" else "Built-in",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (src.configurable) {
+                        IconButton(onClick = { onConfigureSource(src.id) }) {
+                            Icon(Icons.Filled.Settings, contentDescription = "Source settings")
+                        }
                     }
                 }
             }
+            OutlinedButton(onClick = onBrowseExtensions, modifier = Modifier.padding(top = 4.dp)) {
+                Text("Browse extensions")
+            }
         }
-        OutlinedButton(onClick = onBrowseExtensions, modifier = Modifier.padding(top = 4.dp)) {
-            Text("Browse extensions")
-        }
+    }
+}
+
+/** Rounded settings-group card: the 9anime panel look for each More section. */
+@Composable
+private fun SectionCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            content = content,
+        )
     }
 }
 

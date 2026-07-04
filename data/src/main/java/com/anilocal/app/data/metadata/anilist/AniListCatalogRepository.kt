@@ -27,7 +27,7 @@ class AniListCatalogRepository @Inject constructor(
         val q = """
             query(${'$'}page:Int){ Page(page:${'$'}page, perPage:30){
               media(sort:TRENDING_DESC, type:ANIME, isAdult:false){
-                id idMal title{romaji english} coverImage{large} episodes
+                id idMal title{romaji english} coverImage{large} format episodes averageScore
               } } }
         """.trimIndent()
         api.query(body(q, JSONObject().put("page", page)))
@@ -39,7 +39,7 @@ class AniListCatalogRepository @Inject constructor(
         val q = """
             query(${'$'}search:String){ Page(page:1, perPage:30){
               media(search:${'$'}search, type:ANIME, isAdult:false){
-                id idMal title{romaji english} coverImage{large}
+                id idMal title{romaji english} coverImage{large} format episodes averageScore
               } } }
         """.trimIndent()
         api.query(body(q, JSONObject().put("search", query)))
@@ -51,11 +51,20 @@ class AniListCatalogRepository @Inject constructor(
             query(${'$'}id:Int){ Media(id:${'$'}id, type:ANIME){
               id idMal title{romaji english} coverImage{large} bannerImage
               description(asHtml:false) genres episodes
+              format averageScore status seasonYear duration
+              studios(isMain: true) { nodes { name } } nextAiringEpisode { episode }
             } }
         """.trimIndent()
         val m = api.query(body(q, JSONObject().put("id", animeId.toInt()))).data?.media
             ?: error("AniList: media $animeId not found")
-        val count = m.episodes ?: 0
+        // Airing shows report episodes as null OR as the full planned count; while releasing, cap
+        // at what has actually aired so the grid can't offer episodes no source can resolve yet.
+        val aired = m.nextAiringEpisode?.episode?.minus(1)?.coerceAtLeast(0)
+        val count = if (m.status == "RELEASING" && aired != null) {
+            minOf(m.episodes ?: Int.MAX_VALUE, aired)
+        } else {
+            m.episodes ?: 0
+        }
         AnimeDetail(
             id = m.id.toString(),
             title = m.displayTitle(),
@@ -65,6 +74,12 @@ class AniListCatalogRepository @Inject constructor(
             genres = m.genres.orEmpty(),
             idMal = m.idMal,
             episodes = (1..count).map { Episode(id = "${m.id}-$it", number = it, title = "Episode $it") },
+            format = m.format?.prettyFormat(),
+            averageScore = m.averageScore,
+            status = m.status?.prettyStatus(),
+            seasonYear = m.seasonYear,
+            duration = m.duration,
+            studio = m.studios?.nodes?.firstOrNull()?.name,
         )
     }
 
@@ -92,7 +107,7 @@ class AniListCatalogRepository @Inject constructor(
         val q = """
             query(${'$'}page:Int){ Page(page:${'$'}page, perPage:30){
               media($mediaArgs, type:ANIME, isAdult:false){
-                id idMal title{romaji english} coverImage{large}
+                id idMal title{romaji english} coverImage{large} format episodes averageScore
               } } }
         """.trimIndent()
         api.query(body(q, JSONObject().put("page", page))).data?.page?.media.orEmpty().map { it.toSummary() }
@@ -111,11 +126,38 @@ class AniListCatalogRepository @Inject constructor(
         return season to (if (month == 11) year + 1 else year)
     }
 
-    private fun MediaDto.toSummary() =
-        AnimeSummary(id = id.toString(), title = displayTitle(), posterUrl = coverImage?.large, idMal = idMal)
+    private fun MediaDto.toSummary() = AnimeSummary(
+        id = id.toString(),
+        title = displayTitle(),
+        posterUrl = coverImage?.large,
+        idMal = idMal,
+        format = format?.prettyFormat(),
+        episodes = episodes,
+        averageScore = averageScore,
+    )
 
     private fun MediaDto.displayTitle() =
         title?.english ?: title?.romaji ?: title?.native ?: "Untitled"
 
     private fun String.stripHtml() = replace(Regex("<[^>]*>"), "").trim()
+
+    private fun String.prettyFormat() = when (this) {
+        "TV" -> "TV"
+        "TV_SHORT" -> "TV Short"
+        "MOVIE" -> "Movie"
+        "SPECIAL" -> "Special"
+        "OVA" -> "OVA"
+        "ONA" -> "ONA"
+        "MUSIC" -> "Music"
+        else -> this
+    }
+
+    private fun String.prettyStatus() = when (this) {
+        "RELEASING" -> "Releasing"
+        "FINISHED" -> "Finished"
+        "NOT_YET_RELEASED" -> "Upcoming"
+        "CANCELLED" -> "Cancelled"
+        "HIATUS" -> "Hiatus"
+        else -> this
+    }
 }

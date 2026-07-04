@@ -6,6 +6,9 @@ data class AnimeSummary(
     val title: String,
     val posterUrl: String?,
     val idMal: Int? = null,
+    val format: String? = null,            // prettified, e.g. "TV", "Movie"
+    val episodes: Int? = null,
+    val averageScore: Int? = null,         // 0–100, as AniList reports it
 )
 
 /** A "Continue Watching" entry: an anime plus where the user left off. */
@@ -31,6 +34,12 @@ data class AnimeDetail(
     val genres: List<String> = emptyList(),
     val idMal: Int? = null,
     val episodes: List<Episode> = emptyList(),
+    val format: String? = null,            // prettified, e.g. "TV", "Movie"
+    val averageScore: Int? = null,         // 0–100, as AniList reports it
+    val status: String? = null,            // prettified, e.g. "Releasing"
+    val seasonYear: Int? = null,
+    val duration: Int? = null,             // minutes per episode
+    val studio: String? = null,            // first main studio name
 )
 
 data class Episode(

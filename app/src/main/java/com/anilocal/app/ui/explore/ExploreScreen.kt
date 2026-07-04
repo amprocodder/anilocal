@@ -16,12 +16,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -82,30 +87,67 @@ fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = hiltViewModel
         Modifier.fillMaxSize().statusBarsPadding().padding(top = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        Text(
+            "Explore",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+
         OutlinedTextField(
             value = query,
             onValueChange = vm::onQuery,
             placeholder = { Text("Search anime…") },
             leadingIcon = { Icon(Icons.Filled.Search, null) },
             singleLine = true,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(10.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                unfocusedBorderColor = Color.Transparent,
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+            ),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         )
+
+        val chipColors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primary,
+            selectedLabelColor = Color.White,
+        )
+        val chipShape = RoundedCornerShape(100.dp)
 
         // Sort chips
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
             items(BrowseSort.entries, key = { it.name }) { s ->
-                FilterChip(selected = sort == s, onClick = { vm.onSort(s) }, label = { Text(s.label) })
+                FilterChip(
+                    selected = sort == s,
+                    onClick = { vm.onSort(s) },
+                    label = { Text(s.label) },
+                    shape = chipShape,
+                    colors = chipColors,
+                )
             }
         }
 
         // Genre chips
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
             item {
-                FilterChip(selected = genre == null, onClick = { vm.onGenre(null) }, label = { Text("All") })
+                FilterChip(
+                    selected = genre == null,
+                    onClick = { vm.onGenre(null) },
+                    label = { Text("All") },
+                    shape = chipShape,
+                    colors = chipColors,
+                )
             }
             items(AniListGenres, key = { it }) { g ->
-                FilterChip(selected = genre == g, onClick = { vm.onGenre(if (genre == g) null else g) }, label = { Text(g) })
+                FilterChip(
+                    selected = genre == g,
+                    onClick = { vm.onGenre(if (genre == g) null else g) },
+                    label = { Text(g) },
+                    shape = chipShape,
+                    colors = chipColors,
+                )
             }
         }
 

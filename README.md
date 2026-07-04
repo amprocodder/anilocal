@@ -3,7 +3,7 @@
 > Branded **Onboard** in the launcher/UI (midnight-blue accent); the codebase, package
 > (`com.anilocal.app`), repo, and CI artifact keep the original **AniLocal** name.
 
-A single-APK anime app with the AniLab-style menu layout. **AniList** provides the entire browse
+A single-APK anime app with a 9anime-style UI (spotlight hero, badge poster cards, numbered episode grid). **AniList** provides the entire browse
 catalog; playable streams come from a **user-selected source** behind one abstract `AnimeSource`
 plugin seam. The app ships **no** built-in stream sources; it can **install and load
 Aniyomi/Anikku-style extension APKs** as the stream sources — so you can choose any source.
@@ -14,8 +14,8 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
 > an extension; the rest builds clean.
 
 ## What works
-- AniLab-style **bottom-nav shell**: Home · Explore · Library · **Downloads** · More.
-- **Offline downloads (Netflix-style, fully in-app)**: tap the download icon on an episode →
+- 9anime-style **bottom-nav shell**: Home · Explore · Library · **Downloads** · More.
+- **Offline downloads (Netflix-style, fully in-app)**: hold an episode in the grid →
   Media3 `DownloadManager` saves the video to app storage; **subtitles** are pulled to local
   files and **skip-times are cached** too, so playback + auto-skip work with no network. A
   **Downloads tab** (offline-accessible) lists them with progress + **pause / resume / cancel**

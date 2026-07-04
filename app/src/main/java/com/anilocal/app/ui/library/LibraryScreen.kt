@@ -15,7 +15,9 @@ import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,7 +25,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -103,14 +107,32 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
         Text(
             "My List",
             style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        val chipShape = RoundedCornerShape(100.dp)
+        val chipColors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primary,
+            selectedLabelColor = Color.White,
         )
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
             item {
-                FilterChip(selected = filter == null, onClick = { vm.setFilter(null) }, label = { Text("My List") })
+                FilterChip(
+                    selected = filter == null,
+                    onClick = { vm.setFilter(null) },
+                    label = { Text("My List") },
+                    shape = chipShape,
+                    colors = chipColors,
+                )
             }
             items(MalStatus.entries, key = { it.name }) { s ->
-                FilterChip(selected = filter == s, onClick = { vm.setFilter(s) }, label = { Text(s.label) })
+                FilterChip(
+                    selected = filter == s,
+                    onClick = { vm.setFilter(s) },
+                    label = { Text(s.label) },
+                    shape = chipShape,
+                    colors = chipColors,
+                )
             }
         }
 

@@ -3,30 +3,35 @@ package com.anilocal.app.ui.extensions
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -91,6 +96,9 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
                     }
                 },
                 actions = { TextButton(onClick = vm::load) { Text("Reload") } },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
             )
         },
     ) { padding ->
@@ -114,33 +122,53 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
             if (loading && available.isEmpty()) {
                 Text("Loading…", modifier = Modifier.padding(16.dp))
             }
-            LazyColumn(Modifier.fillMaxSize()) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 items(available, key = { it.pkg }) { entry ->
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
                     ) {
-                        Column(Modifier.weight(1f).padding(end = 8.dp)) {
-                            Text(entry.name, style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                "${entry.lang} · v${entry.versionName}" + if (entry.isNsfw) " · 18+" else "",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Button(onClick = {
-                            vm.install(entry) { file ->
-                                runCatching { launchInstall(context, file) }.onFailure {
-                                    Toast.makeText(
-                                        context,
-                                        "Install failed: ${it.message}",
-                                        Toast.LENGTH_LONG,
-                                    ).show()
+                        Row(
+                            Modifier.fillMaxWidth().padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(entry.name, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    "${entry.lang} · v${entry.versionName}" + if (entry.isNsfw) " · 18+" else "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (entry.sourceNames.isNotEmpty()) {
+                                    Text(
+                                        entry.sourceNames.joinToString(", "),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
                             }
-                        }) { Text("Install") }
+                            Button(
+                                onClick = {
+                                    vm.install(entry) { file ->
+                                        runCatching { launchInstall(context, file) }.onFailure {
+                                            Toast.makeText(
+                                                context,
+                                                "Install failed: ${it.message}",
+                                                Toast.LENGTH_LONG,
+                                            ).show()
+                                        }
+                                    }
+                                },
+                                shape = RoundedCornerShape(100.dp),
+                            ) { Text("Install") }
+                        }
                     }
-                    HorizontalDivider()
                 }
             }
         }

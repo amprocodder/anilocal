@@ -1,12 +1,19 @@
 package com.anilocal.app.ui.details
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,20 +22,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BookmarkAdded
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -48,6 +54,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,6 +78,7 @@ import com.anilocal.app.domain.repo.LibraryRepository
 import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.repo.SkipRepository
 import com.anilocal.app.domain.repo.StreamRepository
+import com.anilocal.app.ui.common.scoreLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -146,6 +156,10 @@ private fun pickForQuality(options: List<VideoStream>, quality: DownloadQuality)
         ?: options.minByOrNull { it.height ?: Int.MAX_VALUE }
 }
 
+private const val EPISODE_RANGE_SIZE = 100
+private const val EPISODES_PER_ROW = 5
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailsScreen(
     onPlay: (animeId: String, episodeNumber: Int) -> Unit,
@@ -161,20 +175,45 @@ fun DetailsScreen(
 
     Box(Modifier.fillMaxSize()) {
         if (d != null) {
+            val showRanges = d.episodes.size > EPISODE_RANGE_SIZE
+            var rangeIndex by remember(d.id, d.episodes.size) { mutableStateOf(0) }
+            val rangeStart = if (showRanges) rangeIndex * EPISODE_RANGE_SIZE else 0
+            val episodeRows = remember(d, rangeStart) {
+                val visible =
+                    if (showRanges) {
+                        d.episodes.subList(rangeStart, minOf(rangeStart + EPISODE_RANGE_SIZE, d.episodes.size))
+                    } else {
+                        d.episodes
+                    }
+                visible.chunked(EPISODES_PER_ROW)
+            }
+            val infoLine = listOfNotNull(d.studio, d.duration?.let { "$it min/ep" }).joinToString("  •  ")
             LazyColumn(
                 Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                item { HeaderArt(d) }
-                item {
-                    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(d.title, style = MaterialTheme.typography.headlineSmall)
-                        if (d.genres.isNotEmpty()) {
-                            Text(
-                                d.genres.joinToString("  •  "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                item { DetailHero(d) }
+                if (d.genres.isNotEmpty()) {
+                    item {
+                        FlowRow(
+                            Modifier.padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            d.genres.forEach { genre ->
+                                Surface(
+                                    shape = RoundedCornerShape(100.dp),
+                                    color = Color.Transparent,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                ) {
+                                    Text(
+                                        genre,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -215,29 +254,79 @@ fun DetailsScreen(
                 if (d.synopsis.isNotBlank()) {
                     item { ExpandableSynopsis(d.synopsis) }
                 }
+                if (infoLine.isNotEmpty()) {
+                    item {
+                        Text(
+                            infoLine,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
+                }
                 item {
-                    Row(
-                        Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
+                    Column(
+                        Modifier.padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
-                        Text("Episodes", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                        if (d.episodes.isNotEmpty()) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "${d.episodes.size}",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                "Episodes",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f),
                             )
+                            if (d.episodes.isNotEmpty()) {
+                                Text(
+                                    "${d.episodes.size}",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        Text(
+                            "Tap to play — hold to download",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (showRanges) {
+                    item(key = "ep-ranges") {
+                        val rangeCount = (d.episodes.size + EPISODE_RANGE_SIZE - 1) / EPISODE_RANGE_SIZE
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            items(rangeCount) { i ->
+                                val start = i * EPISODE_RANGE_SIZE + 1
+                                val end = minOf((i + 1) * EPISODE_RANGE_SIZE, d.episodes.size)
+                                FilterChip(
+                                    selected = i == rangeIndex,
+                                    onClick = { rangeIndex = i },
+                                    label = { Text("$start–$end") },
+                                )
+                            }
                         }
                     }
                 }
-                items(d.episodes, key = { it.id }) { ep ->
-                    EpisodeCard(
-                        episode = ep,
-                        downloaded = ep.number in downloaded,
-                        onClick = { onPlay(d.id, ep.number) },
-                        onDownload = { vm.download(ep) },
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
+                items(episodeRows.size, key = { "eps-" + episodeRows[it].first().id }) { rowIndex ->
+                    Row(
+                        Modifier.padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        episodeRows[rowIndex].forEach { ep ->
+                            EpisodeCell(
+                                episode = ep,
+                                downloaded = ep.number in downloaded,
+                                onClick = { onPlay(d.id, ep.number) },
+                                onLongClick = { vm.download(ep) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        repeat(EPISODES_PER_ROW - episodeRows[rowIndex].size) {
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
                 }
                 item { Box(Modifier.navigationBarsPadding().height(8.dp)) }
             }
@@ -287,23 +376,75 @@ fun DetailsScreen(
     }
 }
 
-/** Edge-to-edge header art with a bottom scrim fading into the page background. */
+/** 9anime-style hero: edge-to-edge banner with a sharp overlapping poster and meta pills. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun HeaderArt(d: AnimeDetail) {
+private fun DetailHero(d: AnimeDetail) {
     val bg = MaterialTheme.colorScheme.background
-    Box(Modifier.fillMaxWidth().height(240.dp)) {
-        AsyncImage(
-            model = d.bannerUrl ?: d.posterUrl,
-            contentDescription = d.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
-        Box(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(120.dp)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, bg)))
+    Box(Modifier.fillMaxWidth().height(252.dp)) {
+        Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(210.dp)) {
+            AsyncImage(
+                model = d.bannerUrl ?: d.posterUrl,
+                contentDescription = d.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(100.dp)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, bg)))
+            )
+        }
+        Row(Modifier.align(Alignment.BottomStart).padding(horizontal = 16.dp)) {
+            AsyncImage(
+                model = d.posterUrl,
+                contentDescription = null,   // the banner already carries d.title
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(width = 104.dp, height = 148.dp)
+                    .clip(RoundedCornerShape(6.dp)),
+            )
+            Column(
+                Modifier.align(Alignment.Bottom).padding(start = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    d.title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    d.status?.let { MetaPill(it, tinted = true) }
+                    d.format?.let { MetaPill(it) }
+                    d.seasonYear?.let { MetaPill(it.toString()) }
+                    d.averageScore?.let { MetaPill(scoreLabel(it)) }
+                    if (d.episodes.isNotEmpty()) MetaPill("${d.episodes.size} eps")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetaPill(text: String, tinted: Boolean = false) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = if (tinted) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = if (tinted) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
         )
     }
 }
@@ -324,57 +465,42 @@ private fun ExpandableSynopsis(synopsis: String) {
     )
 }
 
-/** AniLab-style episode row: dark rounded card, bold number badge, download state trailing. */
+/** 9anime-style numbered episode cell: tap plays, long-press downloads. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EpisodeCard(
+private fun EpisodeCell(
     episode: Episode,
     downloaded: Boolean,
     onClick: () -> Unit,
-    onDownload: () -> Unit,
+    onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
-    ) {
-        Row(
-            Modifier.padding(start = 10.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-            ) {
-                Box(Modifier.size(width = 44.dp, height = 32.dp), contentAlignment = Alignment.Center) {
-                    Text(
-                        "${episode.number}",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-            }
-            Text(
-                episode.title ?: "Episode ${episode.number}",
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+    val bg = if (downloaded) MaterialTheme.colorScheme.primaryContainer
+    else MaterialTheme.colorScheme.surfaceContainerHighest
+    val fg = if (downloaded) MaterialTheme.colorScheme.onPrimaryContainer
+    else MaterialTheme.colorScheme.onSurfaceVariant
+    // Downloaded state must be audible, not just a tint; the long-press action gets a label so
+    // accessibility services surface the download affordance.
+    val description =
+        if (downloaded) "Episode ${episode.number}, downloaded" else "Episode ${episode.number}"
+    Box(
+        modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(bg)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+                onLongClickLabel = "Download",
             )
-            if (downloaded) {
-                Icon(
-                    Icons.Filled.DownloadDone, "Downloaded",
-                    tint = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier.padding(12.dp).size(22.dp),
-                )
-            } else {
-                IconButton(onClick = onDownload) {
-                    Icon(
-                        Icons.Filled.Download, "Download",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
+            .testTag("ep-${episode.number}")
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "${episode.number}",
+            style = MaterialTheme.typography.labelLarge,
+            color = fg,
+        )
     }
 }

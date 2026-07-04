@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -45,10 +48,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
@@ -63,6 +66,8 @@ import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.ProgressRepository
 import com.anilocal.app.ui.common.PosterCard
+import com.anilocal.app.ui.common.SectionHeader
+import com.anilocal.app.ui.common.scoreLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,7 +77,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class HomeRow(val title: String, val items: List<AnimeSummary>)
+data class HomeRow(
+    val title: String,
+    val items: List<AnimeSummary>,
+    /** Ranked shelves overlay 9anime-style position digits on their posters. */
+    val ranked: Boolean = false,
+)
 
 /** How many trending titles the hero carousel takes for itself. */
 private const val HERO_COUNT = 6
@@ -106,24 +116,30 @@ class HomeViewModel @Inject constructor(
     fun removeFromContinue(animeId: String) = viewModelScope.launch { progress.remove(animeId) }
 
     init {
-        // Load the AniLab-style rows; each appears as soon as it returns (ordered).
-        val sections: List<Pair<String, suspend () -> List<AnimeSummary>>> = listOf(
-            "Trending Now" to { catalog.trending() },
-            "Popular This Season" to { catalog.popularThisSeason() },
-            "Top Airing" to { catalog.topAiring() },
-            "All-Time Popular" to { catalog.allTimePopular() },
-            "Upcoming" to { catalog.upcoming() },
+        // Load the home rows; each appears as soon as it returns (ordered).
+        data class Section(
+            val title: String,
+            val loader: suspend () -> List<AnimeSummary>,
+            val ranked: Boolean = false,
+        )
+        val sections = listOf(
+            Section("Trending Now", { catalog.trending() }),
+            Section("Popular This Season", { catalog.popularThisSeason() }),
+            Section("Top Airing", { catalog.topAiring() }),
+            Section("All-Time Popular", { catalog.allTimePopular() }, ranked = true),
+            Section("Upcoming", { catalog.upcoming() }),
         )
         viewModelScope.launch {
             for ((index, section) in sections.withIndex()) {
-                val (title, loader) = section
-                val items = runCatching { loader() }.getOrDefault(emptyList())
+                val items = runCatching { section.loader() }.getOrDefault(emptyList())
                 var rowItems = items
                 if (index == 0 && items.isNotEmpty()) {
                     _hero.value = items.take(HERO_COUNT)
                     rowItems = items.drop(HERO_COUNT)
                 }
-                if (rowItems.isNotEmpty()) _rows.value = _rows.value + HomeRow(title, rowItems)
+                if (rowItems.isNotEmpty()) {
+                    _rows.value = _rows.value + HomeRow(section.title, rowItems, section.ranked)
+                }
             }
         }
     }
@@ -165,7 +181,11 @@ fun HomeScreen(
             }
         }
         items(rows, key = { it.title }) { row ->
-            Shelf(row.title, row.items, downloadedIds, onOpen, onSeeAll = onExplore)
+            Shelf(
+                row.title, row.items, downloadedIds, onOpen,
+                onSeeAll = onExplore,
+                ranked = row.ranked,
+            )
         }
     }
 }
@@ -194,9 +214,9 @@ private fun HomeTopBar(onExplore: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 /**
- * AniLab-style hero: an auto-advancing full-bleed poster carousel bleeding under the status bar,
- * with gradient scrims fading the art into the page background, the brand bar on top, and the
- * current title + Watch pill at the bottom.
+ * 9anime-style spotlight: an auto-advancing full-bleed poster carousel bleeding under the status
+ * bar, with the brand bar on top and a solid info band (rank label, title, meta, white Watch pill,
+ * page dots) pinned to the slide bottom.
  */
 @Composable
 private fun HeroCarousel(
@@ -223,8 +243,7 @@ private fun HeroCarousel(
         }
     }
 
-    val bg = MaterialTheme.colorScheme.background
-    Box(Modifier.fillMaxWidth().height(430.dp)) {
+    Box(Modifier.fillMaxWidth().height(410.dp)) {
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val item = items[page]
             AsyncImage(
@@ -234,7 +253,7 @@ private fun HeroCarousel(
                 modifier = Modifier.fillMaxSize().clickable { onOpen(item.id) },
             )
         }
-        // Scrims: darken the top for the brand bar, fade the bottom into the page background.
+        // Top scrim: darken the art for the brand bar (status-bar legibility).
         Box(
             Modifier
                 .align(Alignment.TopCenter)
@@ -242,52 +261,80 @@ private fun HeroCarousel(
                 .height(130.dp)
                 .background(HeroTopScrim)
         )
+
+        HomeTopBar(onExplore, Modifier.statusBarsPadding())
+
+        val page = pagerState.currentPage.coerceIn(items.indices)
+        val current = items[page]
+        // The 9anime signature: a solid info band pinned to the slide bottom.
         Box(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(230.dp)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, bg)))
-        )
-
-        HomeTopBar(onExplore, Modifier.statusBarsPadding())
-
-        val current = items[pagerState.currentPage.coerceIn(items.indices)]
-        Column(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 32.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .heightIn(min = 112.dp)
+                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.94f)),
         ) {
-            Text(
-                current.title,
-                style = MaterialTheme.typography.headlineSmall,
-                color = Color.White,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Button(
-                onClick = { onOpen(current.id) },
-                shape = RoundedCornerShape(100.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
+            Row(
+                Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
-                Text("  Watch now", fontWeight = FontWeight.Bold)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        "#${page + 1} SPOTLIGHT",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        letterSpacing = 1.sp,
+                    )
+                    Text(
+                        current.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val meta = listOfNotNull(
+                        current.format,
+                        current.episodes?.let { "$it ep" },
+                        current.averageScore?.let(::scoreLabel),
+                    ).joinToString("  •  ")
+                    if (meta.isNotEmpty()) {
+                        Text(
+                            meta,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Button(
+                    onClick = { onOpen(current.id) },
+                    shape = RoundedCornerShape(100.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White,
+                        contentColor = Color(0xFF0B1230),
+                    ),
+                ) {
+                    Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(18.dp))
+                    Text("Watch now", fontWeight = FontWeight.Bold)
+                }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
                 items.indices.forEach { i ->
+                    val active = i == pagerState.currentPage
                     Box(
                         Modifier
-                            .size(if (i == pagerState.currentPage) 7.dp else 5.dp)
-                            .clip(CircleShape)
+                            .size(width = if (active) 10.dp else 4.dp, height = 4.dp)
+                            .clip(RoundedCornerShape(2.dp))
                             .background(
-                                if (i == pagerState.currentPage) MaterialTheme.colorScheme.tertiary
+                                if (active) MaterialTheme.colorScheme.tertiary
                                 else Color.White.copy(alpha = 0.4f)
                             )
                     )
@@ -305,11 +352,7 @@ private fun ContinueWatchingShelf(
     onRemove: (String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            "Continue Watching",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
+        SectionHeader("Continue Watching")
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -339,7 +382,7 @@ private fun ContinueCard(
             Modifier
                 .fillMaxWidth()
                 .height(94.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .clickable { onClick() },
         ) {
             AsyncImage(
@@ -421,26 +464,21 @@ private fun Shelf(
     downloadedIds: Set<String>,
     onOpen: (String) -> Unit,
     onSeeAll: () -> Unit,
+    ranked: Boolean = false,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            Text(
-                "See all",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.clickable { onSeeAll() },
-            )
-        }
+        SectionHeader(title, onSeeAll = onSeeAll)
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(horizontal = 16.dp),
         ) {
-            items(items, key = { it.id }) {
-                PosterCard(it, onClick = { onOpen(it.id) }, downloaded = it.id in downloadedIds)
+            itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
+                PosterCard(
+                    item,
+                    onClick = { onOpen(item.id) },
+                    downloaded = item.id in downloadedIds,
+                    rank = if (ranked) index + 1 else null,
+                )
             }
         }
     }

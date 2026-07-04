@@ -23,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -77,7 +79,7 @@ fun DownloadsScreen(
         Modifier.fillMaxSize().statusBarsPadding().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { Text("Downloads", style = MaterialTheme.typography.titleLarge) }
+        item { Text("Downloads", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
         items(items, key = { it.id }) { d ->
             DownloadRow(
                 item = d,
@@ -98,50 +100,66 @@ private fun DownloadRow(
     onResume: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        AsyncImage(
-            model = item.posterUrl,
-            contentDescription = item.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.width(60.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)),
-        )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(item.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-            Text(
-                "Episode ${item.episodeNumber}" + (item.quality?.let { " · $it" } ?: ""),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onClick).padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AsyncImage(
+                model = item.posterUrl,
+                contentDescription = item.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.width(60.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(6.dp)),
             )
-            when (item.state) {
-                DownloadState.DOWNLOADING -> {
-                    LinearProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth())
-                    Text("Downloading ${item.progress}%", style = MaterialTheme.typography.labelSmall)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(item.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                Text(
+                    "Episode ${item.episodeNumber}" + (item.quality?.let { " · $it" } ?: ""),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                when (item.state) {
+                    DownloadState.DOWNLOADING -> {
+                        ProgressBar(item.progress)
+                        Text("Downloading ${item.progress}%", style = MaterialTheme.typography.labelSmall)
+                    }
+                    DownloadState.QUEUED -> Text("Waiting for network…", style = MaterialTheme.typography.labelSmall)
+                    DownloadState.PAUSED -> {
+                        ProgressBar(item.progress)
+                        Text("Paused (${item.progress}%)", style = MaterialTheme.typography.labelSmall)
+                    }
+                    DownloadState.COMPLETED -> Text("Downloaded — tap to play offline",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    DownloadState.FAILED -> Text("Failed", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error)
                 }
-                DownloadState.QUEUED -> Text("Waiting for network…", style = MaterialTheme.typography.labelSmall)
-                DownloadState.PAUSED -> {
-                    LinearProgressIndicator(progress = { item.progress / 100f }, modifier = Modifier.fillMaxWidth())
-                    Text("Paused (${item.progress}%)", style = MaterialTheme.typography.labelSmall)
-                }
-                DownloadState.COMPLETED -> Text("Downloaded — tap to play offline",
-                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                DownloadState.FAILED -> Text("Failed", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error)
             }
+            // State-dependent controls.
+            when (item.state) {
+                DownloadState.DOWNLOADING, DownloadState.QUEUED ->
+                    IconButton(onClick = onPause) { Icon(Icons.Filled.Pause, "Pause") }
+                DownloadState.PAUSED ->
+                    IconButton(onClick = onResume) { Icon(Icons.Filled.PlayArrow, "Resume") }
+                DownloadState.FAILED ->
+                    IconButton(onClick = onResume) { Icon(Icons.Filled.Refresh, "Retry") }
+                DownloadState.COMPLETED -> Unit
+            }
+            IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Remove") }
         }
-        // State-dependent controls.
-        when (item.state) {
-            DownloadState.DOWNLOADING, DownloadState.QUEUED ->
-                IconButton(onClick = onPause) { Icon(Icons.Filled.Pause, "Pause") }
-            DownloadState.PAUSED ->
-                IconButton(onClick = onResume) { Icon(Icons.Filled.PlayArrow, "Resume") }
-            DownloadState.FAILED ->
-                IconButton(onClick = onResume) { Icon(Icons.Filled.Refresh, "Retry") }
-            DownloadState.COMPLETED -> Unit
-        }
-        IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Remove") }
     }
+}
+
+@Composable
+private fun ProgressBar(progress: Int) {
+    LinearProgressIndicator(
+        progress = { progress / 100f },
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.primary,
+        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+    )
 }

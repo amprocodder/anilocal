@@ -35,8 +35,21 @@ data class MediaDto(
     val description: String?,
     val genres: List<String>?,
     val episodes: Int?,
+    val format: String?,
+    val averageScore: Int?,
+    val status: String?,
+    val seasonYear: Int?,
+    val duration: Int?,
+    val studios: StudiosDto?,
+    val nextAiringEpisode: NextAiringEpisodeDto?,
 )
 
 data class TitleDto(val romaji: String?, val english: String?, val native: String?)
 
 data class CoverDto(val large: String?, val extraLarge: String?)
+
+data class StudiosDto(val nodes: List<StudioNodeDto>?)
+
+data class StudioNodeDto(val name: String?)
+
+data class NextAiringEpisodeDto(val episode: Int?)

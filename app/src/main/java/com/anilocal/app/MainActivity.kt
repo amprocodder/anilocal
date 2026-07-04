@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -87,7 +89,7 @@ private fun AppRoot() {
                             onDismiss = appVm::dismissBar,
                         )
                     }
-                    NavigationBar {
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest) {
                         TopTab.entries.forEach { tab ->
                             NavigationBarItem(
                                 selected = currentRoute == tab.route,
@@ -100,6 +102,13 @@ private fun AppRoot() {
                                 },
                                 icon = { androidx.compose.material3.Icon(tab.icon, tab.label) },
                                 label = { Text(tab.label) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    selectedTextColor = MaterialTheme.colorScheme.tertiary,
+                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
                             )
                         }
                     }
