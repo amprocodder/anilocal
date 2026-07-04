@@ -37,6 +37,8 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   no MAL id so the control always demonstrates.
 - **Room persistence**: "My List" (Library tab) + "Continue Watching" (Home), with watch
   progress saved during playback.
+- **In-list search**: the Explore-style search box on the Library tab (filters My List or the
+  selected MAL category by title) and on the Downloads tab (filters the season folders).
 - **User-selectable stream sources**: a runtime **source registry** + picker (More tab). No
   built-in sources ship; **installed Aniyomi extensions** appear automatically and resolve
   streams for AniList-browsed titles. **Browse extensions** (More → Browse extensions) lists a

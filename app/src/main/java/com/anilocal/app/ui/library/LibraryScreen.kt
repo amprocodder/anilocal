@@ -41,6 +41,7 @@ import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.LibraryRepository
 import com.anilocal.app.domain.repo.MalRepository
 import com.anilocal.app.ui.common.PosterCard
+import com.anilocal.app.ui.common.SearchField
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,12 +66,15 @@ class LibraryViewModel @Inject constructor(
     /** null = "My List" (local additions + ALL MAL entries, uncategorised); else a MAL status. */
     val filter = MutableStateFlow<MalStatus?>(null)
 
+    /** Case-insensitive title filter applied on top of the current chip filter. */
+    val query = MutableStateFlow("")
+
     /**
-     * Grid items for the current filter, unified to [AnimeSummary]. "My List" merges the local
-     * library with the entire MAL mirror — deduped by MAL id, with the local entry winning so it
-     * opens directly. A status chip shows just that MAL category.
+     * Grid items for the current chip filter, unified to [AnimeSummary], pre-query. "My List"
+     * merges the local library with the entire MAL mirror — deduped by MAL id, with the local
+     * entry winning so it opens directly. A status chip shows just that MAL category.
      */
-    val items: StateFlow<List<AnimeSummary>> =
+    private val unfiltered: StateFlow<List<AnimeSummary>> =
         filter.flatMapLatest { f ->
             if (f == null) {
                 combine(library.library, mal.all()) { local, malAll ->
@@ -82,10 +86,23 @@ class LibraryViewModel @Inject constructor(
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val items: StateFlow<List<AnimeSummary>> =
+        unfiltered.combine(query) { list, q ->
+            val t = q.trim()
+            if (t.isEmpty()) list else list.filter { it.title.contains(t, ignoreCase = true) }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Whether the current chip has anything at all, pre-query — picks the right empty hint. */
+    val hasEntries: StateFlow<Boolean> =
+        unfiltered.map { it.isNotEmpty() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     val downloadedIds: StateFlow<Set<String>> =
         downloads.downloadedAnimeIds().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     fun setFilter(status: MalStatus?) { filter.value = status }
+
+    fun setQuery(q: String) { query.value = q }
 
     suspend fun anilistIdForMal(malId: Int): String? = catalog.anilistIdForMal(malId)
 
@@ -97,7 +114,9 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val filter by vm.filter.collectAsStateWithLifecycle()
+    val query by vm.query.collectAsStateWithLifecycle()
     val gridItems by vm.items.collectAsStateWithLifecycle()
+    val hasEntries by vm.hasEntries.collectAsStateWithLifecycle()
     val downloadedIds by vm.downloadedIds.collectAsStateWithLifecycle()
 
     Column(
@@ -108,6 +127,12 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
             "My List",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        SearchField(
+            value = query,
+            onValueChange = vm::setQuery,
+            placeholder = "Search your list…",
             modifier = Modifier.padding(horizontal = 16.dp),
         )
         val chipShape = RoundedCornerShape(100.dp)
@@ -138,6 +163,11 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
 
         Box(Modifier.weight(1f).fillMaxSize()) {
             when {
+                // Only when the query filtered out a non-empty list — a genuinely empty
+                // list/category falls through to its actionable onboarding hint instead.
+                gridItems.isEmpty() && query.isNotBlank() && hasEntries ->
+                    Hint("No titles match “${query.trim()}”.")
+
                 gridItems.isEmpty() && filter == null ->
                     Hint("Your list is empty — add titles from a detail page, or sync your MAL list in Settings.")
 

@@ -13,14 +13,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,7 +33,9 @@ import com.anilocal.app.domain.model.BrowseSort
 import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.ui.common.PosterCard
+import com.anilocal.app.ui.common.SearchField
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -61,17 +58,24 @@ class ExploreViewModel @Inject constructor(
     val downloadedIds: StateFlow<Set<String>> =
         downloads.downloadedAnimeIds().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
+    // Latest-wins: a slow earlier search must not overwrite the results of a newer one
+    // (easiest to hit via the search box's clear button restoring the browse grid).
+    private var loadJob: Job? = null
+
     init { reload() }
 
     fun onQuery(q: String) { query.value = q; reload() }
     fun onGenre(g: String?) { genre.value = g; reload() }
     fun onSort(s: BrowseSort) { sort.value = s; reload() }
 
-    private fun reload() = viewModelScope.launch {
-        _results.value = runCatching {
-            val q = query.value
-            if (q.isNotBlank()) catalog.search(q) else catalog.browse(genre.value, sort.value)
-        }.getOrDefault(emptyList())
+    private fun reload() {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            _results.value = runCatching {
+                val q = query.value
+                if (q.isNotBlank()) catalog.search(q) else catalog.browse(genre.value, sort.value)
+            }.getOrDefault(emptyList())
+        }
     }
 }
 
@@ -94,20 +98,11 @@ fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = hiltViewModel
             modifier = Modifier.padding(horizontal = 16.dp),
         )
 
-        OutlinedTextField(
+        SearchField(
             value = query,
             onValueChange = vm::onQuery,
-            placeholder = { Text("Search anime…") },
-            leadingIcon = { Icon(Icons.Filled.Search, null) },
-            singleLine = true,
-            shape = RoundedCornerShape(10.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                unfocusedBorderColor = Color.Transparent,
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-            ),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            placeholder = "Search anime…",
+            modifier = Modifier.padding(horizontal = 16.dp),
         )
 
         val chipColors = FilterChipDefaults.filterChipColors(

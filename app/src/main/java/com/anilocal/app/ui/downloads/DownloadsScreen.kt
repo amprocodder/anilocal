@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +31,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,11 +52,13 @@ import coil.compose.AsyncImage
 import com.anilocal.app.domain.model.DownloadItem
 import com.anilocal.app.domain.model.DownloadState
 import com.anilocal.app.domain.repo.DownloadRepository
+import com.anilocal.app.ui.common.SearchField
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -82,6 +86,9 @@ class DownloadsViewModel @Inject constructor(
     // delete half-done (file cleanup + Room rows would go inconsistent).
     @Named("appScope") private val appScope: CoroutineScope,
 ) : ViewModel() {
+    /** Case-insensitive title filter over the season folders. */
+    val query = MutableStateFlow("")
+
     /**
      * Downloads grouped into per-title season folders. The DAO emits newest-first, and groupBy
      * keeps first-encounter order, so folders are ordered by most recent download activity.
@@ -96,7 +103,17 @@ class DownloadsViewModel @Inject constructor(
                     episodes = eps.sortedBy { it.episodeNumber },
                 )
             }
+        }.combine(query) { list, q ->
+            val t = q.trim()
+            if (t.isEmpty()) list else list.filter { it.title.contains(t, ignoreCase = true) }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Whether ANY download exists, pre-filter — picks the real empty state over "no match". */
+    val hasDownloads: StateFlow<Boolean> =
+        downloads.downloads.map { it.isNotEmpty() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setQuery(q: String) { query.value = q }
 
     // Folders start expanded; the set remembers what the user collapsed (in the VM so it
     // survives tab switches, keyed by animeId so it tracks folders across list changes).
@@ -133,9 +150,13 @@ fun DownloadsScreen(
 ) {
     val folders by vm.folders.collectAsStateWithLifecycle()
     val collapsed by vm.collapsed.collectAsStateWithLifecycle()
+    val query by vm.query.collectAsStateWithLifecycle()
+    val hasDownloads by vm.hasDownloads.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<SeasonFolder?>(null) }
 
-    if (folders.isEmpty()) {
+    if (!hasDownloads) {
+        // Reset any leftover filter so downloads added later aren't silently hidden by it.
+        LaunchedEffect(Unit) { vm.setQuery("") }
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("No downloads yet — tap the download icon on an episode.",
                 style = MaterialTheme.typography.bodyMedium)
@@ -143,30 +164,45 @@ fun DownloadsScreen(
         return
     }
 
-    LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp, vertical = 16.dp),
+    Column(
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp).padding(top = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { Text("Downloads", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-        folders.forEach { folder ->
-            val expanded = folder.animeId !in collapsed
-            item(key = "season-${folder.animeId}") {
-                SeasonHeader(
-                    folder = folder,
-                    expanded = expanded,
-                    onToggle = { vm.toggleFolder(folder.animeId) },
-                    onDeleteAll = { pendingDelete = folder },
-                )
+        Text("Downloads", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        SearchField(value = query, onValueChange = vm::setQuery, placeholder = "Search downloads…")
+        if (folders.isEmpty()) {
+            // Query matched nothing (there ARE downloads — the !hasDownloads case returned above).
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("No downloads match “${query.trim()}”.",
+                    style = MaterialTheme.typography.bodyMedium)
             }
-            if (expanded) {
-                items(folder.episodes, key = { it.id }) { d ->
-                    EpisodeRow(
-                        item = d,
-                        onClick = { if (d.state == DownloadState.COMPLETED) onPlay(d.animeId, d.episodeNumber) },
-                        onPause = { vm.pause(d.id) },
-                        onResume = { vm.resume(d.id) },
-                        onDelete = { vm.remove(d.id) },
-                    )
+        } else {
+            LazyColumn(
+                Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 16.dp),
+            ) {
+                folders.forEach { folder ->
+                    val expanded = folder.animeId !in collapsed
+                    item(key = "season-${folder.animeId}") {
+                        SeasonHeader(
+                            folder = folder,
+                            expanded = expanded,
+                            onToggle = { vm.toggleFolder(folder.animeId) },
+                            onDeleteAll = { pendingDelete = folder },
+                        )
+                    }
+                    if (expanded) {
+                        items(folder.episodes, key = { it.id }) { d ->
+                            EpisodeRow(
+                                item = d,
+                                onClick = { if (d.state == DownloadState.COMPLETED) onPlay(d.animeId, d.episodeNumber) },
+                                onPause = { vm.pause(d.id) },
+                                onResume = { vm.resume(d.id) },
+                                onDelete = { vm.remove(d.id) },
+                            )
+                        }
+                    }
                 }
             }
         }
