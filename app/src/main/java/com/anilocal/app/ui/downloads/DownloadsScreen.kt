@@ -51,13 +51,16 @@ import com.anilocal.app.domain.model.DownloadItem
 import com.anilocal.app.domain.model.DownloadState
 import com.anilocal.app.domain.repo.DownloadRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import javax.inject.Named
 
 /** All of one title's downloads, shown as a collapsible season folder. */
 data class SeasonFolder(
@@ -75,6 +78,9 @@ data class SeasonFolder(
 @HiltViewModel
 class DownloadsViewModel @Inject constructor(
     private val downloads: DownloadRepository,
+    // Removals run here, not on viewModelScope: leaving the tab mid-way must not cancel a season
+    // delete half-done (file cleanup + Room rows would go inconsistent).
+    @Named("appScope") private val appScope: CoroutineScope,
 ) : ViewModel() {
     /**
      * Downloads grouped into per-title season folders. The DAO emits newest-first, and groupBy
@@ -105,9 +111,18 @@ class DownloadsViewModel @Inject constructor(
 
     fun pause(id: String) = downloads.pause(id)
     fun resume(id: String) = downloads.resume(id)
-    fun remove(id: String) = viewModelScope.launch { downloads.remove(id) }
-    fun removeSeason(folder: SeasonFolder) = viewModelScope.launch {
-        folder.episodes.forEach { downloads.remove(it.id) }
+    fun remove(id: String) { appScope.launch { downloads.remove(id) } }
+
+    /**
+     * Deletes by live lookup, not the dialog's UI snapshot — an episode that finished queuing after
+     * the confirm dialog opened is deleted too, instead of surviving as an orphan row.
+     */
+    fun removeSeason(animeId: String) {
+        appScope.launch {
+            runCatching { downloads.downloads.first() }.getOrDefault(emptyList())
+                .filter { it.animeId == animeId }
+                .forEach { downloads.remove(it.id) }
+        }
     }
 }
 
@@ -163,13 +178,16 @@ fun DownloadsScreen(
             title = { Text("Delete season?") },
             text = {
                 Text(
-                    "Remove all ${folder.episodes.size} downloaded episode" +
-                        (if (folder.episodes.size == 1) "" else "s") + " of “${folder.title}”?"
+                    // "episodes", not "downloaded episodes" — the folder also holds queued,
+                    // in-progress and failed rows, and deleting cancels the in-flight ones.
+                    "Remove all ${folder.episodes.size} episode" +
+                        (if (folder.episodes.size == 1) "" else "s") +
+                        " of “${folder.title}” from downloads?"
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    vm.removeSeason(folder)
+                    vm.removeSeason(folder.animeId)
                     pendingDelete = null
                 }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
@@ -202,7 +220,7 @@ private fun SeasonHeader(
         ) {
             AsyncImage(
                 model = folder.posterUrl,
-                contentDescription = folder.title,
+                contentDescription = null,   // the header row's Text already announces the title
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.width(44.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(6.dp)),
             )
@@ -224,9 +242,12 @@ private fun SeasonHeader(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // A thin aggregate bar while anything in the folder is still coming down.
+                // A thin aggregate bar while anything in the folder is still coming down —
+                // averaged over the episodes actually moving (paused/failed ones would pin it).
                 if (folder.active > 0) {
-                    val inFlight = folder.episodes.filter { it.state != DownloadState.COMPLETED }
+                    val inFlight = folder.episodes.filter {
+                        it.state == DownloadState.DOWNLOADING || it.state == DownloadState.QUEUED
+                    }
                     ProgressBar(inFlight.sumOf { it.progress } / inFlight.size.coerceAtLeast(1))
                 }
             }

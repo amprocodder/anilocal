@@ -63,6 +63,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.annotation.VisibleForTesting
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -72,6 +73,7 @@ import coil.compose.AsyncImage
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.DownloadQuality
+import com.anilocal.app.domain.model.DownloadState
 import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.VideoStream
@@ -86,6 +88,8 @@ import com.anilocal.app.ui.common.SectionHeader
 import com.anilocal.app.ui.common.scoreLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -93,6 +97,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Named
 
@@ -107,7 +112,7 @@ data class PendingDownload(
 data class SeasonDownload(
     val queued: Int,
     val failed: Int,
-    val total: Int,
+    val total: Int,          // 0 while the pass is still working out which episodes it needs
     val finished: Boolean = false,
 )
 
@@ -134,10 +139,18 @@ class DetailsViewModel @Inject constructor(
         downloads.downloadedEpisodes(animeId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
-    /** Episodes present in the downloads list in ANY state — drives the season button's done state. */
+    /**
+     * Episodes present in the downloads list in any NON-FAILED state — drives the season button's
+     * done state. Failed rows count as missing so the done check never lies and a season re-press
+     * can retry them.
+     */
     val episodesInDownloads: StateFlow<Set<Int>> =
         downloads.downloads
-            .map { list -> list.filter { it.animeId == animeId }.map { it.episodeNumber }.toSet() }
+            .map { list ->
+                list.filter { it.animeId == animeId && it.state != DownloadState.FAILED }
+                    .map { it.episodeNumber }
+                    .toSet()
+            }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     val defaultQuality: StateFlow<DownloadQuality> =
@@ -146,8 +159,9 @@ class DetailsViewModel @Inject constructor(
     private val _pending = MutableStateFlow<PendingDownload?>(null)
     val pending: StateFlow<PendingDownload?> = _pending
 
-    private val _seasonDownload = MutableStateFlow<SeasonDownload?>(null)
-    val seasonDownload: StateFlow<SeasonDownload?> = _seasonDownload
+    // Shared per-title pass state (see companion) so a re-entered Details screen sees the live pass.
+    private val seasonState = seasonPasses.getOrPut(animeId) { MutableStateFlow(null) }
+    val seasonDownload: StateFlow<SeasonDownload?> = seasonState
 
     init { viewModelScope.launch { _detail.value = runCatching { catalog.detail(animeId) }.getOrNull() } }
 
@@ -178,34 +192,71 @@ class DetailsViewModel @Inject constructor(
 
     /**
      * One press → the whole season: resolves and enqueues every episode not already in the downloads
-     * list, sequentially (polite to the source), picking the variant that matches the default download
-     * quality. Failed episodes are counted but don't stop the rest; a re-press after it finishes
-     * retries just the episodes that are still missing.
+     * list (failed rows count as missing, so a re-press retries them), sequentially — polite to the
+     * source — at the default download quality. Failed episodes are counted but don't stop the rest.
+     * One pass per title app-wide: the pass survives this screen closing, a re-entered screen picks
+     * up its live progress, and pressing the button mid-pass cancels it.
      */
     fun downloadSeason() {
         val d = _detail.value ?: return
-        if (_seasonDownload.value?.finished == false) return   // a queue pass is already running
-        appScope.launch {
-            val existing = runCatching { downloads.downloads.first() }.getOrDefault(emptyList())
-                .filter { it.animeId == d.id }
-                .map { it.episodeNumber }
-                .toSet()
-            val toQueue = d.episodes.filter { it.number !in existing }
-            if (toQueue.isEmpty()) return@launch
-            _seasonDownload.value = SeasonDownload(0, 0, toQueue.size)
-            val quality = runCatching { settings.downloadQuality.first() }.getOrDefault(DownloadQuality.AUTO)
-            var queued = 0
-            var failed = 0
-            for (ep in toQueue) {
-                val ok = runCatching {
-                    val stream = checkNotNull(pickForQuality(streams.resolveStreams(d.title, ep.number), quality))
-                    val markers = runCatching { skip.markers(d.idMal, ep.number, 0) }.getOrDefault(emptyList())
-                    downloads.enqueue(d, ep, stream, markers)
-                }.isSuccess
-                if (ok) queued++ else failed++
-                _seasonDownload.value = SeasonDownload(queued, failed, toQueue.size)
+        if (seasonState.value?.finished == false) return   // a queue pass is already running
+        seasonState.value = SeasonDownload(0, 0, 0)        // claim synchronously — no double-tap window
+        seasonJobs[animeId] = appScope.launch {
+            try {
+                val quality = runCatching { settings.downloadQuality.first() }.getOrDefault(DownloadQuality.AUTO)
+                val toQueue = d.episodes.filter { it.number !in episodesQueuedNow() }
+                if (toQueue.isEmpty()) {
+                    seasonState.value = null
+                    return@launch
+                }
+                seasonState.value = SeasonDownload(0, 0, toQueue.size)
+                var queued = 0
+                var failed = 0
+                for (ep in toQueue) {
+                    val ok = runCatching {
+                        // Re-check against live state: a long-press may have queued it mid-pass.
+                        if (ep.number !in episodesQueuedNow()) {
+                            val stream = checkNotNull(pickForQuality(streams.resolveStreams(d.title, ep.number), quality))
+                            val markers = runCatching { skip.markers(d.idMal, ep.number, 0) }.getOrDefault(emptyList())
+                            downloads.enqueue(d, ep, stream, markers)
+                        }
+                    }.isSuccess
+                    ensureActive()   // runCatching swallows cancellation — don't count it as a failure
+                    if (ok) queued++ else failed++
+                    seasonState.value = SeasonDownload(queued, failed, toQueue.size)
+                }
+                seasonState.value = SeasonDownload(queued, failed, toQueue.size, finished = true)
+            } finally {
+                seasonJobs.remove(animeId)
             }
-            _seasonDownload.value = SeasonDownload(queued, failed, toQueue.size, finished = true)
+        }
+    }
+
+    /** Stops a running pass; episodes already handed to the download manager keep downloading. */
+    fun cancelSeasonDownload() {
+        seasonJobs.remove(animeId)?.cancel()
+        seasonState.value = null
+    }
+
+    /** Episode numbers of this title currently in the downloads list in any non-failed state. */
+    private suspend fun episodesQueuedNow(): Set<Int> =
+        runCatching { downloads.downloads.first() }.getOrDefault(emptyList())
+            .filter { it.animeId == animeId && it.state != DownloadState.FAILED }
+            .map { it.episodeNumber }
+            .toSet()
+
+    companion object {
+        // Keyed by animeId and static: a pass runs on appScope and outlives any single Details
+        // ViewModel, so in-flight tracking (and its progress) must too — otherwise leaving and
+        // re-entering the screen could start a second concurrent pass for the same title.
+        private val seasonPasses = ConcurrentHashMap<String, MutableStateFlow<SeasonDownload?>>()
+        private val seasonJobs = ConcurrentHashMap<String, Job>()
+
+        @VisibleForTesting
+        internal fun resetSeasonDownloadState() {
+            seasonJobs.values.forEach { it.cancel() }
+            seasonJobs.clear()
+            seasonPasses.clear()
         }
     }
 }
@@ -303,7 +354,8 @@ fun DetailsScreen(
                             state = seasonDownload,
                             allInDownloads = d.episodes.isNotEmpty() &&
                                 d.episodes.all { it.number in inDownloads },
-                            onClick = vm::downloadSeason,
+                            onDownload = vm::downloadSeason,
+                            onCancel = vm::cancelSeasonDownload,
                         )
                         FilledTonalIconButton(
                             onClick = vm::toggleSaved,
@@ -356,10 +408,12 @@ fun DetailsScreen(
                         val sd = seasonDownload
                         Text(
                             when {
+                                sd != null && !sd.finished && sd.total == 0 ->
+                                    "Preparing season download…"
                                 sd != null && !sd.finished ->
-                                    "Queuing season… ${sd.queued + sd.failed}/${sd.total}"
+                                    "Queuing season… ${sd.queued + sd.failed}/${sd.total} — press again to cancel"
                                 sd != null && sd.failed > 0 ->
-                                    "Season queued — ${sd.failed} episode${if (sd.failed == 1) "" else "s"} failed"
+                                    "Season queued — ${sd.failed} episode${if (sd.failed == 1) "" else "s"} failed, press to retry"
                                 else -> "Tap to play — hold to download"
                             },
                             style = MaterialTheme.typography.bodySmall,
@@ -475,29 +529,44 @@ fun DetailsScreen(
 }
 
 /**
- * One-press "download the whole season" button. While a queue pass runs it shows queued/total;
- * once every episode is in the downloads list it flips to a tinted done check.
+ * One-press "download the whole season" button. While a queue pass runs it shows progress and a
+ * press cancels; once every episode is in the downloads list (none failed) it flips to a tinted
+ * done check.
  */
 @Composable
 private fun SeasonDownloadButton(
     state: SeasonDownload?,
     allInDownloads: Boolean,
-    onClick: () -> Unit,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
 ) {
     val queuing = state != null && !state.finished
     FilledTonalIconButton(
-        onClick = onClick,
-        enabled = !queuing,
+        onClick = if (queuing) onCancel else onDownload,
         colors = IconButtonDefaults.filledTonalIconButtonColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         ),
         modifier = Modifier.size(46.dp).testTag("download-season"),
     ) {
         when {
-            queuing -> Text(
-                "${state!!.queued + state.failed}/${state.total}",
-                style = MaterialTheme.typography.labelSmall,
-            )
+            queuing -> {
+                val s = state!!
+                val done = s.queued + s.failed
+                Text(
+                    when {
+                        s.total == 0 -> "…"
+                        // Three-digit seasons don't fit in a 46dp circle — fall back to percent.
+                        s.total > 99 -> "${done * 100 / s.total}%"
+                        else -> "$done/${s.total}"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Cancel season download, $done of ${s.total} queued"
+                    },
+                )
+            }
             allInDownloads -> Icon(
                 Icons.Filled.DownloadDone,
                 "Season downloaded",

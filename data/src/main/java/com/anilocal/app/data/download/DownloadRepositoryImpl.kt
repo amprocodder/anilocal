@@ -136,7 +136,19 @@ class DownloadRepositoryImpl @Inject constructor(
         val request = DownloadRequest.Builder(id, Uri.parse(stream.url))
             .apply { stream.mimeType?.let { setMimeType(it) } }
             .build()
-        DownloadService.sendAddDownload(context, AniLocalDownloadService::class.java, request, /* foreground= */ true)
+        try {
+            DownloadService.sendAddDownload(context, AniLocalDownloadService::class.java, request, /* foreground= */ true)
+        } catch (e: Exception) {
+            // Season passes enqueue from appScope, possibly with the app backgrounded — where an
+            // API 31+ foreground-service start throws. Hand the request straight to the shared
+            // DownloadManager instead (the service binds the same instance and takes over on its
+            // next start). If even that fails, drop the Room row we just wrote so no phantom
+            // "Downloading 0%" entry survives, and let the caller count the episode as failed.
+            runCatching { downloadManager.addDownload(request) }.onFailure {
+                dao.deleteById(id)
+                throw it
+            }
+        }
     }
 
     override suspend fun getOffline(animeId: String, episodeNumber: Int): OfflineEpisode? {
