@@ -106,9 +106,12 @@ class DownloadRepositoryImpl @Inject constructor(
         val id = "${detail.id}-ep${episode.number}"
 
         // Pull sidecar subtitles into app storage and rewrite their URLs to local file:// uris.
+        // The stream's request headers ride along — subtitle CDNs are often gated on the same
+        // Referer as the video, and a header-less fetch 403s (which used to mean the episode
+        // downloaded with no captions at all).
         val localSubs = stream.subtitles.mapIndexedNotNull { index, sub ->
             runCatching {
-                val file = downloadSubtitle(sub, id, index)
+                val file = downloadSubtitle(sub, id, index, stream.headers)
                 Subtitle(Uri.fromFile(file).toString(), sub.language, sub.label)
             }.getOrNull()
         }
@@ -205,7 +208,7 @@ class DownloadRepositoryImpl @Inject constructor(
         dao.deleteById(id)
     }
 
-    private suspend fun downloadSubtitle(sub: Subtitle, id: String, index: Int): File =
+    private suspend fun downloadSubtitle(sub: Subtitle, id: String, index: Int, headers: Map<String, String>): File =
         withContext(Dispatchers.IO) {
             val dir = File(downloadDir, "subs").apply { mkdirs() }
             // Derive the extension from the URL PATH, not the raw URL: "…/sub.srt?token=abc" must yield
@@ -213,7 +216,12 @@ class DownloadRepositoryImpl @Inject constructor(
             // path-based mime classifier when the cached file:// uri is replayed offline.
             val ext = (Uri.parse(sub.url).path ?: sub.url).substringAfterLast('.', "vtt").take(5)
             val file = File(dir, "$id-$index.$ext")
-            okHttp.newCall(Request.Builder().url(sub.url).build()).execute().use { resp ->
+            val request = Request.Builder().url(sub.url).apply {
+                // Per-header runCatching: one source-supplied header OkHttp rejects (odd chars)
+                // must not cost the whole subtitle.
+                headers.forEach { (k, v) -> runCatching { header(k, v) } }
+            }.build()
+            okHttp.newCall(request).execute().use { resp ->
                 // Without this check an error page would persist as a "valid" subtitle sidecar and
                 // render as garbage cues offline; throwing lets the caller drop just this track.
                 if (!resp.isSuccessful) error("subtitle fetch failed (HTTP ${resp.code})")

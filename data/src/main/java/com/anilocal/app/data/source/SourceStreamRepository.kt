@@ -85,18 +85,24 @@ class SourceStreamRepository @Inject constructor(
             ?: error("source '${source.info.name}': no servers for episode of \"${detail.title}\"")
         val variants = source.resolve(server).sortedByDescending { it.height ?: 0 }
         if (variants.isEmpty()) error("source '${source.info.name}': no streams for episode $episodeNumber of \"${detail.title}\"")
-        return variants
+        // Some sources attach subtitle tracks to only one rendition (often a lower one). Union every
+        // variant's subs onto EVERY variant (deduped by url, the variant's own first so the default
+        // track stays stable) — whichever variant playback's height sort or the download quality
+        // picker selects, no caption is silently lost. Downloads especially depended on this: the
+        // picked variant used to carry only its own (often empty) list, so episodes downloaded
+        // without any subtitles.
+        val union = variants.flatMap { it.subtitles }.distinctBy { it.url }
+        return if (union.isEmpty()) variants
+        else variants.map { v ->
+            if (v.subtitles.size == union.size) v
+            else v.copy(subtitles = (v.subtitles + union).distinctBy { it.url })
+        }
     }
 
-    override suspend fun resolveStream(animeTitle: String, episodeNumber: Int): VideoStream {
-        val variants = resolveStreams(animeTitle, episodeNumber)
-        val best = variants.firstOrNull() ?: error("no stream for \"$animeTitle\"")
-        // Online playback uses only the top-quality variant, but some sources attach subtitle tracks to
-        // a lower rendition (or only some of them). Union every variant's subs onto the chosen stream
-        // (deduped by url, best's own first) so captions aren't silently lost to the height sort.
-        val mergedSubs = variants.flatMap { it.subtitles }.distinctBy { it.url }
-        return if (mergedSubs.size > best.subtitles.size) best.copy(subtitles = mergedSubs) else best
-    }
+    // The union merge above already puts every known subtitle on every variant, so the best
+    // variant is complete as-is.
+    override suspend fun resolveStream(animeTitle: String, episodeNumber: Int): VideoStream =
+        resolveStreams(animeTitle, episodeNumber).first()
 
     private companion object {
         val DETAIL: java.lang.reflect.Type = AnimeDetail::class.java
