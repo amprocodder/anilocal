@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [LibraryEntity::class, WatchProgressEntity::class, DownloadEntity::class, MalEntryEntity::class],
-    version = 4,
+    version = 5,   // bumps MUST ship a Migration in DatabaseModule — this DB holds user data
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {

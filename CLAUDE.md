@@ -162,14 +162,37 @@ for the old MAL client id).
   and the DAO hard-codes `state = 1` to mean COMPLETED — a magic number duplicated from private companion
   consts, easy to break; subtitles and skip markers are stored as Moshi **JSON columns** on `DownloadEntity`
   (not separate tables); offline subtitle files are pulled into `<downloadDir>/subs/` with their URLs
-  rewritten to `file://` and **deleted manually in `remove()`**. The DB (`anilocal.db`, version 4,
-  `exportSchema = false`) uses `fallbackToDestructiveMigration()` with **no `Migration` objects**
-  (`DatabaseModule.kt`) — any schema change must bump the version and **wipes all local data** (library,
-  progress, downloads, MAL cache) on next launch.
+  rewritten to `file://` and **deleted manually in `remove()`**. There are **two Room databases**
+  (`DatabaseModule.kt`): `anilocal.db` (version 5, `exportSchema = false`) holds user data and **every
+  schema bump must ship a `Migration`** (`MIGRATION_4_5` — the `headersJson` column — is the pattern;
+  `fallbackToDestructiveMigration()` remains only as a last-resort for pathless jumps), while
+  `anilocal-cache.db` is the **disposable** JSON cache (one `kv_cache` table) where destructive
+  migration is always fine.
+
+- **Stale-while-revalidate reads via `JsonCache`** (`data/.../cache/JsonCache.kt`, over the disposable
+  cache DB): repositories call `cache.cached(key, type, ttl) { fetch() }` — **any** cached hit (fresh
+  or stale) is served instantly, a past-TTL hit also kicks a deduped background refresh, and only a
+  cold cache blocks on the network. That makes Home/Explore/Details/Search, AniSkip markers, and the
+  extension-repo index render offline once seen (namespaced keys: `home:*`, `browse:*`, `search:*`,
+  `popular:*`, `detail:*`, `skip:*`, `src:*`, `extrepo:*`, `malmap:*` — the last is permanent, the
+  rest sweep after 30 days). `CatalogRepository` binds to `CachedCatalogRepository` (decorator over
+  `AniListCatalogRepository`); when adding a catalog query, add it to **both**. Stream resolution still
+  needs the network — it caches only the search→detail leg (episode ids, 4h) to cut round-trips, never
+  server/stream URLs (tokenized/short-lived); a cached match that stops resolving falls back to one
+  live re-run which overwrites the entry on success. Posters survive offline via the app-wide Coil
+  loader in `AniLocalApp` (`respectCacheHeaders(false)` + 256 MB disk cache).
 
 - **One shared Media3 `Cache`** (`data/.../download/DownloadModule.kt`) is written by the
   `DownloadManager` and read back by the playback `CacheDataSource.Factory`. The player is built on that
   factory, so it transparently serves downloaded bytes offline and falls through to network when online.
+  There are **two** `DefaultHttpDataSource.Factory` singletons: the unqualified one is the player's
+  (per-stream headers set by `PlayerViewModel`), `@Named("downloadHttp")` is the `DownloadManager`'s —
+  they must stay separate or playback headers clobber a running download's Referer (403s). Download
+  headers ride a `ResolvingDataSource` that consults `DownloadHeaderStore` **per request**: enqueue/
+  resume point the store at the download's headers (persisted in `DownloadEntity.headersJson`), and
+  on a cold process — including a headless scheduler/boot service restart, where no ViewModel ever
+  constructs `DownloadRepositoryImpl` — the store lazily restores them from Room on the download
+  thread itself.
 
 - **The download service crosses the module/manifest boundary.** `AniLocalDownloadService` (code in
   `:data`) plus its permissions (`FOREGROUND_SERVICE*`, `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`)
@@ -250,7 +273,10 @@ for the old MAL client id).
   spinners or error dialogs** for load/error states. The one deliberate exception is the player's
   transient center rebuffer spinner (playback stall feedback, not a load state). Match that pattern
   rather than adding loading/error UI that clashes with it.
-- Networking: Retrofit + Moshi + OkHttp, wired in `data/.../remote/NetworkModule.kt`.
+- Networking: Retrofit + Moshi + OkHttp, wired in `data/.../remote/NetworkModule.kt` — one shared
+  client with explicit timeouts, a 20 MB HTTP cache, and a bounded `RetryInterceptor` (ONE retry with
+  backoff on IO errors, or one honored short `Retry-After` on 429 — AniList rate-limits at 90 req/min;
+  Explore additionally debounces typed queries 300 ms).
 - Settings persist via DataStore (`DataStoreSettingsRepository`) exposed as Kotlin `Flow`s — including
   `autoPlayNext`, `autoSkip`, `wifiOnlyDownloads`, default download quality, and **subtitle
   scale/background** (the player applies these live to the `SubtitleView`; More shows a to-scale preview

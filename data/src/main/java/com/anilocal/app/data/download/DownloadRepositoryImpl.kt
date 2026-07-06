@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadRequest
@@ -44,9 +43,10 @@ import javax.inject.Singleton
 class DownloadRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val downloadManager: DownloadManager,
-    // The same HTTP factory the DownloadManager downloads through; we set the source's request
-    // headers on it so header-gated manifests/segments fetch instead of 403'ing (mirrors playback).
-    private val httpDataSourceFactory: DefaultHttpDataSource.Factory,
+    // Per-request headers for the download stack: the DownloadManager's data-source chain resolves
+    // every manifest/segment request through this store (see DownloadModule), so header-gated
+    // sources fetch instead of 403'ing — in this process or a headless service restart.
+    private val headerStore: DownloadHeaderStore,
     private val dao: DownloadDao,
     private val okHttp: OkHttpClient,
     moshi: Moshi,
@@ -60,6 +60,10 @@ class DownloadRepositoryImpl @Inject constructor(
         moshi.adapter<List<Subtitle>>(Types.newParameterizedType(List::class.java, Subtitle::class.java))
     private val markerAdapter =
         moshi.adapter<List<SkipMarker>>(Types.newParameterizedType(List::class.java, SkipMarker::class.java))
+    private val headerAdapter =
+        moshi.adapter<Map<String, String>>(
+            Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
+        )
 
     init {
         // Bridge Media3 download state → Room so the UI (which reads only Room) stays offline-safe.
@@ -125,14 +129,15 @@ class DownloadRepositoryImpl @Inject constructor(
                 state = STATE_DOWNLOADING,
                 progress = 0,
                 createdAt = System.currentTimeMillis(),
+                headersJson = headerAdapter.toJson(stream.headers),
             )
         )
 
-        // Apply the source's request headers to the shared download HTTP factory before enqueuing, so
-        // the manifest and every segment fetch with them. Adaptive (HLS/DASH/SS) requests carry the
+        // Point the header store at this stream before enqueuing, so the manifest and every segment
+        // fetch with the source's headers. Adaptive (HLS/DASH/SS) requests carry the
         // mimeType but no stream keys, so the segment downloader pulls every rendition (the
         // DownloadQuality setting isn't applied to adaptive track selection yet — progressive only).
-        httpDataSourceFactory.setDefaultRequestProperties(stream.headers)
+        headerStore.set(stream.headers)
         val request = DownloadRequest.Builder(id, Uri.parse(stream.url))
             .apply { stream.mimeType?.let { setMimeType(it) } }
             .build()
@@ -173,9 +178,20 @@ class DownloadRepositoryImpl @Inject constructor(
     }
 
     override fun resume(id: String) {
-        DownloadService.sendSetStopReason(
-            context, AniLocalDownloadService::class.java, id, Download.STOP_REASON_NONE, /* foreground= */ true,
-        )
+        // Point the header store at THIS download (it may still hold another stream's headers).
+        // Async is fine: the store is read per-request on the download thread, and this tiny Room
+        // read almost always lands before the service processes the resume intent.
+        scope.launch { runCatching { headerStore.setFromJson(dao.getById(id)?.headersJson) } }
+        // Send synchronously from the tap handler (app is foreground). If a background start still
+        // slips through on API 31+, fall back to the shared manager directly — same pattern and
+        // reason as enqueue()'s fallback.
+        try {
+            DownloadService.sendSetStopReason(
+                context, AniLocalDownloadService::class.java, id, Download.STOP_REASON_NONE, /* foreground= */ true,
+            )
+        } catch (e: Exception) {
+            runCatching { downloadManager.setStopReason(id, Download.STOP_REASON_NONE) }
+        }
     }
 
     override suspend fun remove(id: String) {
@@ -198,6 +214,9 @@ class DownloadRepositoryImpl @Inject constructor(
             val ext = (Uri.parse(sub.url).path ?: sub.url).substringAfterLast('.', "vtt").take(5)
             val file = File(dir, "$id-$index.$ext")
             okHttp.newCall(Request.Builder().url(sub.url).build()).execute().use { resp ->
+                // Without this check an error page would persist as a "valid" subtitle sidecar and
+                // render as garbage cues offline; throwing lets the caller drop just this track.
+                if (!resp.isSuccessful) error("subtitle fetch failed (HTTP ${resp.code})")
                 file.outputStream().use { out -> resp.body?.byteStream()?.copyTo(out) }
             }
             file

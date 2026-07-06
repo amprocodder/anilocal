@@ -3,7 +3,7 @@ package com.anilocal.app.di
 import com.anilocal.app.data.download.DownloadRepositoryImpl
 import com.anilocal.app.data.local.RoomLibraryRepository
 import com.anilocal.app.data.local.RoomProgressRepository
-import com.anilocal.app.data.metadata.anilist.AniListCatalogRepository
+import com.anilocal.app.data.metadata.anilist.CachedCatalogRepository
 import com.anilocal.app.data.metadata.extension.ExtensionRepositoryImpl
 import com.anilocal.app.data.metadata.mal.MalRepositoryImpl
 import com.anilocal.app.data.settings.DataStoreSettingsRepository
@@ -50,8 +50,10 @@ abstract class AppModule {
     @Binds @Singleton
     abstract fun bindSourceRegistry(impl: SourceRegistryImpl): SourceRegistry
 
+    // Cache-first: the decorator serves the cache DB and delegates to AniListCatalogRepository,
+    // so browsing works offline once seen. Bind the raw AniList impl instead to bypass caching.
     @Binds @Singleton
-    abstract fun bindCatalogRepository(impl: AniListCatalogRepository): CatalogRepository
+    abstract fun bindCatalogRepository(impl: CachedCatalogRepository): CatalogRepository
 
     @Binds @Singleton
     abstract fun bindStreamRepository(impl: SourceStreamRepository): StreamRepository

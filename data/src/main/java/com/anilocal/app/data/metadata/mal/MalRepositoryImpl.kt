@@ -6,6 +6,7 @@ import com.anilocal.app.domain.model.MalListEntry
 import com.anilocal.app.domain.model.MalStatus
 import com.anilocal.app.domain.repo.MalRepository
 import com.anilocal.app.domain.repo.SettingsRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -54,17 +55,27 @@ class MalRepositoryImpl @Inject constructor(
                 offset += batch.size
             }
 
-            dao.clear()
-            dao.upsertAll(rows)
+            dao.replaceAll(rows)
             settings.setMalLastSynced(System.currentTimeMillis())
             rows.size
+        }.onFailure {
+            // A cancelled sync (user backed out mid-flight) is not a failure — rethrow so it
+            // propagates normally instead of arming the failure throttle.
+            if (it is CancellationException) throw it
+            lastFailedSyncAt = System.currentTimeMillis()
         }
     }
+
+    // Failure memory (process-lifetime): `malLastSynced` only advances on success — correct for
+    // retrying — but without this a permanently-failing config (offline, private list, bad
+    // username) would re-attempt a full sync on every app open.
+    @Volatile private var lastFailedSyncAt = 0L
 
     override suspend fun syncIfDue() {
         if (!settings.malSyncEnabled.first()) return
         if (settings.malUsername.first().isBlank()) return
         if (System.currentTimeMillis() - settings.malLastSynced.first() < THROTTLE_MS) return
+        if (System.currentTimeMillis() - lastFailedSyncAt < FAIL_THROTTLE_MS) return
         sync()
     }
 
@@ -80,6 +91,7 @@ class MalRepositoryImpl @Inject constructor(
 
     private companion object {
         const val THROTTLE_MS = 30 * 60 * 1000L          // re-sync at most every 30 min on open
+        const val FAIL_THROTTLE_MS = 10 * 60 * 1000L     // back off auto-retries after a failed sync
         const val MAX_PAGES = 50                          // ~300 entries/page
 
         /** MAL's numeric list codes from load.json → our [MalStatus]. (5 is unused by MAL.) */

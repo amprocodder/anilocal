@@ -36,6 +36,7 @@ import com.anilocal.app.ui.common.PosterCard
 import com.anilocal.app.ui.common.SearchField
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -64,19 +65,24 @@ class ExploreViewModel @Inject constructor(
 
     init { reload() }
 
-    fun onQuery(q: String) { query.value = q; reload() }
+    // Typing debounces so we don't fire a request per keystroke (AniList rate-limits at 90 req/min
+    // and every prefix would also pollute the search cache); chips/clear reload immediately.
+    fun onQuery(q: String) { query.value = q; reload(debounceMs = if (q.isBlank()) 0 else QUERY_DEBOUNCE_MS) }
     fun onGenre(g: String?) { genre.value = g; reload() }
     fun onSort(s: BrowseSort) { sort.value = s; reload() }
 
-    private fun reload() {
+    private fun reload(debounceMs: Long = 0) {
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
+            if (debounceMs > 0) delay(debounceMs)
             _results.value = runCatching {
                 val q = query.value
                 if (q.isNotBlank()) catalog.search(q) else catalog.browse(genre.value, sort.value)
             }.getOrDefault(emptyList())
         }
     }
+
+    private companion object { const val QUERY_DEBOUNCE_MS = 300L }
 }
 
 @Composable

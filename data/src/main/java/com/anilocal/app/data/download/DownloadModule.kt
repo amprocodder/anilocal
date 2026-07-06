@@ -5,8 +5,10 @@ import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.DatabaseProvider
 import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.NoOpCacheEvictor
@@ -48,10 +50,41 @@ object DownloadModule {
     fun downloadCache(@Named("downloadDir") dir: File, db: DatabaseProvider): Cache =
         SimpleCache(File(dir, "media"), NoOpCacheEvictor(), db)
 
+    /**
+     * PLAYBACK http factory (the unqualified one PlayerViewModel and the CacheDataSource read
+     * through). Deliberately a DIFFERENT instance from [downloadHttpFactory]: both the player and
+     * the download stack set per-stream default request headers on their factory, and while they
+     * shared one instance, starting playback mid-download clobbered the download's Referer (each
+     * segment fetch then 403'd) and vice versa.
+     */
     @OptIn(UnstableApi::class)
     @Provides @Singleton
     fun httpFactory(): DefaultHttpDataSource.Factory =
         DefaultHttpDataSource.Factory().setUserAgent("AniLocal").setAllowCrossProtocolRedirects(true)
+
+    /** DOWNLOAD http factory — only reached through [downloadDataSourceFactory]'s header resolver. */
+    @OptIn(UnstableApi::class)
+    @Provides @Singleton @Named("downloadHttp")
+    fun downloadHttpFactory(): DefaultHttpDataSource.Factory =
+        DefaultHttpDataSource.Factory().setUserAgent("AniLocal").setAllowCrossProtocolRedirects(true)
+
+    /**
+     * The DownloadManager's upstream: every manifest/segment request is resolved through
+     * [DownloadHeaderStore] so the source's headers (Referer etc.) ride along — including in a
+     * headless service-restart process, where the store lazily restores them from Room on the
+     * download thread itself. Explicit per-request headers win over the store's.
+     */
+    @OptIn(UnstableApi::class)
+    @Provides @Singleton @Named("downloadDataSource")
+    fun downloadDataSourceFactory(
+        @Named("downloadHttp") http: DefaultHttpDataSource.Factory,
+        headerStore: DownloadHeaderStore,
+    ): DataSource.Factory =
+        ResolvingDataSource.Factory(http) { dataSpec ->
+            val headers = headerStore.current()
+            if (headers.isEmpty()) dataSpec
+            else dataSpec.buildUpon().setHttpRequestHeaders(headers + dataSpec.httpRequestHeaders).build()
+        }
 
     @OptIn(UnstableApi::class)
     @Provides @Singleton
@@ -59,9 +92,9 @@ object DownloadModule {
         @ApplicationContext context: Context,
         db: DatabaseProvider,
         cache: Cache,
-        http: DefaultHttpDataSource.Factory,
+        @Named("downloadDataSource") upstream: DataSource.Factory,
     ): DownloadManager =
-        DownloadManager(context, db, cache, http, Executors.newFixedThreadPool(3)).apply {
+        DownloadManager(context, db, cache, upstream, Executors.newFixedThreadPool(3)).apply {
             maxParallelDownloads = 2
         }
 

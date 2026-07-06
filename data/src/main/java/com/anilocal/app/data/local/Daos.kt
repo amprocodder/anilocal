@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
@@ -37,6 +38,12 @@ interface DownloadDao {
     @Query("SELECT * FROM downloads WHERE id = :id")
     suspend fun getById(id: String): DownloadEntity?
 
+    /** Newest not-yet-completed download (0 DOWNLOADING, 3 PAUSED, 4 QUEUED) — its persisted
+     *  headers seed DownloadHeaderStore after a process restart so resumes don't 403. Blocking
+     *  (non-suspend) on purpose: it's called lazily from Media3's download threads. */
+    @Query("SELECT * FROM downloads WHERE state IN (0, 3, 4) ORDER BY createdAt DESC LIMIT 1")
+    fun newestActiveNow(): DownloadEntity?
+
     @Query("SELECT DISTINCT animeId FROM downloads WHERE state = 1")
     fun observeDownloadedAnimeIds(): Flow<List<String>>
 
@@ -66,6 +73,13 @@ interface MalDao {
 
     @Query("DELETE FROM mal_list")
     suspend fun clear()
+
+    /** Atomic mirror replace — process death between clear and upsert can't empty the list. */
+    @Transaction
+    suspend fun replaceAll(entries: List<MalEntryEntity>) {
+        clear()
+        upsertAll(entries)
+    }
 }
 
 @Dao
