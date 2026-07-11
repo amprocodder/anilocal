@@ -33,6 +33,8 @@ class DataStoreSettingsRepository @Inject constructor(
         val SELECTED_SOURCE = stringPreferencesKey("selected_source")
         val AUTO_LAST_WINNER = stringPreferencesKey("auto_last_winner")
         val EXTENSION_REPOS = stringPreferencesKey("extension_repos")
+        val AUTO_INSTALLED = stringPreferencesKey("auto_installed_sources")
+        val EVICTED_SOURCES = stringPreferencesKey("evicted_sources")
         val MAL_USERNAME = stringPreferencesKey("mal_username")
         val MAL_SYNC = booleanPreferencesKey("mal_sync_enabled")
         val MAL_LAST_SYNCED = longPreferencesKey("mal_last_synced")
@@ -107,6 +109,20 @@ class DataStoreSettingsRepository @Inject constructor(
         context.dataStore.edit { it[Keys.EXTENSION_REPOS] = urls.joinToString("\n") }
     }
 
+    override val autoInstalledSources: Flow<Set<String>> =
+        context.dataStore.data.map { it[Keys.AUTO_INSTALLED].toPkgSet() }
+
+    override suspend fun setAutoInstalledSources(pkgs: Set<String>) {
+        context.dataStore.edit { it[Keys.AUTO_INSTALLED] = pkgs.joinToString("\n") }
+    }
+
+    override val evictedSources: Flow<Set<String>> =
+        context.dataStore.data.map { it[Keys.EVICTED_SOURCES].toPkgSet() }
+
+    override suspend fun setEvictedSources(pkgs: Set<String>) {
+        context.dataStore.edit { it[Keys.EVICTED_SOURCES] = pkgs.joinToString("\n") }
+    }
+
     override val malUsername: Flow<String> =
         context.dataStore.data.map { it[Keys.MAL_USERNAME] ?: "" }
 
@@ -127,4 +143,8 @@ class DataStoreSettingsRepository @Inject constructor(
     override suspend fun setMalLastSynced(epochMs: Long) {
         context.dataStore.edit { it[Keys.MAL_LAST_SYNCED] = epochMs }
     }
+
+    /** Newline-joined package sets round-trip through one string pref (same pattern as the repo URLs). */
+    private fun String?.toPkgSet(): Set<String> =
+        this?.lines()?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet() ?: emptySet()
 }

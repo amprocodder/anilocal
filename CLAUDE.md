@@ -297,9 +297,15 @@ for the old MAL client id).
   don't re-add) used ONLY to bootstrap Auto so the race has proven candidates on day one;
   `installRecommended(target)` tops up to `target` verified seeds (idempotent), triggered when the user
   picks Auto and via a "Install recommended" button in More. The empirical scoreboard takes over ranking
-  from there — no ongoing curation. (Stats-driven auto-**eviction** of persistent losers is deliberately
-  not done yet: the `srcstats:` key is a source id, not a package, so safe pkg-level pruning needs a
-  mapping — a documented follow-up; users uninstall manually meanwhile.)
+  from there — no ongoing curation. **Auto-eviction** closes the loop: `ExtensionRepository.pruneLosers`
+  (run alongside provisioning) uninstalls app-installed packages whose sources have a poor aggregate
+  success rate after ≥`MIN_ATTEMPTS` recorded resolves — but ONLY ones that are **not** the pinned best
+  for any title (`AutoSourceSelector.pinnedSourceIds`, enumerated via `CacheDao.entriesLike("bestsrc:%")`),
+  never a user's manual install (only `settings.autoInstalledSources` is eligible), and never below
+  `MIN_KEPT_PACKAGES`. Evicted packages go on `settings.evictedSources` so provisioning won't re-add them.
+  The source→package link is `SourceInfo.pkg` (set by the loader/adapter; null for built-ins). Because a
+  race loser that's merely *slower* is cancelled and records nothing, accumulated failures mean a source
+  actually failed to resolve — so this targets dead/broken sources, not working-but-slow ones.
 
 ## Conventions
 

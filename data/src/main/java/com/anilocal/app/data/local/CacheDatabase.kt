@@ -32,6 +32,11 @@ interface CacheDao {
     @Query("DELETE FROM kv_cache WHERE `key` = :key")
     suspend fun delete(key: String)
 
+    /** All rows whose key matches [pattern] (a SQL LIKE, e.g. "bestsrc:%") — used to enumerate a
+     *  namespace (the per-title source pins) that has no other index. */
+    @Query("SELECT * FROM kv_cache WHERE `key` LIKE :pattern")
+    suspend fun entriesLike(pattern: String): List<CacheEntryEntity>
+
     /** Age-based sweep; rows whose key matches [keepPrefix] are kept regardless (tiny, non-refetchable offline). */
     @Query("DELETE FROM kv_cache WHERE updatedAt < :cutoff AND `key` NOT LIKE :keepPrefix")
     suspend fun prune(cutoff: Long, keepPrefix: String)

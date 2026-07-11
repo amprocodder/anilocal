@@ -55,7 +55,6 @@ object AnimeExtensionLoader {
         val pm = context.packageManager
         return dedupeByPackage(installedPackages(pm), privatePackages(context, pm))
             .flatMap { runCatching { loadPackage(context, it) }.getOrDefault(emptyList()) }
-            .map { AniyomiSourceAdapter(it) }
     }
 
     private fun installedPackages(pm: PackageManager): List<PackageInfo> {
@@ -107,7 +106,7 @@ object AnimeExtensionLoader {
     private fun PackageInfo.isAnimeExtension(): Boolean =
         reqFeatures?.any { it.name == EXTENSION_FEATURE } == true
 
-    private fun loadPackage(context: Context, pkgInfo: PackageInfo): List<AnimeSource> {
+    private fun loadPackage(context: Context, pkgInfo: PackageInfo): List<DomainAnimeSource> {
         val appInfo = pkgInfo.applicationInfo ?: return emptyList()
 
         // Lib version is the major.minor of the extension's versionName (e.g. "16.0.3" -> 16.0).
@@ -117,10 +116,11 @@ object AnimeExtensionLoader {
         val classNames = appInfo.metaData?.getString(METADATA_SOURCE_CLASS) ?: return emptyList()
         val classLoader = ChildFirstPathClassLoader(appInfo.sourceDir, null, context.classLoader)
 
+        // Tag every adapted source with its package so install/uninstall/eviction can act per-package.
         return classNames.split(";").flatMap { raw ->
             val className = raw.trim().let { if (it.startsWith(".")) pkgInfo.packageName + it else it }
             instantiate(className, classLoader, appInfo.sourceDir, context)
-        }
+        }.map { AniyomiSourceAdapter(it, pkgInfo.packageName) }
     }
 
     private fun instantiate(

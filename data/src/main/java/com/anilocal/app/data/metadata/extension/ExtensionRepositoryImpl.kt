@@ -6,6 +6,7 @@ import com.anilocal.app.data.cache.JsonCache
 import com.anilocal.app.domain.model.ExtensionEntry
 import com.anilocal.app.domain.repo.ExtensionRepository
 import com.anilocal.app.domain.repo.SettingsRepository
+import com.anilocal.app.data.source.AutoSourceSelector
 import com.anilocal.app.domain.source.SourceRegistry
 import com.anilocal.app.extensions.loader.AnimeExtensionLoader
 import com.squareup.moshi.Types
@@ -34,6 +35,7 @@ class ExtensionRepositoryImpl @Inject constructor(
     private val settings: SettingsRepository,
     private val cache: JsonCache,
     private val registry: SourceRegistry,
+    private val selector: AutoSourceSelector,
 ) : ExtensionRepository {
 
     override suspend fun available(): List<ExtensionEntry> = withContext(Dispatchers.IO) {
@@ -133,22 +135,87 @@ class ExtensionRepositoryImpl @Inject constructor(
     override suspend fun privatelyInstalled(): Set<String> = withContext(Dispatchers.IO) { privatePackageNames() }
 
     override suspend fun installRecommended(target: Int): Int = withContext(Dispatchers.IO) {
+        val evicted = settings.evictedSources.first()
         val index = runCatching { available() }.getOrDefault(emptyList())
         val installedNow = installedPackages()
-        // Ranked recommended entries actually present in the configured repos.
-        val seedEntries = RecommendedSources.RANKED.mapNotNull { pkg -> index.firstOrNull { it.pkg == pkg } }
+        // Ranked recommended entries present in the repos, minus any we auto-evicted as dead (so
+        // provisioning doesn't just keep re-installing a source eviction already judged a loser).
+        val seedEntries = RecommendedSources.RANKED
+            .filter { it !in evicted }
+            .mapNotNull { pkg -> index.firstOrNull { it.pkg == pkg } }
         val alreadySeeded = seedEntries.count { it.pkg in installedNow }
         var installed = 0
+        val autoSet = settings.autoInstalledSources.first().toMutableSet()
         for (entry in seedEntries) {
             if (alreadySeeded + installed >= target) break
             if (entry.pkg in installedNow) continue
             // requireVerified: auto-install must never run code from a repo without a signing fingerprint.
             if (runCatching { privateInstall(entry, requireVerified = true) }.getOrDefault(false)) {
                 installed++
+                autoSet += entry.pkg   // mark as app-installed → eligible for later auto-eviction
                 Log.i(TAG, "installRecommended: added ${entry.pkg}")
             }
         }
+        if (installed > 0) settings.setAutoInstalledSources(autoSet)
         installed
+    }
+
+    override suspend fun pruneLosers(): Int = withContext(Dispatchers.IO) {
+        val autoInstalled = settings.autoInstalledSources.first()
+        if (autoInstalled.isEmpty()) return@withContext 0
+
+        val sources = registry.sources.value
+        val extensionPkgs = sources.mapNotNull { it.info.pkg }.toSet()
+        if (extensionPkgs.size <= MIN_KEPT_PACKAGES) return@withContext 0   // keep a floor to race against
+
+        val pinned = runCatching { selector.pinnedSourceIds() }.getOrDefault(emptySet())
+        val byPkg = sources.filter { it.info.pkg != null }.groupBy { it.info.pkg!! }
+
+        // Candidate losers: app-installed packages, currently loaded, NOT pinned as any title's best,
+        // with enough recorded attempts and a poor aggregate success rate. (Cancelled race losers
+        // record nothing, so failures here mean the source actually failed to resolve, not merely
+        // that it was slower — so this targets broken/dead sources, not working-but-slow ones.)
+        val losers = mutableListOf<Pair<String, Double>>()
+        for (pkg in autoInstalled) {
+            val pkgSources = byPkg[pkg] ?: continue                      // not currently loaded → skip
+            if (pkgSources.any { it.info.id in pinned }) continue        // best for some title → keep
+            var succ = 0
+            var fail = 0
+            for (s in pkgSources) {
+                val h = selector.healthOf(s.info.id) ?: continue
+                succ += h.successes
+                fail += h.failures
+            }
+            val attempts = succ + fail
+            if (attempts < MIN_ATTEMPTS) continue
+            val rate = succ.toDouble() / attempts
+            if (rate < LOSER_SUCCESS_RATE) losers += pkg to rate
+        }
+        if (losers.isEmpty()) return@withContext 0
+
+        // Never drop below the floor; remove the worst first.
+        val maxEvictable = (extensionPkgs.size - MIN_KEPT_PACKAGES).coerceAtLeast(0)
+        val toEvict = losers.sortedBy { it.second }.take(maxEvictable)
+        if (toEvict.isEmpty()) return@withContext 0
+
+        val nowEvicted = settings.evictedSources.first().toMutableSet()
+        val nowAuto = autoInstalled.toMutableSet()
+        var evicted = 0
+        for ((pkg, rate) in toEvict) {
+            val file = File(AnimeExtensionLoader.privateDir(context), pkg + AnimeExtensionLoader.PRIVATE_APK_SUFFIX)
+            if (file.delete()) {
+                nowEvicted += pkg
+                nowAuto -= pkg
+                evicted++
+                Log.i(TAG, "pruneLosers: evicted $pkg (successRate=${"%.2f".format(rate)})")
+            }
+        }
+        if (evicted > 0) {
+            settings.setEvictedSources(nowEvicted)
+            settings.setAutoInstalledSources(nowAuto)
+            registry.refresh()   // one rescan for the whole batch
+        }
+        evicted
     }
 
     override suspend fun recommendedNotInstalled(): List<ExtensionEntry> = withContext(Dispatchers.IO) {
@@ -197,6 +264,11 @@ class ExtensionRepositoryImpl @Inject constructor(
         val META_TYPE: java.lang.reflect.Type = RepoMetaDto::class.java
         const val REPO_TTL_MS = 60L * 60 * 1000   // repos publish updates at most a few times a day
         const val TAG = "AniLocalExtensions"
+
+        // Auto-eviction thresholds.
+        const val MIN_ATTEMPTS = 6              // recorded resolves before a package can be judged
+        const val LOSER_SUCCESS_RATE = 0.15     // below this success rate (after MIN_ATTEMPTS) = a loser
+        const val MIN_KEPT_PACKAGES = 2         // never evict below this many extension packages
     }
 
     private fun RepoEntryDto.toEntry(repoRoot: String) = ExtensionEntry(

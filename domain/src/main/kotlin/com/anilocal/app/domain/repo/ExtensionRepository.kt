@@ -45,4 +45,12 @@ interface ExtensionRepository {
     /** Recommended-source entries present in the configured repos that aren't installed yet — for the
      *  "Install recommended sources" affordance to know whether there's anything left to add. */
     suspend fun recommendedNotInstalled(): List<ExtensionEntry>
+
+    /**
+     * Auto-evict dead/losing sources: uninstall app-installed packages whose sources have a proven
+     * poor track record (low success rate after enough attempts) and aren't the pinned best for any
+     * title, keeping a floor so Auto always has candidates. Never touches user-installed extensions;
+     * evicted packages are remembered so provisioning won't re-add them. Returns how many it removed.
+     */
+    suspend fun pruneLosers(): Int
 }

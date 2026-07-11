@@ -55,7 +55,10 @@ import eu.kanade.tachiyomi.animesource.AnimeSource as AniyomiSource
  *   lib-mismatched extension degrades to empty, not a crash (matches the app's silent-degrade
  *   convention; `runCatching` catches `Throwable`, including `AbstractMethodError`).
  */
-class AniyomiSourceAdapter(private val src: AniyomiSource) : AnimeSource {
+class AniyomiSourceAdapter(
+    private val src: AniyomiSource,
+    pkg: String? = null,
+) : AnimeSource {
 
     override val info = SourceInfo(
         id = SOURCE_PREFIX + src.id,
@@ -63,6 +66,7 @@ class AniyomiSourceAdapter(private val src: AniyomiSource) : AnimeSource {
         lang = src.lang.ifEmpty { "en" },
         isExternal = true,
         configurable = src is ConfigurableAnimeSource,
+        pkg = pkg,
     )
 
     override suspend fun popular(page: Int): List<AnimeSummary> = withContext(Dispatchers.IO) {

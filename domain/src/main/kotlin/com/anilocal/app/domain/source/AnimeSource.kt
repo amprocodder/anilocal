@@ -14,6 +14,9 @@ data class SourceInfo(
     val isExternal: Boolean = false,
     /** true = the source exposes user-configurable preferences (see [AnimeSource.preferences]). */
     val configurable: Boolean = false,
+    /** Android package the source was loaded from, or null for built-ins. Multiple sources can share
+     *  one package; it's the unit install/uninstall (and auto-eviction) operate on. */
+    val pkg: String? = null,
 )
 
 /**

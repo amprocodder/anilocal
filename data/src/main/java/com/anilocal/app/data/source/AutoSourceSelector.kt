@@ -214,6 +214,16 @@ class AutoSourceSelector @Inject constructor(
         }
     }
 
+    /** This source's recorded scoreboard row (successes/failures/latency), or null if never seen —
+     *  exposed so auto-eviction can judge a source's track record. */
+    suspend fun healthOf(sourceId: String): SrcStat? =
+        cache.getAged<SrcStat>(statKey(sourceId), STAT_TYPE)?.value
+
+    /** Every source id currently pinned as some title's best. Auto-eviction spares these: a pinned
+     *  source is the winner for at least one title, and removing it would break that title. */
+    suspend fun pinnedSourceIds(): Set<String> =
+        cache.valuesUnder<Pin>("bestsrc:", PIN_TYPE).map { it.sourceId }.toSet()
+
     /** Top sources by score, reserving one slot for an unexplored source so a mediocre-but-working
      *  incumbent can be displaced by a faster installed source over time. */
     private suspend fun pickCandidates(available: List<AnimeSource>): List<AnimeSource> {

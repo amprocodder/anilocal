@@ -43,6 +43,15 @@ interface SettingsRepository {
     val extensionRepoBaseUrls: Flow<List<String>>
     suspend fun setExtensionRepoBaseUrls(urls: List<String>)
 
+    /** Packages the app auto-installed to seed "Auto" — the only ones auto-eviction is allowed to
+     *  remove (a user's manual installs are never touched). */
+    val autoInstalledSources: Flow<Set<String>>
+    suspend fun setAutoInstalledSources(pkgs: Set<String>)
+
+    /** Packages auto-eviction removed as dead, so provisioning won't keep re-installing them. */
+    val evictedSources: Flow<Set<String>>
+    suspend fun setEvictedSources(pkgs: Set<String>)
+
     // MyAnimeList sync — keyless, by username only (mirrors the user's PUBLIC list)
     val malUsername: Flow<String>
     suspend fun setMalUsername(username: String)

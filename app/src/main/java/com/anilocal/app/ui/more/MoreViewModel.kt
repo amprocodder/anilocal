@@ -95,12 +95,18 @@ class MoreViewModel @Inject constructor(
     private suspend fun provision() {
         if (_provisioning.value) return
         _provisioning.value = true
-        _provisionStatus.value = "Installing recommended sources…"
+        _provisionStatus.value = "Updating sources…"
         val added = runCatching { extensions.installRecommended() }.getOrDefault(0)
-        _provisionStatus.value = when {
-            added > 0 -> "Added $added recommended source${if (added == 1) "" else "s"}"
-            else -> null   // nothing to add (already have them) or offline — stay quiet
-        }
+        // Self-maintain: drop app-installed sources that have proven to be dead losers (guarded by a
+        // minimum attempt count, so freshly-added ones are never pruned prematurely).
+        val removed = runCatching { extensions.pruneLosers() }.getOrDefault(0)
+        _provisionStatus.value = buildString {
+            if (added > 0) append("Added $added source${if (added == 1) "" else "s"}")
+            if (removed > 0) {
+                if (isNotEmpty()) append(" · ")
+                append("removed $removed dead")
+            }
+        }.ifBlank { null }   // nothing changed (already tuned, or offline) — stay quiet
         _provisioning.value = false
     }
 

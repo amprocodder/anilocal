@@ -57,6 +57,12 @@ class JsonCache @Inject constructor(
         runCatching { dao.delete(key) }
     }
 
+    /** Every parseable value whose key starts with [keyPrefix] (e.g. "bestsrc:"). For enumerating a
+     *  whole namespace — rows that don't parse to [type] are skipped. */
+    suspend fun <T : Any> valuesUnder(keyPrefix: String, type: Type): List<T> = runCatching {
+        dao.entriesLike("$keyPrefix%").mapNotNull { row -> adapter<T>(type).fromJson(row.json) }
+    }.getOrDefault(emptyList())
+
     /**
      * The stale-while-revalidate read: ANY cached entry — fresh or stale — is served immediately
      * (a screen never blocks on the network once it has been seen; on a connected-but-dead network
