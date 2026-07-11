@@ -11,4 +11,7 @@ data class ExtensionEntry(
     val isNsfw: Boolean,
     /** Human names of the source(s) the extension provides (for display). */
     val sourceNames: List<String>,
+    /** Repo base URL this entry came from (root of its `index.min.json`/`repo.json`), for the
+     *  install-time signing-key trust check. Empty on entries read from an older cache. */
+    val repoRoot: String = "",
 )

@@ -1,5 +1,6 @@
 package com.anilocal.app.data.source
 
+import android.os.SystemClock
 import com.anilocal.app.data.cache.JsonCache
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.VideoStream
@@ -7,10 +8,12 @@ import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.repo.StreamRepository
 import com.anilocal.app.domain.source.AnimeSource
 import com.anilocal.app.domain.source.SourceRegistry
+import com.anilocal.app.domain.source.Sources
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -34,39 +37,71 @@ class SourceStreamRepository @Inject constructor(
     private val registry: SourceRegistry,
     private val settings: SettingsRepository,
     private val cache: JsonCache,
+    private val selector: AutoSourceSelector,
 ) : StreamRepository {
 
-    private suspend fun activeSource(): AnimeSource {
-        val selected = settings.selectedSourceId.first()
-        return registry.get(selected)
-            ?: registry.sources.value.firstOrNull()
-            ?: error("no stream sources available")
+    /** Resolve the selected manual source, waiting briefly for the async extension scan to populate
+     *  the registry before falling back to the first available source (a resolve fired right after
+     *  cold start would otherwise see an empty registry and fail spuriously). */
+    private suspend fun sourceFor(selectedId: String): AnimeSource {
+        registry.get(selectedId)?.let { return it }
+        val available = withTimeoutOrNull(REGISTRY_WAIT_MS) { registry.sources.first { it.isNotEmpty() } }
+        return available?.firstOrNull() ?: error("no stream sources available")
     }
 
     override suspend fun resolveStreams(animeTitle: String, episodeNumber: Int): List<VideoStream> =
         withContext(Dispatchers.IO) {
-            val source = activeSource()
-            val key = "src:${source.info.id}:${animeTitle.trim().lowercase()}"
-
-            // A fresh cached match is only trusted when it actually carries the requested episode —
-            // an episode that aired after the entry was cached must force a live re-fetch.
-            val cached = cache.getFresh<AnimeDetail>(key, DETAIL, MATCH_TTL_MS)
-            if (cached != null && cached.episodes.any { it.number == episodeNumber }) {
+            val selected = settings.selectedSourceId.first()
+            if (selected == Sources.AUTO) {
+                // Auto mode: race installed sources / reuse the pinned winner. The per-source probe is
+                // exactly the manual pipeline below, so caching and failure shape are identical.
+                selector.resolve(animeTitle, episodeNumber) { source ->
+                    resolveVia(source, animeTitle, episodeNumber)
+                }.streams
+            } else {
+                val source = sourceFor(selected)
+                // Time the manual resolve into the same scoreboard Auto reads, so switching to Auto
+                // later starts warm instead of cold.
+                val start = SystemClock.elapsedRealtime()
                 try {
-                    return@withContext resolveFrom(source, cached, episodeNumber)
+                    val r = resolveVia(source, animeTitle, episodeNumber)
+                    selector.record(source.info.id, SystemClock.elapsedRealtime() - start, success = true)
+                    r.streams
                 } catch (ce: CancellationException) {
                     throw ce
-                } catch (_: Exception) {
-                    // Could be rotated ids OR a transient/offline error — the adapter flattens both
-                    // to empty. Don't evict: fall through to a live run, which overwrites the entry
-                    // on success and leaves it intact when the failure was transient.
+                } catch (e: Exception) {
+                    selector.record(source.info.id, SystemClock.elapsedRealtime() - start, success = false)
+                    throw e
                 }
             }
-
-            val detail = liveMatch(source, animeTitle)
-            if (detail.episodes.isNotEmpty()) cache.put(key, DETAIL, detail)
-            resolveFrom(source, detail, episodeNumber)
         }
+
+    /** Resolve ONE source end-to-end (the cached-match fast path + a live fallback), reporting
+     *  whether the matched entry actually carried the requested episode. This is the unit the auto
+     *  selector races and the manual path runs directly — so there is exactly one pipeline. */
+    private suspend fun resolveVia(source: AnimeSource, animeTitle: String, episodeNumber: Int): SourceResolution {
+        val key = "src:${source.info.id}:${animeTitle.trim().lowercase()}"
+
+        // A fresh cached match is only trusted when it actually carries the requested episode —
+        // an episode that aired after the entry was cached must force a live re-fetch.
+        val cached = cache.getFresh<AnimeDetail>(key, DETAIL, MATCH_TTL_MS)
+        if (cached != null && cached.episodes.any { it.number == episodeNumber }) {
+            try {
+                return SourceResolution(resolveFrom(source, cached, episodeNumber), exactEpisode = true)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Exception) {
+                // Could be rotated ids OR a transient/offline error — the adapter flattens both
+                // to empty. Don't evict: fall through to a live run, which overwrites the entry
+                // on success and leaves it intact when the failure was transient.
+            }
+        }
+
+        val detail = liveMatch(source, animeTitle)
+        if (detail.episodes.isNotEmpty()) cache.put(key, DETAIL, detail)
+        val exact = detail.episodes.any { it.number == episodeNumber }
+        return SourceResolution(resolveFrom(source, detail, episodeNumber), exactEpisode = exact)
+    }
 
     /** The un-cached search → detail leg (throws with a sourced message, as before). */
     private suspend fun liveMatch(source: AnimeSource, animeTitle: String): AnimeDetail {
@@ -107,5 +142,6 @@ class SourceStreamRepository @Inject constructor(
     private companion object {
         val DETAIL: java.lang.reflect.Type = AnimeDetail::class.java
         const val MATCH_TTL_MS = 4L * 60 * 60 * 1000   // episode lists grow weekly; 4h keeps them current
+        const val REGISTRY_WAIT_MS = 3_000L            // tolerate the cold-start async extension scan
     }
 }

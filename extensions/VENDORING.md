@@ -20,6 +20,11 @@ these classes via the child-first class loader (Phase 3).
   androidx.webkit) and `android.util.Log` (no logcat); it solves the JS challenge in a headless
   WebView and re-supplies the fresh `cf_clearance` cookie via [AndroidCookieJar]. On failure/timeout
   or when WebView is unavailable it degrades silently (never throws past the host's runCatching).
+  **AniLocal deviation (host-added, not upstream):** `intercept()` serializes the cookie-delete +
+  WebView solve under a process-wide `ReentrantLock` (`cfLock`), re-checks after acquiring whether
+  another thread already refreshed `cf_clearance` (skips a redundant solve), and bails if
+  `chain.call().isCanceled()`. This makes it safe for the "Auto (best source)" selector to race
+  several sources at once, any of which may hit a Cloudflare challenge simultaneously.
 - **`NetworkPreferences`** — rewritten to drop the `tachiyomi.core.common.preference` framework.
 - **`PreferenceScreen`** — KMP `expect`/`actual` flattened to a single typealias.
 - **`AnimeFilterList`** — dropped the `@androidx.compose.runtime.Stable` annotation (no Compose here).

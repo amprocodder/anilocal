@@ -81,7 +81,7 @@ object DownloadModule {
         headerStore: DownloadHeaderStore,
     ): DataSource.Factory =
         ResolvingDataSource.Factory(http) { dataSpec ->
-            val headers = headerStore.current()
+            val headers = headerStore.current(dataSpec.uri.host)
             if (headers.isEmpty()) dataSpec
             else dataSpec.buildUpon().setHttpRequestHeaders(headers + dataSpec.httpRequestHeaders).build()
         }

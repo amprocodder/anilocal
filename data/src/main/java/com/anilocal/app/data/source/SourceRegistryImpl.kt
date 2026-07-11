@@ -38,7 +38,7 @@ class SourceRegistryImpl @Inject constructor(
     }
 
     /** Re-scan installed extensions and merge them with the built-ins. */
-    fun refresh() {
+    override fun refresh() {
         scope.launch(Dispatchers.IO) {
             val loaded = runCatching { AnimeExtensionLoader.loadSources(context) }.getOrDefault(emptyList())
             _sources.value = sortSources(builtInList + loaded)

@@ -44,6 +44,13 @@ interface DownloadDao {
     @Query("SELECT * FROM downloads WHERE state IN (0, 3, 4) ORDER BY createdAt DESC LIMIT 1")
     fun newestActiveNow(): DownloadEntity?
 
+    /** Every active download (0 DOWNLOADING, 3 PAUSED, 4 QUEUED), newest first — seeds
+     *  DownloadHeaderStore's per-host headers after a process restart so each concurrent download
+     *  (possibly on a different source/host) resumes with its own Referer. Blocking on purpose,
+     *  like [newestActiveNow]. */
+    @Query("SELECT * FROM downloads WHERE state IN (0, 3, 4) ORDER BY createdAt DESC")
+    fun activeNow(): List<DownloadEntity>
+
     @Query("SELECT DISTINCT animeId FROM downloads WHERE state = 1")
     fun observeDownloadedAnimeIds(): Flow<List<String>>
 

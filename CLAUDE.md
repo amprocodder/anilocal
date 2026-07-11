@@ -256,6 +256,51 @@ for the old MAL client id).
   the `SourceRegistry` by the persisted `selectedSourceId` (falling back to the first available source) —
   there is no compile-time `bindAnimeSource` binding (it was removed).
 
+- **"Auto (best source)" races installed sources and pins the winner.** `selectedSourceId` can hold a
+  sentinel `Sources.AUTO`; when set, `SourceStreamRepository.resolveStreams` routes through
+  `AutoSourceSelector` (`data/.../source/`) instead of one fixed source. The per-source pipeline is
+  factored out as `resolveVia(source, title, ep)` (the cached-match fast path + a live fallback,
+  returning a `SourceResolution` that also reports whether the match carried the EXACT episode) — the
+  **one** unit both the manual path and the selector's race run, so there's a single pipeline. The
+  selector: (1) reuses a per-title **pin** (`bestsrc:<title>` in the disposable JsonCache, 7-day TTL) —
+  a warm pinned resolve is the common case and matches manual latency; (2) on a pin miss/fail, **races**
+  the top-K(≤4) sources ranked by a persisted scoreboard (`srcstats:<sourceId>`: latency EWMA that moves
+  only on success ÷ Laplace-smoothed success rate), staggered 300 ms, gated by a shared `Semaphore(3)`,
+  12 s per candidate / 15 s overall; the FIRST *strong* success (non-empty **and** exact episode) wins
+  immediately, non-exact "weak" successes are a fallback only if nothing strong lands. Probes run in a
+  scope **detached** from the caller (a child of `appScope`) so a slow blocking lib-14 loser can't hold
+  up returning the winner; a `finally { raceScope.cancel() }` tears losers down on every exit.
+  **Never persists a stream URL** (tokenized) — only the winning source id + stats, all re-derivable and
+  swept with the cache. Manual-mode resolves also call `selector.record(...)`, so Auto starts warm. Only
+  a **total** wipeout throws (the player surfaces the resolver's own message, e.g. "no source could
+  resolve … (4 tried)"). Two hardening fixes ride with it because racing makes latent bugs routine: the
+  vendored `CloudflareInterceptor` now serializes its cookie-delete + WebView solve under a process-wide
+  lock (with a post-acquire `cf_clearance` re-check + `isCanceled` bail — see `extensions/VENDORING.md`),
+  and `DownloadHeaderStore` is keyed **per stream-URL host** (concurrent downloads on different
+  sources/hosts each keep their own Referer; cold-process restore seeds every active download's headers
+  via the new `DownloadDao.activeNow()`).
+
+- **Extensions install PRIVATELY (silent, verified) — no system-installer tap.** `AnimeExtensionLoader`
+  now loads from two places, deduped by package (higher `versionCode` wins; a system install ties in its
+  favour): installed (shared) packages **and** read-only APKs in `AnimeExtensionLoader.privateDir` =
+  `filesDir/exts/<pkg>.apk` (parsed via `getPackageArchiveInfo`, `sourceDir`/`publicSourceDir` patched,
+  then the same lib-12–16 gate + `ChildFirstPathClassLoader`). `ExtensionRepository.privateInstall`
+  (`:data`) downloads → verifies the APK's signing-cert SHA-256 against the repo's `repo.json`
+  `signingKeyFingerprint` (`ExtensionSignatures`) → enforces no-downgrade + no-signer-swap on updates →
+  copies **read-only** into `filesDir/exts` (Android 14+ refuses to class-load writable dex) →
+  `registry.refresh()`. `requireVerified=true` (auto-install) rejects any repo without a fingerprint;
+  manual install from a fingerprint-less repo is allowed (user-initiated). `SourceRegistry.refresh()` is
+  now on the **domain interface** so an install/uninstall rescans live (no app restart — the old gap).
+  The Extensions screen installs silently, shows installed/uninstall state, and removes private
+  extensions by deleting the file. **Auto-provisioning:** `RecommendedSources` (`:data`) is a small
+  ranked community allow-list (verified against the yuzono repo; HiAnime/AnimeKai are dead & removed —
+  don't re-add) used ONLY to bootstrap Auto so the race has proven candidates on day one;
+  `installRecommended(target)` tops up to `target` verified seeds (idempotent), triggered when the user
+  picks Auto and via a "Install recommended" button in More. The empirical scoreboard takes over ranking
+  from there — no ongoing curation. (Stats-driven auto-**eviction** of persistent losers is deliberately
+  not done yet: the `srcstats:` key is a source id, not a package, so safe pkg-level pruning needs a
+  mapping — a documented follow-up; users uninstall manually meanwhile.)
+
 ## Conventions
 
 - Navigation is a single Compose `NavHost` in `MainActivity.kt`; routes live in

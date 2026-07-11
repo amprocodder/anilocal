@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +59,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 import com.anilocal.app.domain.model.DownloadQuality
+import com.anilocal.app.domain.source.Sources
 import kotlin.math.roundToInt
 
 @Composable
@@ -203,11 +206,35 @@ fun MoreScreen(
         SectionCard {
             val sources by vm.sources.collectAsStateWithLifecycle()
             val selectedSourceId by vm.selectedSourceId.collectAsStateWithLifecycle()
+            val lastAutoWinner by vm.lastAutoWinner.collectAsStateWithLifecycle()
+            val provisioning by vm.provisioning.collectAsStateWithLifecycle()
+            val provisionStatus by vm.provisionStatus.collectAsStateWithLifecycle()
             Text("Streaming source", style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold)
             Text("Where video is resolved from. Browsing and metadata always come from AniList.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // "Auto" only helps when there's a choice to make — hide it with 0/1 source installed.
+            if (sources.size > 1) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { vm.setSelectedSource(Sources.AUTO) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = selectedSourceId == Sources.AUTO,
+                        onClick = { vm.setSelectedSource(Sources.AUTO) },
+                    )
+                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                        Text("Auto (best source)", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (lastAutoWinner.isBlank()) "Races your installed sources and reuses the fastest"
+                            else "Races your installed sources · last: $lastAutoWinner",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
             sources.forEach { src ->
                 Row(
                     Modifier.fillMaxWidth().clickable { vm.setSelectedSource(src.id) },
@@ -232,8 +259,23 @@ fun MoreScreen(
                     }
                 }
             }
-            OutlinedButton(onClick = onBrowseExtensions, modifier = Modifier.padding(top = 4.dp)) {
-                Text("Browse extensions")
+            Row(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(onClick = onBrowseExtensions) { Text("Browse extensions") }
+                OutlinedButton(onClick = vm::installRecommended, enabled = !provisioning) {
+                    if (provisioning) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Install recommended")
+                    }
+                }
+            }
+            provisionStatus?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

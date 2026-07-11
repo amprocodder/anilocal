@@ -18,6 +18,7 @@ import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
 
 /**
  * Trimmed vendored copy of Aniyomi's CloudflareInterceptor (see VENDORING.md). Solves the Cloudflare
@@ -45,13 +46,32 @@ class CloudflareInterceptor(
     }
 
     override fun intercept(chain: Interceptor.Chain, request: Request, response: Response): Response {
+        // Release the original body before the WebView work and the re-request.
+        response.close()
+        // The cf_clearance in play when this request 403'd — the stale one that just failed.
+        val staleCookie = cookieManager.get(request.url).firstOrNull { it.name == "cf_clearance" }
         return try {
-            // Release the original body before the WebView work and the re-request.
-            response.close()
-            cookieManager.remove(request.url, COOKIE_NAMES, 0)
-            val oldCookie = cookieManager.get(request.url)
-                .firstOrNull { it.name == "cf_clearance" }
-            resolveWithWebView(request, oldCookie)
+            // Serialize the cookie-delete + headless-WebView solve process-wide (a top-level lock, so
+            // one at a time regardless of how many sources race): the WebView solves one challenge at
+            // a time anyway, and two threads deleting/re-reading cf_clearance for the same host race —
+            // one can wipe the cookie the other just earned. Auto mode racing several sources makes
+            // this collision, previously latent, routine.
+            cfLock.lock()
+            try {
+                // A losing race candidate that was cancelled while queued behind the lock must not
+                // then spend up to 30s driving the WebView for a result nobody will use.
+                if (chain.call().isCanceled()) throw IOException("Cancelled before Cloudflare bypass")
+                // Another thread may have solved this host while we waited for the lock. If a
+                // cf_clearance different from the stale one now exists, skip the solve and just retry.
+                val current = cookieManager.get(request.url).firstOrNull { it.name == "cf_clearance" }
+                if (current == null || current == staleCookie) {
+                    cookieManager.remove(request.url, COOKIE_NAMES, 0)
+                    val oldCookie = cookieManager.get(request.url).firstOrNull { it.name == "cf_clearance" }
+                    resolveWithWebView(request, oldCookie)
+                }
+            } finally {
+                cfLock.unlock()
+            }
 
             // cookieJar now holds the fresh cf_clearance; loadForRequest re-supplies it on the retry.
             chain.proceed(request)
@@ -158,5 +178,9 @@ class CloudflareInterceptor(
 private val ERROR_CODES = listOf(403, 503)
 private val SERVER_CHECK = arrayOf("cloudflare-nginx", "cloudflare")
 private val COOKIE_NAMES = listOf("cf_clearance")
+
+/** Process-wide: at most one Cloudflare solve (and its cookie delete/re-read) runs at a time, across
+ *  every source and every racing candidate. See the deviation note in extensions/VENDORING.md. */
+private val cfLock = ReentrantLock()
 
 private class CloudflareBypassException : Exception()

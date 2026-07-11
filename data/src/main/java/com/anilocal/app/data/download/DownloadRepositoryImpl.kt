@@ -171,7 +171,7 @@ class DownloadRepositoryImpl @Inject constructor(
         // fetch with the source's headers. Adaptive (HLS/DASH/SS) requests carry the
         // mimeType but no stream keys, so the segment downloader pulls every rendition (the
         // DownloadQuality setting isn't applied to adaptive track selection yet — progressive only).
-        headerStore.set(stream.headers)
+        headerStore.set(Uri.parse(stream.url).host, stream.headers)
         val request = DownloadRequest.Builder(id, Uri.parse(stream.url))
             .apply { stream.mimeType?.let { setMimeType(it) } }
             .build()
@@ -261,7 +261,7 @@ class DownloadRepositoryImpl @Inject constructor(
                     headersJson = headerAdapter.toJson(stream.headers),
                 )
             )
-            headerStore.set(stream.headers)
+            headerStore.set(Uri.parse(stream.url).host, stream.headers)
 
             val request = DownloadRequest.Builder(id, Uri.parse(stream.url))
                 .apply { stream.mimeType?.let { setMimeType(it) } }
@@ -289,7 +289,12 @@ class DownloadRepositoryImpl @Inject constructor(
         // Point the header store at THIS download (it may still hold another stream's headers).
         // Async is fine: the store is read per-request on the download thread, and this tiny Room
         // read almost always lands before the service processes the resume intent.
-        scope.launch { runCatching { headerStore.setFromJson(dao.getById(id)?.headersJson) } }
+        scope.launch {
+            runCatching {
+                val row = dao.getById(id)
+                headerStore.setFromJson(row?.streamUri?.let { Uri.parse(it).host }, row?.headersJson)
+            }
+        }
         // Send synchronously from the tap handler (app is foreground). If a background start still
         // slips through on API 31+, fall back to the shared manager directly — same pattern and
         // reason as enqueue()'s fallback.

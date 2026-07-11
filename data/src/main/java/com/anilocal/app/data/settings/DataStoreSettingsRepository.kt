@@ -31,6 +31,7 @@ class DataStoreSettingsRepository @Inject constructor(
         val SUBTITLE_SCALE = floatPreferencesKey("subtitle_scale")
         val SUBTITLE_BG = booleanPreferencesKey("subtitle_background")
         val SELECTED_SOURCE = stringPreferencesKey("selected_source")
+        val AUTO_LAST_WINNER = stringPreferencesKey("auto_last_winner")
         val EXTENSION_REPOS = stringPreferencesKey("extension_repos")
         val MAL_USERNAME = stringPreferencesKey("mal_username")
         val MAL_SYNC = booleanPreferencesKey("mal_sync_enabled")
@@ -87,6 +88,13 @@ class DataStoreSettingsRepository @Inject constructor(
 
     override suspend fun setSelectedSourceId(id: String) {
         context.dataStore.edit { it[Keys.SELECTED_SOURCE] = id }
+    }
+
+    override val lastAutoWinner: Flow<String> =
+        context.dataStore.data.map { it[Keys.AUTO_LAST_WINNER] ?: "" }
+
+    override suspend fun setLastAutoWinner(name: String) {
+        context.dataStore.edit { it[Keys.AUTO_LAST_WINNER] = name }
     }
 
     override val extensionRepoBaseUrls: Flow<List<String>> =

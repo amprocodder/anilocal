@@ -1,10 +1,13 @@
 package com.anilocal.app.data.metadata.extension
 
 import android.content.Context
+import android.util.Log
 import com.anilocal.app.data.cache.JsonCache
 import com.anilocal.app.domain.model.ExtensionEntry
 import com.anilocal.app.domain.repo.ExtensionRepository
 import com.anilocal.app.domain.repo.SettingsRepository
+import com.anilocal.app.domain.source.SourceRegistry
+import com.anilocal.app.extensions.loader.AnimeExtensionLoader
 import com.squareup.moshi.Types
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +33,7 @@ class ExtensionRepositoryImpl @Inject constructor(
     private val okHttp: OkHttpClient,
     private val settings: SettingsRepository,
     private val cache: JsonCache,
+    private val registry: SourceRegistry,
 ) : ExtensionRepository {
 
     override suspend fun available(): List<ExtensionEntry> = withContext(Dispatchers.IO) {
@@ -49,26 +53,150 @@ class ExtensionRepositoryImpl @Inject constructor(
     override suspend fun downloadApk(entry: ExtensionEntry): File = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "extensions").apply { mkdirs() }
         val file = File(dir, entry.apkUrl.substringAfterLast('/'))
-        // Stream to a temp file and rename only on success, so an interrupted transfer can never
-        // leave a truncated APK behind for the system installer to choke on.
-        val tmp = File(dir, "${file.name}.part")
+        downloadTo(entry.apkUrl, file)
+        file
+    }
+
+    override suspend fun privateInstall(entry: ExtensionEntry, requireVerified: Boolean): Boolean =
+        withContext(Dispatchers.IO) {
+            val pm = context.packageManager
+            val dir = AnimeExtensionLoader.privateDir(context).apply { mkdirs() }
+            val target = File(dir, entry.pkg + AnimeExtensionLoader.PRIVATE_APK_SUFFIX)
+            val staging = File(dir, "${entry.pkg}.staging")
+            try {
+                runCatching { downloadTo(entry.apkUrl, staging) }.getOrElse {
+                    Log.w(TAG, "privateInstall ${entry.pkg}: download failed: ${it.message}")
+                    return@withContext false
+                }
+
+                val id = ExtensionSignatures.identifyApk(pm, staging.absolutePath)
+                    ?: run { Log.w(TAG, "privateInstall ${entry.pkg}: not a readable APK"); return@withContext false }
+                // The APK must actually BE the advertised package — a repo can't redirect an entry at
+                // some other (e.g. malicious) apk and have it load under the trusted name.
+                if (id.pkg != entry.pkg) {
+                    Log.w(TAG, "privateInstall ${entry.pkg}: apk declares ${id.pkg}"); return@withContext false
+                }
+                if (id.signatures.isEmpty()) {
+                    Log.w(TAG, "privateInstall ${entry.pkg}: unsigned APK"); return@withContext false
+                }
+
+                val fingerprint = repoFingerprint(entry)
+                when {
+                    fingerprint != null ->
+                        if (id.signatures.none { it.equals(fingerprint, ignoreCase = true) }) {
+                            Log.w(TAG, "privateInstall ${entry.pkg}: signing cert doesn't match repo fingerprint")
+                            return@withContext false
+                        }
+                    // Auto-install must never run code from a repo we can't verify.
+                    requireVerified -> {
+                        Log.w(TAG, "privateInstall ${entry.pkg}: repo has no fingerprint; refusing auto-install")
+                        return@withContext false
+                    }
+                    // else: manual install from a repo without repo.json — allowed (user-initiated).
+                }
+
+                // Update guard: never downgrade, never accept a changed signer, vs an existing private copy.
+                if (target.exists()) {
+                    ExtensionSignatures.identifyApk(pm, target.absolutePath)?.let { cur ->
+                        if (id.versionCode < cur.versionCode) {
+                            Log.w(TAG, "privateInstall ${entry.pkg}: downgrade blocked"); return@withContext false
+                        }
+                        if (cur.signatures.isNotEmpty() && !id.signatures.containsAll(cur.signatures)) {
+                            Log.w(TAG, "privateInstall ${entry.pkg}: signer changed, blocked"); return@withContext false
+                        }
+                    }
+                }
+
+                // Commit: read-only APK in app-private storage. Android 14+ (targetSdk 34+) refuses to
+                // class-load a writable dex, so setReadOnly() is mandatory, not hygiene.
+                if (target.exists()) target.delete()
+                if (!staging.renameTo(target)) staging.copyTo(target, overwrite = true)
+                target.setReadOnly()
+            } finally {
+                staging.delete()
+            }
+            registry.refresh()
+            true
+        }
+
+    override suspend fun privateUninstall(pkg: String) {
+        withContext(Dispatchers.IO) {
+            val file = File(AnimeExtensionLoader.privateDir(context), pkg + AnimeExtensionLoader.PRIVATE_APK_SUFFIX)
+            if (file.delete()) registry.refresh()
+        }
+    }
+
+    override suspend fun installedPackages(): Set<String> = withContext(Dispatchers.IO) {
+        AnimeExtensionLoader.installedPackageNames(context) + privatePackageNames()
+    }
+
+    override suspend fun privatelyInstalled(): Set<String> = withContext(Dispatchers.IO) { privatePackageNames() }
+
+    override suspend fun installRecommended(target: Int): Int = withContext(Dispatchers.IO) {
+        val index = runCatching { available() }.getOrDefault(emptyList())
+        val installedNow = installedPackages()
+        // Ranked recommended entries actually present in the configured repos.
+        val seedEntries = RecommendedSources.RANKED.mapNotNull { pkg -> index.firstOrNull { it.pkg == pkg } }
+        val alreadySeeded = seedEntries.count { it.pkg in installedNow }
+        var installed = 0
+        for (entry in seedEntries) {
+            if (alreadySeeded + installed >= target) break
+            if (entry.pkg in installedNow) continue
+            // requireVerified: auto-install must never run code from a repo without a signing fingerprint.
+            if (runCatching { privateInstall(entry, requireVerified = true) }.getOrDefault(false)) {
+                installed++
+                Log.i(TAG, "installRecommended: added ${entry.pkg}")
+            }
+        }
+        installed
+    }
+
+    override suspend fun recommendedNotInstalled(): List<ExtensionEntry> = withContext(Dispatchers.IO) {
+        val index = runCatching { available() }.getOrDefault(emptyList())
+        val installedNow = installedPackages()
+        RecommendedSources.RANKED
+            .mapNotNull { pkg -> index.firstOrNull { it.pkg == pkg } }
+            .filter { it.pkg !in installedNow }
+    }
+
+    /** Private extensions are stored as `<pkg>.apk`, so the file names ARE the package names. */
+    private fun privatePackageNames(): Set<String> =
+        AnimeExtensionLoader.privateDir(context)
+            .listFiles { f -> f.isFile && f.name.endsWith(AnimeExtensionLoader.PRIVATE_APK_SUFFIX) }
+            ?.map { it.name.removeSuffix(AnimeExtensionLoader.PRIVATE_APK_SUFFIX) }
+            ?.toSet()
+            ?: emptySet()
+
+    /** The repo's published signing-cert SHA-256, or null if the repo has no `repo.json`/fingerprint. */
+    private suspend fun repoFingerprint(entry: ExtensionEntry): String? = runCatching {
+        val root = entry.repoRoot.ifBlank { entry.apkUrl.substringBefore("/apk/") }.trimEnd('/')
+        if (root.isBlank()) return null
+        cache.cached("extmeta:$root", META_TYPE, REPO_TTL_MS) { api.repoMeta("$root/repo.json") }
+            .meta?.signingKeyFingerprint?.lowercase()?.replace(":", "")?.trim()?.takeIf { it.isNotBlank() }
+    }.getOrNull()
+
+    /** Stream [url] to [dest] via a temp file, renaming only on success so an interrupted transfer
+     *  never leaves a truncated APK behind. */
+    private fun downloadTo(url: String, dest: File) {
+        val tmp = File(dest.parentFile, "${dest.name}.part")
         try {
-            okHttp.newCall(Request.Builder().url(entry.apkUrl).build()).execute().use { resp ->
+            okHttp.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                 if (!resp.isSuccessful) error("download failed (HTTP ${resp.code})")
                 tmp.outputStream().use { out -> resp.body.byteStream().copyTo(out) }
             }
-            file.delete()
-            if (!tmp.renameTo(file)) error("couldn't finalize ${file.name}")
+            dest.delete()
+            if (!tmp.renameTo(dest)) error("couldn't finalize ${dest.name}")
         } finally {
             tmp.delete()
         }
-        file
     }
 
     private companion object {
         val ENTRIES: java.lang.reflect.Type =
             Types.newParameterizedType(List::class.java, ExtensionEntry::class.java)
+        val META_TYPE: java.lang.reflect.Type = RepoMetaDto::class.java
         const val REPO_TTL_MS = 60L * 60 * 1000   // repos publish updates at most a few times a day
+        const val TAG = "AniLocalExtensions"
     }
 
     private fun RepoEntryDto.toEntry(repoRoot: String) = ExtensionEntry(
@@ -79,5 +207,6 @@ class ExtensionRepositoryImpl @Inject constructor(
         versionName = version,
         isNsfw = nsfw == 1,
         sourceNames = sources?.map { it.name } ?: emptyList(),
+        repoRoot = repoRoot,
     )
 }

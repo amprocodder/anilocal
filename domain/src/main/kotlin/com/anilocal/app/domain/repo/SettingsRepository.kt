@@ -32,6 +32,13 @@ interface SettingsRepository {
     val selectedSourceId: Flow<String>
     suspend fun setSelectedSourceId(id: String)
 
+    /**
+     * Display name of the source the automatic selector last picked, purely for the picker's
+     * "Auto (best source) · last: <name>" subtitle. Empty until Auto mode has resolved once.
+     */
+    val lastAutoWinner: Flow<String>
+    suspend fun setLastAutoWinner(name: String)
+
     /** Base URLs of extension repos (each serving an `index.min.json`). Pre-seeded with yuzono. */
     val extensionRepoBaseUrls: Flow<List<String>>
     suspend fun setExtensionRepoBaseUrls(urls: List<String>)

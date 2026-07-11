@@ -313,7 +313,13 @@ class PlayerViewModel @Inject constructor(
         prefetched = null
         val stream = pre?.let { runCatching { it.await() }.getOrNull() }
             ?: runCatching { streams.resolveStream(d.title, episodeNumber) }
-                .getOrElse { _error.value = "No stream from the selected source for \"${d.title}\""; return }
+                // Prefer the resolver's own message — in Auto mode it names how many sources were
+                // tried, and manual mode names the failing source — falling back to a generic hint.
+                .getOrElse {
+                    _error.value = it.message?.takeIf { m -> m.isNotBlank() }
+                        ?: "No stream from the selected source for \"${d.title}\""
+                    return
+                }
         play(stream.url, stream.mimeType, stream.subtitles, stream.headers)
     }
 
