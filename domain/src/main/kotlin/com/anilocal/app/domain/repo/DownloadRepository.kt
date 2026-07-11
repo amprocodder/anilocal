@@ -31,6 +31,16 @@ interface DownloadRepository {
     fun pause(id: String)
     fun resume(id: String)
 
+    /**
+     * Retry a FAILED download from scratch: re-resolve a FRESH stream URL from the active source
+     * (the original one is typically an expired token by the time a queued episode reaches a
+     * download slot) at the closest match to the originally chosen quality, refetch subtitles,
+     * and re-add the download. Returns false when the row no longer exists or re-resolution
+     * found nothing — the row then stays FAILED for a later retry. Failed downloads are also
+     * auto-retried this way a bounded number of times per process.
+     */
+    suspend fun retry(id: String): Boolean
+
     /** Cancel an in-flight download or delete a completed one. */
     suspend fun remove(id: String)
 }

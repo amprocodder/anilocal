@@ -158,7 +158,14 @@ for the old MAL client id).
   `init` block **bridges** Media3 → Room three ways: a `DownloadManager.Listener` writes state changes
   (`dao.updateState(...)`) and removals (`dao.deleteById`), and the `wifiOnlyDownloads` settings `Flow`
   drives `downloadManager.setRequirements(...)`. When adding download/offline features, follow this bridge
-  pattern rather than reading Media3 state in the UI. **Gotchas:** download state persists as an Int code,
+  pattern rather than reading Media3 state in the UI. **Failed downloads retry by RE-RESOLUTION**
+  (`DownloadRepository.retry`): a queued episode's tokenized stream URL usually expires before it
+  gets one of the 2 parallel download slots, so a retry re-resolves a fresh URL at the original
+  quality, refetches subs, and swaps the Media3 download in place (same id; the Room row is
+  rewritten, and the resulting `onDownloadRemoved` is suppressed via the `retrying` guard so it
+  can't delete the row). `STATE_FAILED` auto-retries this way (2× per process, backoff); the
+  Downloads-screen Retry button calls `retry()` — never `resume()`, which is a no-op for FAILED.
+  **Gotchas:** download state persists as an Int code,
   and the DAO hard-codes `state = 1` to mean COMPLETED — a magic number duplicated from private companion
   consts, easy to break; subtitles and skip markers are stored as Moshi **JSON columns** on `DownloadEntity`
   (not separate tables); offline subtitle files are pulled into `<downloadDir>/subs/` with their URLs

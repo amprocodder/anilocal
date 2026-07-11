@@ -130,6 +130,10 @@ class DownloadsViewModel @Inject constructor(
     fun resume(id: String) = downloads.resume(id)
     fun remove(id: String) { appScope.launch { downloads.remove(id) } }
 
+    // appScope: the retry re-resolves the stream (multi-second network work) and must survive
+    // navigating away mid-flight. Failure leaves the row FAILED — the button stays available.
+    fun retry(id: String) { appScope.launch { runCatching { downloads.retry(id) } } }
+
     /**
      * Deletes by live lookup, not the dialog's UI snapshot — an episode that finished queuing after
      * the confirm dialog opened is deleted too, instead of surviving as an orphan row.
@@ -199,6 +203,7 @@ fun DownloadsScreen(
                                 onClick = { if (d.state == DownloadState.COMPLETED) onPlay(d.animeId, d.episodeNumber) },
                                 onPause = { vm.pause(d.id) },
                                 onResume = { vm.resume(d.id) },
+                                onRetry = { vm.retry(d.id) },
                                 onDelete = { vm.remove(d.id) },
                             )
                         }
@@ -304,6 +309,7 @@ private fun EpisodeRow(
     onClick: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
+    onRetry: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Surface(
@@ -343,8 +349,10 @@ private fun EpisodeRow(
                     IconButton(onClick = onPause) { Icon(Icons.Filled.Pause, "Pause") }
                 DownloadState.PAUSED ->
                     IconButton(onClick = onResume) { Icon(Icons.Filled.PlayArrow, "Resume") }
+                // Retry must NOT be resume(): a failed download's stop-reason change is a no-op in
+                // Media3, and its URL is usually an expired token anyway — retry() re-resolves.
                 DownloadState.FAILED ->
-                    IconButton(onClick = onResume) { Icon(Icons.Filled.Refresh, "Retry") }
+                    IconButton(onClick = onRetry) { Icon(Icons.Filled.Refresh, "Retry") }
                 DownloadState.COMPLETED -> Unit
             }
             IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Remove") }

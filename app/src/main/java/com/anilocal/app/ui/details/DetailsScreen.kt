@@ -212,7 +212,7 @@ class DetailsViewModel @Inject constructor(
                 seasonState.value = SeasonDownload(0, 0, toQueue.size)
                 var queued = 0
                 var failed = 0
-                for (ep in toQueue) {
+                suspend fun tryQueue(ep: Episode): Boolean {
                     val ok = runCatching {
                         // Re-check against live state: a long-press may have queued it mid-pass.
                         if (ep.number !in episodesQueuedNow()) {
@@ -222,8 +222,22 @@ class DetailsViewModel @Inject constructor(
                         }
                     }.isSuccess
                     ensureActive()   // runCatching swallows cancellation — don't count it as a failure
-                    if (ok) queued++ else failed++
+                    return ok
+                }
+                val resolveFailed = mutableListOf<Episode>()
+                for (ep in toQueue) {
+                    if (tryQueue(ep)) queued++ else { failed++; resolveFailed += ep }
                     seasonState.value = SeasonDownload(queued, failed, toQueue.size)
+                }
+                // Second chance for resolve-time failures (rate-limit/CF hiccups mid-pass): one
+                // more polite sequential attempt each. Episodes that fail LATER, at download time,
+                // are handled separately by the repository's auto-retry — this pass only covers
+                // the ones that never made it into the downloads list at all.
+                for (ep in resolveFailed) {
+                    if (tryQueue(ep)) {
+                        queued++; failed--
+                        seasonState.value = SeasonDownload(queued, failed, toQueue.size)
+                    }
                 }
                 seasonState.value = SeasonDownload(queued, failed, toQueue.size, finished = true)
             } finally {

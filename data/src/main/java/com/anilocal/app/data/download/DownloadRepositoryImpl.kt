@@ -21,19 +21,24 @@ import com.anilocal.app.domain.model.Subtitle
 import com.anilocal.app.domain.model.VideoStream
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.SettingsRepository
+import com.anilocal.app.domain.repo.StreamRepository
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
@@ -49,6 +54,9 @@ class DownloadRepositoryImpl @Inject constructor(
     private val headerStore: DownloadHeaderStore,
     private val dao: DownloadDao,
     private val okHttp: OkHttpClient,
+    // For retry(): a failed download's URL is usually an expired token, so retrying means
+    // re-resolving a fresh stream from the active source, not re-fetching the dead URL.
+    private val streams: StreamRepository,
     moshi: Moshi,
     settings: SettingsRepository,
     @Named("downloadDir") private val downloadDir: File,
@@ -65,15 +73,39 @@ class DownloadRepositoryImpl @Inject constructor(
             Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
         )
 
+    // Retry machinery: one retry at a time (polite to the source — a season's worth of failures
+    // arriving together must not stampede it), a bounded per-process auto-retry budget, and the
+    // ids whose Media3 removal is part of an in-place retry (their Room row must survive it).
+    private val retryMutex = Mutex()
+    private val retrying = ConcurrentHashMap.newKeySet<String>()
+    private val autoRetryCounts = ConcurrentHashMap<String, Int>()
+
     init {
         // Bridge Media3 download state → Room so the UI (which reads only Room) stays offline-safe.
         downloadManager.addListener(object : DownloadManager.Listener {
             override fun onDownloadChanged(dm: DownloadManager, download: Download, finalException: Exception?) {
                 val progress = download.percentDownloaded.toInt().coerceIn(0, 100)
                 scope.launch { dao.updateState(download.request.id, mapState(download.state), progress) }
+                // Auto-retry the terminal failure: with 2 parallel slots, a queued episode's
+                // tokenized URL has often expired by the time it gets a slot — a fresh resolve
+                // succeeds where re-fetching the dead URL never can. Bounded per process; the
+                // manual Retry button (which re-arms this budget) remains for the rest.
+                if (download.state == Download.STATE_FAILED) {
+                    val id = download.request.id
+                    val attempt = autoRetryCounts.merge(id, 1, Int::plus) ?: 1
+                    if (attempt <= MAX_AUTO_RETRIES) {
+                        scope.launch {
+                            delay(AUTO_RETRY_BASE_DELAY_MS * attempt)
+                            runCatching { doRetry(id) }
+                        }
+                    }
+                }
             }
 
             override fun onDownloadRemoved(dm: DownloadManager, download: Download) {
+                // An in-place retry removes the old Media3 download (purging its stale bytes) and
+                // immediately re-adds under the same id — that removal must not delete the row.
+                if (retrying.remove(download.request.id)) return
                 scope.launch { dao.deleteById(download.request.id) }
             }
         })
@@ -105,16 +137,7 @@ class DownloadRepositoryImpl @Inject constructor(
     ) {
         val id = "${detail.id}-ep${episode.number}"
 
-        // Pull sidecar subtitles into app storage and rewrite their URLs to local file:// uris.
-        // The stream's request headers ride along — subtitle CDNs are often gated on the same
-        // Referer as the video, and a header-less fetch 403s (which used to mean the episode
-        // downloaded with no captions at all).
-        val localSubs = stream.subtitles.mapIndexedNotNull { index, sub ->
-            runCatching {
-                val file = downloadSubtitle(sub, id, index, stream.headers)
-                Subtitle(Uri.fromFile(file).toString(), sub.language, sub.label)
-            }.getOrNull()
-        }
+        val localSubs = fetchLocalSubs(stream, id)
 
         dao.upsert(
             DownloadEntity(
@@ -180,6 +203,84 @@ class DownloadRepositoryImpl @Inject constructor(
         )
     }
 
+    override suspend fun retry(id: String): Boolean {
+        autoRetryCounts.remove(id)   // a deliberate user retry re-arms the auto budget
+        return doRetry(id)
+    }
+
+    // Re-resolve → refetch subs → swap the Media3 download in place (same id, fresh URL). The Room
+    // row is REWRITTEN, never deleted, so the episode keeps its place in the Downloads UI; on any
+    // resolution failure the row is left untouched (still FAILED, still retryable).
+    private suspend fun doRetry(id: String): Boolean = withContext(Dispatchers.IO) {
+        retryMutex.withLock {
+            // Only a row that is STILL failed is retryable: a delayed auto-retry (or a queued
+            // second tap) must not purge and restart a download that has meanwhile been fixed by
+            // a manual retry, re-enqueued by a season re-press, or even completed.
+            val e = dao.getById(id)?.takeIf { it.state == STATE_FAILED } ?: return@withLock false
+            val variants = runCatching { streams.resolveStreams(e.title, e.episodeNumber) }
+                .getOrNull() ?: return@withLock false
+            val stream = pickVariant(variants, e.quality) ?: return@withLock false
+            val localSubs = fetchLocalSubs(stream, id)
+
+            // The resolve/subs legs above are seconds of network work — re-check that the row
+            // survived them (a user delete mid-retry must win; without this the upsert below
+            // would resurrect a removed episode) and that nothing else took the download over.
+            // Past this point everything is local and fast, so the remaining window is ~ms.
+            if (dao.getById(id)?.state != STATE_FAILED) return@withLock false
+
+            // Purge the dead attempt's bytes; the flag makes the resulting async
+            // onDownloadRemoved skip the row delete (this is a rewrite, not a removal).
+            retrying.add(id)
+            try {
+                DownloadService.sendRemoveDownload(context, AniLocalDownloadService::class.java, id, false)
+            } catch (ex: Exception) {
+                runCatching { downloadManager.removeDownload(id) }
+            }
+
+            dao.upsert(
+                e.copy(
+                    streamUri = stream.url,
+                    mimeType = stream.mimeType,
+                    quality = stream.quality ?: e.quality,
+                    subtitlesJson = subAdapter.toJson(localSubs),
+                    state = STATE_DOWNLOADING,
+                    progress = 0,
+                    headersJson = headerAdapter.toJson(stream.headers),
+                )
+            )
+            headerStore.set(stream.headers)
+
+            val request = DownloadRequest.Builder(id, Uri.parse(stream.url))
+                .apply { stream.mimeType?.let { setMimeType(it) } }
+                .build()
+            try {
+                DownloadService.sendAddDownload(context, AniLocalDownloadService::class.java, request, /* foreground= */ true)
+            } catch (ex: Exception) {
+                // Same API 31+ background-start fallback as enqueue(); if even the direct add
+                // fails, put the row back to FAILED so the retry affordance survives.
+                runCatching { downloadManager.addDownload(request) }.onFailure {
+                    dao.updateState(id, STATE_FAILED, 0)
+                    return@withLock false
+                }
+            }
+            true
+        }
+    }
+
+    /**
+     * Re-pick the originally chosen quality from a fresh variant list, tolerantly: exact label
+     * match, else the best variant not above the label's height, else the lowest one (everything
+     * now exceeds it), else the best available. [variants] arrive best-first.
+     */
+    private fun pickVariant(variants: List<VideoStream>, quality: String?): VideoStream? {
+        if (variants.isEmpty()) return null
+        if (quality == null) return variants.first()
+        variants.firstOrNull { it.quality == quality }?.let { return it }
+        val wanted = quality.filter { it.isDigit() }.toIntOrNull() ?: return variants.first()
+        return variants.filter { (it.height ?: 0) <= wanted }.maxByOrNull { it.height ?: 0 }
+            ?: variants.lastOrNull()
+    }
+
     override fun resume(id: String) {
         // Point the header store at THIS download (it may still hold another stream's headers).
         // Async is fine: the store is read per-request on the download thread, and this tiny Room
@@ -206,6 +307,25 @@ class DownloadRepositoryImpl @Inject constructor(
             File(downloadDir, "subs").listFiles { f -> f.name.startsWith("$id-") }?.forEach { it.delete() }
         }
         dao.deleteById(id)
+    }
+
+    /**
+     * Pull sidecar subtitles into app storage and rewrite their URLs to local file:// uris. The
+     * stream's request headers ride along — subtitle CDNs are often gated on the same Referer as
+     * the video, and a header-less fetch 403s (which used to mean the episode downloaded with no
+     * captions at all). Any previous attempt's sidecars for this id are dropped first, so a retry
+     * can't leave orphans behind when the new stream names/formats its subs differently.
+     */
+    private suspend fun fetchLocalSubs(stream: VideoStream, id: String): List<Subtitle> {
+        withContext(Dispatchers.IO) {
+            File(downloadDir, "subs").listFiles { f -> f.name.startsWith("$id-") }?.forEach { it.delete() }
+        }
+        return stream.subtitles.mapIndexedNotNull { index, sub ->
+            runCatching {
+                val file = downloadSubtitle(sub, id, index, stream.headers)
+                Subtitle(Uri.fromFile(file).toString(), sub.language, sub.label)
+            }.getOrNull()
+        }
     }
 
     private suspend fun downloadSubtitle(sub: Subtitle, id: String, index: Int, headers: Map<String, String>): File =
@@ -263,5 +383,7 @@ class DownloadRepositoryImpl @Inject constructor(
         const val STATE_PAUSED = 3
         const val STATE_QUEUED = 4
         const val STOP_REASON_PAUSED = 1   // any non-zero stop reason pauses a download
+        const val MAX_AUTO_RETRIES = 2               // per download id, per process
+        const val AUTO_RETRY_BASE_DELAY_MS = 5_000L  // 5s, then 10s — outlives a transient blip
     }
 }
