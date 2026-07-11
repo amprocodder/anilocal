@@ -50,6 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import coil.compose.AsyncImage
 import com.anilocal.app.domain.model.DownloadItem
+import com.anilocal.app.domain.model.DownloadProgress
 import com.anilocal.app.domain.model.DownloadState
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.ui.common.SearchField
@@ -113,6 +114,10 @@ class DownloadsViewModel @Inject constructor(
         downloads.downloads.map { it.isNotEmpty() }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** Live per-download progress/speed/ETA, keyed by id — overlaid on the DOWNLOADING rows. */
+    val activeProgress: StateFlow<Map<String, DownloadProgress>> =
+        downloads.activeProgress.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
     fun setQuery(q: String) { query.value = q }
 
     // Folders start expanded; the set remembers what the user collapsed (in the VM so it
@@ -156,6 +161,7 @@ fun DownloadsScreen(
     val collapsed by vm.collapsed.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     val hasDownloads by vm.hasDownloads.collectAsStateWithLifecycle()
+    val activeProgress by vm.activeProgress.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<SeasonFolder?>(null) }
 
     if (!hasDownloads) {
@@ -200,6 +206,7 @@ fun DownloadsScreen(
                         items(folder.episodes, key = { it.id }) { d ->
                             EpisodeRow(
                                 item = d,
+                                live = activeProgress[d.id],
                                 onClick = { if (d.state == DownloadState.COMPLETED) onPlay(d.animeId, d.episodeNumber) },
                                 onPause = { vm.pause(d.id) },
                                 onResume = { vm.resume(d.id) },
@@ -306,6 +313,7 @@ private fun SeasonHeader(
 @Composable
 private fun EpisodeRow(
     item: DownloadItem,
+    live: DownloadProgress?,
     onClick: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
@@ -329,8 +337,16 @@ private fun EpisodeRow(
                 )
                 when (item.state) {
                     DownloadState.DOWNLOADING -> {
-                        ProgressBar(item.progress)
-                        Text("Downloading ${item.progress}%", style = MaterialTheme.typography.labelSmall)
+                        // Prefer the live poll's smoother percent; fall back to the persisted value.
+                        val pct = live?.percent ?: item.progress
+                        ProgressBar(pct)
+                        // "Downloading 42% · 3.1 MB/s · 1m 20s left" — speed/ETA shown when known.
+                        val detail = buildString {
+                            append("Downloading $pct%")
+                            live?.bytesPerSecond?.takeIf { it > 0 }?.let { append(" · ${formatSpeed(it)}") }
+                            live?.etaSeconds?.let { append(" · ${formatEta(it)} left") }
+                        }
+                        Text(detail, style = MaterialTheme.typography.labelSmall)
                     }
                     DownloadState.QUEUED -> Text("Waiting for network…", style = MaterialTheme.typography.labelSmall)
                     DownloadState.PAUSED -> {
@@ -368,4 +384,21 @@ private fun ProgressBar(progress: Int) {
         color = MaterialTheme.colorScheme.primary,
         trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
     )
+}
+
+/** Human-readable transfer rate: "920 KB/s", "3.1 MB/s" (binary units, one decimal for MB+). */
+private fun formatSpeed(bytesPerSecond: Long): String = when {
+    bytesPerSecond >= 1024L * 1024 -> "%.1f MB/s".format(bytesPerSecond / (1024.0 * 1024))
+    bytesPerSecond >= 1024L -> "${bytesPerSecond / 1024} KB/s"
+    else -> "$bytesPerSecond B/s"
+}
+
+/** Compact time-remaining: "45s", "1m 20s", "1h 5m". */
+private fun formatEta(seconds: Long): String {
+    val s = seconds.coerceAtLeast(0)
+    return when {
+        s >= 3600 -> "${s / 3600}h ${(s % 3600) / 60}m"
+        s >= 60 -> "${s / 60}m ${s % 60}s"
+        else -> "${s}s"
+    }
 }

@@ -63,6 +63,11 @@ interface DownloadDao {
     @Query("UPDATE downloads SET state = :state, progress = :progress WHERE id = :id")
     suspend fun updateState(id: String, state: Int, progress: Int)
 
+    /** Progress-only write for the live poll: guarded on `state = 0` (DOWNLOADING) so a tick that
+     *  lands just after the row flipped to COMPLETED/FAILED can't reset it back to DOWNLOADING. */
+    @Query("UPDATE downloads SET progress = :progress WHERE id = :id AND state = 0")
+    suspend fun updateProgress(id: String, progress: Int)
+
     @Query("DELETE FROM downloads WHERE id = :id")
     suspend fun deleteById(id: String)
 }

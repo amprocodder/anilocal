@@ -2,6 +2,7 @@ package com.anilocal.app.domain.repo
 
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.DownloadItem
+import com.anilocal.app.domain.model.DownloadProgress
 import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.OfflineEpisode
 import com.anilocal.app.domain.model.SkipMarker
@@ -15,6 +16,15 @@ import kotlinx.coroutines.flow.Flow
  */
 interface DownloadRepository {
     val downloads: Flow<List<DownloadItem>>
+
+    /**
+     * Live progress (smooth percent, transfer speed, ETA) for currently-downloading episodes, keyed
+     * by download id — polled from the engine, in-memory only. The engine reports byte progress by
+     * polling, not by pushing state events, so [DownloadItem.progress] alone would sit at 0% until
+     * a download completes; this flow carries the in-between values plus speed/ETA for the UI.
+     */
+    val activeProgress: Flow<Map<String, DownloadProgress>>
+
     fun downloadedAnimeIds(): Flow<Set<String>>
     fun downloadedEpisodes(animeId: String): Flow<Set<Int>>
 

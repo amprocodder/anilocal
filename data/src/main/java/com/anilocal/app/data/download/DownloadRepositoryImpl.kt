@@ -2,6 +2,7 @@ package com.anilocal.app.data.download
 
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
@@ -14,6 +15,7 @@ import com.anilocal.app.data.local.DownloadDao
 import com.anilocal.app.data.local.DownloadEntity
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.DownloadItem
+import com.anilocal.app.domain.model.DownloadProgress
 import com.anilocal.app.domain.model.DownloadState
 import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.OfflineEpisode
@@ -31,7 +33,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -81,6 +85,9 @@ class DownloadRepositoryImpl @Inject constructor(
     private val retrying = ConcurrentHashMap.newKeySet<String>()
     private val autoRetryCounts = ConcurrentHashMap<String, Int>()
 
+    private val _activeProgress = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
+    override val activeProgress: Flow<Map<String, DownloadProgress>> = _activeProgress
+
     init {
         // Bridge Media3 download state → Room so the UI (which reads only Room) stays offline-safe.
         downloadManager.addListener(object : DownloadManager.Listener {
@@ -124,6 +131,59 @@ class DownloadRepositoryImpl @Inject constructor(
             settings.wifiOnlyDownloads.collect { wifiOnly ->
                 val network = if (wifiOnly) Requirements.NETWORK_UNMETERED else Requirements.NETWORK
                 downloadManager.setRequirements(Requirements(network))
+            }
+        }
+
+        // Live progress poll. Media3 reports byte progress ONLY by polling getCurrentDownloads()
+        // (that is exactly how its own foreground-notification updater works) — onDownloadChanged
+        // fires on state transitions, not per-percent, so the persisted progress would sit at 0%
+        // until COMPLETED. Poll on the main thread (the DownloadManager's own thread) to drive a
+        // smooth percent + a transfer-rate/ETA readout, and persist whole-percent changes so the
+        // list survives backgrounding. Idles cheaply when nothing is downloading.
+        mainScope.launch {
+            val lastBytes = HashMap<String, Pair<Long, Long>>()   // id -> (bytesDownloaded, elapsedRealtimeMs)
+            val smoothedBps = HashMap<String, Double>()           // id -> EMA of bytes/sec
+            val lastWrittenPct = HashMap<String, Int>()           // id -> last percent persisted to Room
+            while (isActive) {
+                val downloading = downloadManager.currentDownloads
+                    .filter { it.state == Download.STATE_DOWNLOADING }
+                if (downloading.isEmpty()) {
+                    if (_activeProgress.value.isNotEmpty()) _activeProgress.value = emptyMap()
+                    lastBytes.clear(); smoothedBps.clear(); lastWrittenPct.clear()
+                    delay(PROGRESS_IDLE_POLL_MS)
+                    continue
+                }
+                val now = SystemClock.elapsedRealtime()
+                val next = HashMap<String, DownloadProgress>(downloading.size)
+                for (d in downloading) {
+                    val id = d.request.id
+                    val bytes = d.bytesDownloaded.coerceAtLeast(0)
+                    val total = d.contentLength                    // C.LENGTH_UNSET (-1) if unknown
+                    val pct = d.percentDownloaded
+                        .let { if (it.isNaN() || it < 0f) null else it.toInt().coerceIn(0, 100) }
+                        ?: if (total > 0) ((bytes * 100) / total).toInt().coerceIn(0, 100) else 0
+                    val prev = lastBytes[id]
+                    val instBps =
+                        if (prev != null && now > prev.second)
+                            ((bytes - prev.first).coerceAtLeast(0) * 1000.0) / (now - prev.second)
+                        else 0.0
+                    // EMA smooths the per-tick jitter (segment bursts) into a steady readout.
+                    val bps = smoothedBps[id]?.let { 0.6 * it + 0.4 * instBps } ?: instBps
+                    smoothedBps[id] = bps
+                    lastBytes[id] = bytes to now
+                    val eta = if (total > 0 && bps > 1.0)
+                        ((total - bytes).coerceAtLeast(0) / bps).toLong() else null
+                    next[id] = DownloadProgress(pct, bps.toLong(), eta)
+                    if (lastWrittenPct[id] != pct) {
+                        lastWrittenPct[id] = pct
+                        scope.launch { dao.updateProgress(id, pct) }
+                    }
+                }
+                (lastBytes.keys - next.keys).toList().forEach {
+                    lastBytes.remove(it); smoothedBps.remove(it); lastWrittenPct.remove(it)
+                }
+                _activeProgress.value = next
+                delay(PROGRESS_POLL_MS)
             }
         }
     }
@@ -395,5 +455,7 @@ class DownloadRepositoryImpl @Inject constructor(
         const val MAX_AUTO_RETRIES = 4               // per download id, per process
         const val AUTO_RETRY_BASE_DELAY_MS = 4_000L  // 4s, 8s, 12s, 16s — outlives a transient blip
         const val TAG = "AniLocalDownloads"
+        const val PROGRESS_POLL_MS = 1_000L          // live progress cadence while downloading
+        const val PROGRESS_IDLE_POLL_MS = 3_000L     // back off when nothing is downloading
     }
 }
