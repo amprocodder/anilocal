@@ -2,6 +2,7 @@ package com.anilocal.app.data.download
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.offline.Download
@@ -92,12 +93,19 @@ class DownloadRepositoryImpl @Inject constructor(
                 // manual Retry button (which re-arms this budget) remains for the rest.
                 if (download.state == Download.STATE_FAILED) {
                     val id = download.request.id
+                    // Sideload builds have no logcat access for the user; make the real cause
+                    // (UnknownHostException = dead/expired host, 403 = bad headers, timeout, …)
+                    // visible so a stuck-download report is diagnosable from `adb logcat`.
+                    Log.w(TAG, "Download failed: $id host=${download.request.uri.host} → " +
+                        "${finalException?.javaClass?.simpleName}: ${finalException?.message}")
                     val attempt = autoRetryCounts.merge(id, 1, Int::plus) ?: 1
                     if (attempt <= MAX_AUTO_RETRIES) {
                         scope.launch {
                             delay(AUTO_RETRY_BASE_DELAY_MS * attempt)
                             runCatching { doRetry(id) }
                         }
+                    } else {
+                        Log.w(TAG, "Download $id exhausted $MAX_AUTO_RETRIES auto-retries; left FAILED for manual retry")
                     }
                 }
             }
@@ -218,8 +226,11 @@ class DownloadRepositoryImpl @Inject constructor(
             // a manual retry, re-enqueued by a season re-press, or even completed.
             val e = dao.getById(id)?.takeIf { it.state == STATE_FAILED } ?: return@withLock false
             val variants = runCatching { streams.resolveStreams(e.title, e.episodeNumber) }
+                .onFailure { Log.w(TAG, "Retry $id: re-resolve failed: ${it.message}") }
                 .getOrNull() ?: return@withLock false
-            val stream = pickVariant(variants, e.quality) ?: return@withLock false
+            val stream = pickVariant(variants, e.quality) ?: run {
+                Log.w(TAG, "Retry $id: re-resolve returned no usable variant"); return@withLock false
+            }
             val localSubs = fetchLocalSubs(stream, id)
 
             // The resolve/subs legs above are seconds of network work — re-check that the row
@@ -227,15 +238,17 @@ class DownloadRepositoryImpl @Inject constructor(
             // would resurrect a removed episode) and that nothing else took the download over.
             // Past this point everything is local and fast, so the remaining window is ~ms.
             if (dao.getById(id)?.state != STATE_FAILED) return@withLock false
+            Log.i(TAG, "Retry $id: re-resolved to host=${Uri.parse(stream.url).host}, re-adding")
 
-            // Purge the dead attempt's bytes; the flag makes the resulting async
-            // onDownloadRemoved skip the row delete (this is a rewrite, not a removal).
+            // Swap the download in place through the DownloadManager DIRECTLY — NOT via the
+            // foreground-service intents. Firing startForegroundService for every retry (a season
+            // of simultaneous failures = a burst of them) trips the platform's background-FGS /
+            // "Stop FGS timeout" limiter, which tears the service down and stalls the healthy
+            // downloads sharing it. The manager restarts/maintains the service on its own when a
+            // download is present. The `retrying` flag makes the resulting async onDownloadRemoved
+            // skip the row delete (this is a rewrite, not a removal).
             retrying.add(id)
-            try {
-                DownloadService.sendRemoveDownload(context, AniLocalDownloadService::class.java, id, false)
-            } catch (ex: Exception) {
-                runCatching { downloadManager.removeDownload(id) }
-            }
+            downloadManager.removeDownload(id)
 
             dao.upsert(
                 e.copy(
@@ -253,16 +266,7 @@ class DownloadRepositoryImpl @Inject constructor(
             val request = DownloadRequest.Builder(id, Uri.parse(stream.url))
                 .apply { stream.mimeType?.let { setMimeType(it) } }
                 .build()
-            try {
-                DownloadService.sendAddDownload(context, AniLocalDownloadService::class.java, request, /* foreground= */ true)
-            } catch (ex: Exception) {
-                // Same API 31+ background-start fallback as enqueue(); if even the direct add
-                // fails, put the row back to FAILED so the retry affordance survives.
-                runCatching { downloadManager.addDownload(request) }.onFailure {
-                    dao.updateState(id, STATE_FAILED, 0)
-                    return@withLock false
-                }
-            }
+            downloadManager.addDownload(request)
             true
         }
     }
@@ -383,7 +387,8 @@ class DownloadRepositoryImpl @Inject constructor(
         const val STATE_PAUSED = 3
         const val STATE_QUEUED = 4
         const val STOP_REASON_PAUSED = 1   // any non-zero stop reason pauses a download
-        const val MAX_AUTO_RETRIES = 2               // per download id, per process
-        const val AUTO_RETRY_BASE_DELAY_MS = 5_000L  // 5s, then 10s — outlives a transient blip
+        const val MAX_AUTO_RETRIES = 4               // per download id, per process
+        const val AUTO_RETRY_BASE_DELAY_MS = 4_000L  // 4s, 8s, 12s, 16s — outlives a transient blip
+        const val TAG = "AniLocalDownloads"
     }
 }
