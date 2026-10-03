@@ -14,25 +14,40 @@ android {
         applicationId = "com.anilocal.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.1"
         vectorDrawables { useSupportLibrary = true }
 
         // Optional features (blank = no-op). See README. (MAL sync is keyless — username only.)
-        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty("GOOGLE_WEB_CLIENT_ID") ?: ""}\"")
         buildConfigField("String", "TMDB_API_KEY", "\"${project.findProperty("TMDB_API_KEY") ?: ""}\"")
+    }
+
+    // Debug builds are signed with the COMMITTED app/debug.keystore (a standard, non-secret
+    // debug key — storepass/keypass "android"). Without this, every CI run mints a fresh
+    // ephemeral debug key, so no sideloaded APK can ever update another install channel
+    // (INSTALL_FAILED_UPDATE_INCOMPATIBLE / "App not installed" + full data wipe each time).
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         create("benchmark") {
             initWith(getByName("release"))
+            // Keep the extension host ABI intact and the original Phase 2 update identity.
+            // Loaded extension APKs reference the host's class and method names at runtime.
+            isMinifyEnabled = false
+            isDebuggable = false
             signingConfig = signingConfigs.getByName("debug")
-            matchingFallbacks += "release"
+            matchingFallbacks += listOf("release")
         }
     }
     compileOptions {
@@ -44,11 +59,6 @@ android {
         compose = true
         buildConfig = true
     }
-}
-
-// Apply Google Services only after you drop in your own app/google-services.json.
-if (file("google-services.json").exists()) {
-    apply(plugin = "com.google.gms.google-services")
 }
 
 dependencies {
@@ -78,12 +88,10 @@ dependencies {
     // Player UI (the player itself lives in :app; the offline cache factory comes from :data).
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.hls)
+    // DASH (.mpd) and SmoothStreaming (.ism) so adaptive extension streams resolve instead of
+    // crashing — DefaultMediaSourceFactory reflectively loads these factories when present.
+    implementation(libs.media3.exoplayer.dash)
+    implementation(libs.media3.exoplayer.smoothstreaming)
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
-
-    // Google Sign-In UI (the Firebase exchange lives in :data).
-    implementation(libs.play.services.auth)
-
-    testImplementation(libs.junit)
-    testImplementation(libs.coroutines.test)
 }

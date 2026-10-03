@@ -1,6 +1,7 @@
 package com.anilocal.app.data.download
 
 import android.app.Notification
+import android.annotation.SuppressLint
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.offline.Download
@@ -51,6 +52,8 @@ class AniLocalDownloadService : DownloadService(
 
     // JobScheduler-backed: persists across reboot (requires RECEIVE_BOOT_COMPLETED) and
     // restarts the service to resume downloads when the manager's requirements are met.
+    // This library's components/permissions are declared by :app's AndroidManifest.xml.
+    @SuppressLint("MissingPermission")
     override fun getScheduler(): Scheduler = PlatformScheduler(this, DOWNLOAD_JOB_ID)
 
     override fun getForegroundNotification(

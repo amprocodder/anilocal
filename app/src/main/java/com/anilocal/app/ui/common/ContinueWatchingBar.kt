@@ -39,7 +39,10 @@ fun ContinueWatchingBar(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(tonalElevation = 3.dp, modifier = modifier.fillMaxWidth()) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier.fillMaxWidth(),
+    ) {
         Column {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -83,6 +86,7 @@ fun ContinueWatchingBar(
             item.fraction?.let { f ->
                 LinearProgressIndicator(
                     progress = { f },
+                    color = MaterialTheme.colorScheme.tertiary,
                     modifier = Modifier.fillMaxWidth().height(2.dp),
                 )
             }

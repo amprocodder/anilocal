@@ -2,6 +2,7 @@ package com.anilocal.app.ui.player
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +35,7 @@ internal class PlaybackRecovery(
     private var lastRequest: PlaybackRestart? = null
     private var attempts = 0
     private var closed = false
+    private var generation = 0
 
     fun onError(request: PlaybackRestart) {
         if (closed) return
@@ -42,9 +44,10 @@ internal class PlaybackRecovery(
         pending = request
         if (recoveryJob?.isActive == true) return
 
-        recoveryJob = scope.launch {
+        val session = generation
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
-                while (pending != null) {
+                while (pending != null && session == generation) {
                     val next = checkNotNull(pending)
                     pending = null
                     if (attempts >= MAX_ATTEMPTS) {
@@ -65,18 +68,21 @@ internal class PlaybackRecovery(
                     }
                 }
             } finally {
-                recoveryJob = null
+                if (session == generation) recoveryJob = null
             }
         }
+        recoveryJob = job
+        job.start()
     }
 
     fun onPlaybackStarted() {
         if (closed || pending != null) return
         _state.value = PlaybackRecoveryState.Idle
         if (stablePlaybackJob?.isActive == true) return
+        val session = generation
         stablePlaybackJob = scope.launch {
             delay(STABLE_PLAYBACK_MS)
-            attempts = 0
+            if (session == generation) attempts = 0
         }
     }
 
@@ -98,9 +104,20 @@ internal class PlaybackRecovery(
 
     fun close() {
         closed = true
+        reset()
+    }
+
+    /** An episode switch abandons old work and gives the newly selected episode its own budget. */
+    fun reset() {
+        generation++
         pending = null
-        recoveryJob?.cancel()
+        lastRequest = null
+        val previous = recoveryJob
+        recoveryJob = null
+        previous?.cancel()
         onPlaybackStopped()
+        attempts = 0
+        _state.value = PlaybackRecoveryState.Idle
     }
 
     private companion object {

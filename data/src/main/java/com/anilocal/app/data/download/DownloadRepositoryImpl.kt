@@ -2,6 +2,7 @@ package com.anilocal.app.data.download
 
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
@@ -12,9 +13,9 @@ import androidx.media3.exoplayer.offline.DownloadService
 import androidx.media3.exoplayer.scheduler.Requirements
 import com.anilocal.app.data.local.DownloadDao
 import com.anilocal.app.data.local.DownloadEntity
-import com.anilocal.app.data.local.DownloadStateUpdate
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.DownloadItem
+import com.anilocal.app.domain.model.DownloadProgress
 import com.anilocal.app.domain.model.DownloadState
 import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.OfflineEpisode
@@ -23,25 +24,26 @@ import com.anilocal.app.domain.model.Subtitle
 import com.anilocal.app.domain.model.VideoStream
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.SettingsRepository
+import com.anilocal.app.domain.repo.StreamRepository
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -49,7 +51,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.io.File
-import kotlin.coroutines.coroutineContext
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
@@ -59,95 +61,163 @@ import javax.inject.Singleton
 class DownloadRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val downloadManager: DownloadManager,
+    // Per-request headers for the download stack: the DownloadManager's data-source chain resolves
+    // every manifest/segment request through this store (see DownloadModule), so header-gated
+    // sources fetch instead of 403'ing — in this process or a headless service restart.
+    private val headerStore: DownloadHeaderStore,
     private val dao: DownloadDao,
-    okHttp: OkHttpClient,
+    private val okHttp: OkHttpClient,
+    // For retry(): a failed download's URL is usually an expired token, so retrying means
+    // re-resolving a fresh stream from the active source, not re-fetching the dead URL.
+    private val streams: StreamRepository,
     moshi: Moshi,
     settings: SettingsRepository,
     @Named("downloadDir") private val downloadDir: File,
-    @Named("appScope") private val appScope: CoroutineScope,
 ) : DownloadRepository {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val subtitleDownloader = SubtitleDownloader(okHttp, File(downloadDir, "subs"))
+    // Persist native callbacks in arrival order so a delayed progress write cannot undo completion.
+    private val stateWrites = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+    private val progressWakeups = Channel<Unit>(Channel.CONFLATED)
+    private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val subAdapter =
         moshi.adapter<List<Subtitle>>(Types.newParameterizedType(List::class.java, Subtitle::class.java))
     private val markerAdapter =
         moshi.adapter<List<SkipMarker>>(Types.newParameterizedType(List::class.java, SkipMarker::class.java))
-    private val subtitleDownloader = SubtitleDownloader(okHttp, File(downloadDir, "subs"))
-    private val operations = KeyedOperationMutex()
-    private val writes = Mutex()
-    private val writeQueue = DownloadWriteQueue()
-    private val writeSignals = Channel<Unit>(Channel.CONFLATED)
-    private val listenerReady = CompletableDeferred<Unit>()
+    private val headerAdapter =
+        moshi.adapter<Map<String, String>>(
+            Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
+        )
 
-    // These fields are used only on the Media3 application thread (the main thread).
-    private var polling: Job? = null
-    private var reconciliationStarted = false
-    private val startup = StartupDownloadReconciliation()
-    private val lastPercent = HashMap<String, Int>()
-    private val removals = HashMap<String, CompletableDeferred<Unit>>()
+    // Retry machinery: one retry at a time (polite to the source — a season's worth of failures
+    // arriving together must not stampede it), a bounded per-process auto-retry budget, and the
+    // ids whose Media3 removal is part of an in-place retry (their Room row must survive it).
+    private val retryMutex = Mutex()
+    private val operations = KeyedOperationMutex()
+    private val removals = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+    private val additions = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+    private val nativeReady = CompletableDeferred<Unit>()
+    private val autoRetryCounts = ConcurrentHashMap<String, Int>()
+
+    private val _activeProgress = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
+    override val activeProgress: Flow<Map<String, DownloadProgress>> = _activeProgress
 
     init {
-        appScope.launch {
-            for (signal in writeSignals) {
-                delay(250)
-                var failed = false
-                writes.withLock {
-                    val batch = writeQueue.drain()
-                    if (!batch.isEmpty) {
-                        try {
-                            dao.applyChanges(batch.updates, batch.removedIds)
-                            writeQueue.committed(batch)
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (error: Exception) {
-                            writeQueue.retry(batch)
-                            failed = true
-                            Log.w("AniLocalDownloads", "Could not save download progress", error)
+        scope.launch {
+            for (write in stateWrites) {
+                try { write() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { Log.w(TAG, "Could not save download state", error) }
+            }
+        }
+        // Bridge Media3 download state → Room so the UI (which reads only Room) stays offline-safe.
+        mainScope.launch(Dispatchers.Main.immediate) {
+            downloadManager.addListener(object : DownloadManager.Listener {
+            override fun onInitialized(dm: DownloadManager) {
+                nativeReady.complete(Unit)
+                progressWakeups.trySend(Unit)
+            }
+
+            override fun onDownloadChanged(dm: DownloadManager, download: Download, finalException: Exception?) {
+                additions[download.request.id]?.complete(Unit)
+                val progress = if (download.state == Download.STATE_COMPLETED) 100
+                    else download.percentDownloaded.takeIf { it.isFinite() && it >= 0 }?.toInt()?.coerceIn(0, 100) ?: 0
+                val state = mapState(download.state)
+                stateWrites.trySend { dao.updateState(download.request.id, state, progress) }
+                progressWakeups.trySend(Unit)
+                // Auto-retry the terminal failure: with 2 parallel slots, a queued episode's
+                // tokenized URL has often expired by the time it gets a slot — a fresh resolve
+                // succeeds where re-fetching the dead URL never can. Bounded per process; the
+                // manual Retry button (which re-arms this budget) remains for the rest.
+                if (download.state == Download.STATE_FAILED) {
+                    val id = download.request.id
+                    // Sideload builds have no logcat access for the user; make the real cause
+                    // (UnknownHostException = dead/expired host, 403 = bad headers, timeout, …)
+                    // visible so a stuck-download report is diagnosable from `adb logcat`.
+                    Log.w(TAG, "Download failed: $id host=${download.request.uri.host} → " +
+                        "${finalException?.javaClass?.simpleName}: ${finalException?.message}")
+                    val attempt = autoRetryCounts.merge(id, 1, Int::plus) ?: 1
+                    if (attempt <= MAX_AUTO_RETRIES) {
+                        scope.launch {
+                            delay(AUTO_RETRY_BASE_DELAY_MS * attempt)
+                            runCatching { doRetry(id) }
                         }
+                    } else {
+                        Log.w(TAG, "Download $id exhausted $MAX_AUTO_RETRIES auto-retries; left FAILED for manual retry")
                     }
                 }
-                if (failed) {
-                    delay(1_000)
-                    writeSignals.trySend(Unit)
-                }
+            }
+
+            override fun onDownloadRemoved(dm: DownloadManager, download: Download) {
+                // The operation awaiting native removal owns the subsequent row mutation.
+                removals[download.request.id]?.let { it.complete(Unit); return }
+                stateWrites.trySend { dao.deleteById(download.request.id) }
+                progressWakeups.trySend(Unit)
+            }
+        })
+        if (downloadManager.isInitialized) nativeReady.complete(Unit)
+        }
+
+        // WiFi-only setting → DownloadManager requirements. The manager watches connectivity
+        // and automatically pauses (STATE_QUEUED) / resumes downloads as the network changes.
+        mainScope.launch {
+            settings.wifiOnlyDownloads.distinctUntilChanged().collect { wifiOnly ->
+                val network = if (wifiOnly) Requirements.NETWORK_UNMETERED else Requirements.NETWORK
+                downloadManager.setRequirements(Requirements(network))
             }
         }
 
-        appScope.launch(Dispatchers.Main.immediate) {
-            try {
-                downloadManager.addListener(object : DownloadManager.Listener {
-                    override fun onInitialized(dm: DownloadManager) {
-                        reconcileNativeDownloads()
-                        updatePolling()
-                    }
-
-                    override fun onDownloadChanged(dm: DownloadManager, download: Download, finalException: Exception?) {
-                        record(download)
-                        updatePolling()
-                    }
-
-                    override fun onDownloadRemoved(dm: DownloadManager, download: Download) {
-                        val id = download.request.id
-                        startup.touch(id)
-                        lastPercent.remove(id)
-                        val waiting = removals[id]
-                        if (waiting != null) waiting.complete(Unit)
-                        else if (writeQueue.remove(id)) writeSignals.trySend(Unit)
-                        updatePolling()
-                    }
-                })
-                if (downloadManager.isInitialized) {
-                    reconcileNativeDownloads()
-                    updatePolling()
+        // Live progress poll. Media3 reports byte progress ONLY by polling getCurrentDownloads()
+        // (that is exactly how its own foreground-notification updater works) — onDownloadChanged
+        // fires on state transitions, not per-percent, so the persisted progress would sit at 0%
+        // until COMPLETED. Poll on the main thread (the DownloadManager's own thread) to drive a
+        // smooth percent + a transfer-rate/ETA readout, and persist whole-percent changes so the
+        // list survives backgrounding. Idles cheaply when nothing is downloading.
+        mainScope.launch {
+            val lastBytes = HashMap<String, Pair<Long, Long>>()   // id -> (bytesDownloaded, elapsedRealtimeMs)
+            val smoothedBps = HashMap<String, Double>()           // id -> EMA of bytes/sec
+            val lastWrittenPct = HashMap<String, Int>()           // id -> last percent persisted to Room
+            while (isActive) {
+                val downloading = downloadManager.currentDownloads
+                    .filter { it.state == Download.STATE_DOWNLOADING }
+                if (downloading.isEmpty()) {
+                    if (_activeProgress.value.isNotEmpty()) _activeProgress.value = emptyMap()
+                    lastBytes.clear(); smoothedBps.clear(); lastWrittenPct.clear()
+                    progressWakeups.receive()
+                    continue
                 }
-                listenerReady.complete(Unit)
-                // Changes to another preference must not reconfigure or wake the native manager.
-                settings.wifiOnlyDownloads.distinctUntilChanged().collect { wifiOnly ->
-                    val network = if (wifiOnly) Requirements.NETWORK_UNMETERED else Requirements.NETWORK
-                    downloadManager.setRequirements(Requirements(network))
+                val now = SystemClock.elapsedRealtime()
+                val next = HashMap<String, DownloadProgress>(downloading.size)
+                for (d in downloading) {
+                    val id = d.request.id
+                    val bytes = d.bytesDownloaded.coerceAtLeast(0)
+                    val total = d.contentLength                    // C.LENGTH_UNSET (-1) if unknown
+                    val pct = d.percentDownloaded
+                        .let { if (it.isNaN() || it < 0f) null else it.toInt().coerceIn(0, 100) }
+                        ?: if (total > 0) ((bytes * 100) / total).toInt().coerceIn(0, 100) else 0
+                    val prev = lastBytes[id]
+                    val instBps =
+                        if (prev != null && now > prev.second)
+                            ((bytes - prev.first).coerceAtLeast(0) * 1000.0) / (now - prev.second)
+                        else 0.0
+                    // EMA smooths the per-tick jitter (segment bursts) into a steady readout.
+                    val bps = smoothedBps[id]?.let { 0.6 * it + 0.4 * instBps } ?: instBps
+                    smoothedBps[id] = bps
+                    lastBytes[id] = bytes to now
+                    val eta = if (total > 0 && bps > 1.0)
+                        ((total - bytes).coerceAtLeast(0) / bps).toLong() else null
+                    next[id] = DownloadProgress(pct, bps.toLong(), eta)
+                    if (lastWrittenPct[id] != pct) {
+                        lastWrittenPct[id] = pct
+                        stateWrites.trySend { dao.updateProgress(id, pct) }
+                    }
                 }
-            } catch (error: Throwable) {
-                listenerReady.completeExceptionally(error)
-                throw error
+                (lastBytes.keys - next.keys).toList().forEach {
+                    lastBytes.remove(it); smoothedBps.remove(it); lastWrittenPct.remove(it)
+                }
+                _activeProgress.value = next
+                delay(PROGRESS_POLL_MS)
             }
         }
     }
@@ -155,106 +225,13 @@ class DownloadRepositoryImpl @Inject constructor(
     override val downloads: Flow<List<DownloadItem>> =
         dao.observeAll().distinctUntilChanged().map { list -> list.map { it.toItem() } }
             .distinctUntilChanged().flowOn(Dispatchers.Default)
-            .shareIn(appScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+            .shareIn(scope, SharingStarted.WhileSubscribed(5_000), replay = 1)
 
-    private val completedAnimeIds: Flow<Set<String>> =
-        dao.observeDownloadedAnimeIds().map { it.toSet() }.distinctUntilChanged()
-            .flowOn(Dispatchers.Default)
-            .shareIn(appScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
-
-    override fun downloadedAnimeIds(): Flow<Set<String>> = completedAnimeIds
+    override fun downloadedAnimeIds(): Flow<Set<String>> =
+        dao.observeDownloadedAnimeIds().map { it.toSet() }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
     override fun downloadedEpisodes(animeId: String): Flow<Set<Int>> =
-        dao.observeDownloadedEpisodes(animeId).map { it.toSet() }.distinctUntilChanged()
-            .flowOn(Dispatchers.Default)
-
-    /** Media3 emits state changes, but does not emit callbacks as its byte counter advances. */
-    private fun updatePolling() {
-        val active = downloadManager.currentDownloads.any { it.state == Download.STATE_DOWNLOADING }
-        if (active && polling?.isActive != true) {
-            polling = appScope.launch(Dispatchers.Main.immediate) {
-                while (isActive) {
-                    val current = downloadManager.currentDownloads
-                    current.forEach(::record)
-                    if (current.none { it.state == Download.STATE_DOWNLOADING }) break
-                    delay(1_000)
-                }
-            }
-        } else if (!active) {
-            polling?.cancel()
-            polling = null
-        }
-    }
-
-    private fun record(download: Download) {
-        val id = download.request.id
-        startup.touch(id)
-        val percent = download.percentDownloaded
-        val progress = when {
-            download.state == Download.STATE_COMPLETED -> 100
-            percent.isFinite() && percent >= 0f -> percent.toInt().coerceIn(0, 100)
-            else -> lastPercent[id] ?: 0
-        }
-        lastPercent[id] = progress
-        if (writeQueue.update(DownloadStateUpdate(id, mapState(download.state), progress))) {
-            writeSignals.trySend(Unit)
-        }
-    }
-
-    /** Recover terminal changes that happened while the process/UI repository was absent. */
-    private fun reconcileNativeDownloads() {
-        if (reconciliationStarted) return
-        reconciliationStarted = true
-        val index = downloadManager.downloadIndex
-        appScope.launch {
-            try {
-                val (stored, completedRows) = withContext(Dispatchers.IO) {
-                    val native = index.getDownloads().use { cursor ->
-                        buildList { while (cursor.moveToNext()) add(cursor.download) }
-                    }
-                    native to dao.getCompletedRows()
-                }
-                withContext(Dispatchers.Main.immediate) {
-                    stored.filter { !startup.wasTouched(it.request.id) }.forEach(::record)
-                    // Live state takes precedence over an older index snapshot.
-                    downloadManager.currentDownloads.forEach(::record)
-                }
-                val nativeIds = stored.mapTo(HashSet()) { it.request.id }
-                val missing = withContext(Dispatchers.Main.immediate) {
-                    startup.orphaned(completedRows, nativeIds, downloadManager.currentDownloads.mapTo(HashSet()) { it.request.id })
-                }
-                missing.forEach { row ->
-                    // Enqueue and removal reserve the same ID. Recheck the startup ledger after
-                    // acquiring it, since their intent may have arrived after the snapshot.
-                    operations.withLock(row.id) {
-                        writes.withLock {
-                            val stillMissing = withContext(Dispatchers.Main.immediate) {
-                                startup.orphaned(listOf(row), nativeIds,
-                                    downloadManager.currentDownloads.mapTo(HashSet()) { it.request.id })
-                                    .isNotEmpty()
-                            }
-                            if (stillMissing) {
-                                writeQueue.forget(row.id)
-                                // A newly created row or one no longer completed must stay intact.
-                                dao.invalidateCompleted(row.id, row.createdAt)
-                            }
-                        }
-                    }
-                }
-                withContext(Dispatchers.Main.immediate) {
-                    startup.finish()
-                    updatePolling()
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                withContext(Dispatchers.Main.immediate) {
-                    startup.finish()
-                }
-                Log.w("AniLocalDownloads", "Could not reconcile saved downloads", error)
-            }
-        }
-    }
+        dao.observeDownloadedEpisodes(animeId).map { it.toSet() }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
     override suspend fun enqueue(
         detail: AnimeDetail,
@@ -263,25 +240,15 @@ class DownloadRepositoryImpl @Inject constructor(
         markers: List<SkipMarker>,
     ) {
         val id = "${detail.id}-ep${episode.number}"
-        withContext(Dispatchers.Main.immediate) { startup.touch(id) }
-        operations.withLock(id) {
-            withContext(Dispatchers.IO) {
-                listenerReady.await()
-                val existing = dao.getById(id)
-                if (existing != null && existing.state != STATE_FAILED) return@withContext
-                if (existing != null) {
-                    val index = withContext(Dispatchers.Main.immediate) { downloadManager.downloadIndex }
-                    val native = index.getDownload(id)
-                    if (native != null && native.state != Download.STATE_FAILED) return@withContext
-                }
 
-                var rowCreated = false
-                var nativeQueued = false
-                var sidecars = emptyList<DownloadedSubtitle>()
-                try {
-                    sidecars = subtitleDownloader.downloadAll(stream.subtitles, id, stream.headers)
-                    val localSubs = sidecars.map { Subtitle(Uri.fromFile(it.file).toString(), it.subtitle.language, it.subtitle.label) }
-                    val entity = DownloadEntity(
+        operations.withLock(id) {
+            nativeReady.await()
+            if (dao.getById(id)?.state?.let { it != STATE_FAILED } == true) return@withLock
+            val localSubs = fetchLocalSubs(stream, id)
+            withContext(NonCancellable) {
+                removeNativeAndWait(id)
+                writeAndWait { dao.upsert(
+                    DownloadEntity(
                         id = id,
                         animeId = detail.id,
                         episodeNumber = episode.number,
@@ -293,111 +260,236 @@ class DownloadRepositoryImpl @Inject constructor(
                         quality = stream.quality,
                         subtitlesJson = subAdapter.toJson(localSubs),
                         skipMarkersJson = markerAdapter.toJson(markers),
-                        state = STATE_QUEUED,
+                        state = STATE_DOWNLOADING,
                         progress = 0,
                         createdAt = System.currentTimeMillis(),
+                        headersJson = headerAdapter.toJson(stream.headers),
                     )
-                    val request = DownloadRequest.Builder(id, Uri.parse(stream.url))
-                        .setData(DownloadRequestMetadata.encode(stream.headers))
-                        .apply { stream.mimeType?.let { setMimeType(it) } }.build()
-                    coroutineContext.ensureActive()
-                    // Once the row is committed, navigation cannot leave a queued row without a
-                    // matching native download. All cancellable network work has already finished.
-                    withContext(NonCancellable) {
-                        writes.withLock {
-                            writeQueue.forget(id)
-                            dao.upsert(entity)
-                            rowCreated = true
-                        }
-                        withContext(Dispatchers.Main.immediate) {
-                            DownloadService.sendResumeDownloads(context, AniLocalDownloadService::class.java, true)
-                            DownloadService.sendAddDownload(context, AniLocalDownloadService::class.java, request, true)
-                        }
-                        nativeQueued = true
-                    }
-                } catch (error: Throwable) {
-                    if (!nativeQueued) withContext(NonCancellable + Dispatchers.IO) {
-                        sidecars.forEach { it.file.delete() }
-                        if (rowCreated) writes.withLock { dao.updateState(id, STATE_FAILED, 0) }
-                    }
+                ) }
+
+                // Point the header store at this stream before enqueuing, so the manifest and every segment
+                // fetch with the source's headers. Adaptive (HLS/DASH/SS) requests carry the
+                // mimeType but no stream keys, so the segment downloader pulls every rendition (the
+                // DownloadQuality setting isn't applied to adaptive track selection yet — progressive only).
+                headerStore.set(Uri.parse(stream.url).host, stream.headers)
+                val request = DownloadRequest.Builder(id, Uri.parse(stream.url))
+                    .apply { stream.mimeType?.let { setMimeType(it) } }
+                    .build()
+                try {
+                    addNativeAndWait(request)
+                } catch (error: Exception) {
+                    writeAndWait { dao.deleteById(id) }
                     throw error
                 }
             }
         }
     }
 
-    override suspend fun getOffline(animeId: String, episodeNumber: Int): OfflineEpisode? =
-        withContext(Dispatchers.IO) {
-            val e = dao.getById("$animeId-ep$episodeNumber") ?: return@withContext null
-            if (e.state != STATE_COMPLETED) return@withContext null
-            OfflineEpisode(
-                streamUri = e.streamUri,
-                mimeType = e.mimeType,
-                title = e.title,
-                posterUrl = e.posterUrl,
-                episodeNumber = e.episodeNumber,
-                idMal = e.idMal,
-                subtitles = runCatching { subAdapter.fromJson(e.subtitlesJson) }.getOrNull().orEmpty(),
-                markers = runCatching { markerAdapter.fromJson(e.skipMarkersJson) }.getOrNull().orEmpty(),
-            )
-        }
+    override suspend fun getOffline(animeId: String, episodeNumber: Int): OfflineEpisode? {
+        val e = dao.getById("$animeId-ep$episodeNumber") ?: return null
+        if (e.state != STATE_COMPLETED) return null
+        return OfflineEpisode(
+            streamUri = e.streamUri,
+            mimeType = e.mimeType,
+            title = e.title,
+            posterUrl = e.posterUrl,
+            episodeNumber = e.episodeNumber,
+            idMal = e.idMal,
+            subtitles = runCatching { subAdapter.fromJson(e.subtitlesJson) }.getOrNull().orEmpty(),
+            markers = runCatching { markerAdapter.fromJson(e.skipMarkersJson) }.getOrNull().orEmpty(),
+        )
+    }
 
     override fun pause(id: String) {
-        appScope.launch(Dispatchers.Main.immediate) {
-            listenerReady.await()
-            DownloadService.sendSetStopReason(context, AniLocalDownloadService::class.java, id, STOP_REASON_PAUSED, false)
+        DownloadService.sendSetStopReason(
+            context, AniLocalDownloadService::class.java, id, STOP_REASON_PAUSED, /* foreground= */ false,
+        )
+    }
+
+    override suspend fun retry(id: String): Boolean {
+        autoRetryCounts.remove(id)   // a deliberate user retry re-arms the auto budget
+        return doRetry(id)
+    }
+
+    // Re-resolve → refetch subs → swap the Media3 download in place (same id, fresh URL). The Room
+    // row is REWRITTEN, never deleted, so the episode keeps its place in the Downloads UI; on any
+    // resolution failure the row is left untouched (still FAILED, still retryable).
+    private suspend fun doRetry(id: String): Boolean = withContext(Dispatchers.IO) {
+        retryMutex.withLock {
+            operations.withLock(id) operation@ {
+                nativeReady.await()
+                // Only a row that is STILL failed is retryable: a delayed auto-retry (or a queued
+                // second tap) must not purge and restart a download that has meanwhile been fixed by
+                // a manual retry, re-enqueued by a season re-press, or even completed.
+                val e = dao.getById(id)?.takeIf { it.state == STATE_FAILED } ?: return@operation false
+                val variants = runCatching { streams.resolveStreams(e.title, e.episodeNumber) }
+                    .onFailure { if (it is CancellationException) throw it; Log.w(TAG, "Retry $id: re-resolve failed: ${it.message}") }
+                    .getOrNull() ?: return@operation false
+                val stream = pickVariant(variants, e.quality) ?: run {
+                    Log.w(TAG, "Retry $id: re-resolve returned no usable variant"); return@operation false
+                }
+                val localSubs = fetchLocalSubs(stream, id)
+
+                // The resolve/subs legs above are seconds of network work — re-check that the row
+                // survived them (a user delete mid-retry must win; without this the upsert below
+                // would resurrect a removed episode) and that nothing else took the download over.
+                // Past this point everything is local and fast, so the remaining window is ~ms.
+                if (dao.getById(id)?.state != STATE_FAILED) return@operation false
+                Log.i(TAG, "Retry $id: re-resolved to host=${Uri.parse(stream.url).host}, re-adding")
+
+                // Swap the download in place through the DownloadManager DIRECTLY — NOT via the
+                // foreground-service intents. Firing startForegroundService for every retry (a season
+                // of simultaneous failures = a burst of them) trips the platform's background-FGS /
+                // "Stop FGS timeout" limiter, which tears the service down and stalls the healthy
+                // downloads sharing it. The manager restarts/maintains the service on its own when a
+                // download is present. Wait for the old native removal before adding the replacement;
+                // its acknowledged callback must never delete the rewritten row.
+                withContext(NonCancellable) {
+                removeNativeAndWait(id)
+
+                writeAndWait { dao.upsert(
+                    e.copy(
+                        streamUri = stream.url,
+                        mimeType = stream.mimeType,
+                        quality = stream.quality ?: e.quality,
+                        subtitlesJson = subAdapter.toJson(localSubs),
+                        state = STATE_DOWNLOADING,
+                        progress = 0,
+                        headersJson = headerAdapter.toJson(stream.headers),
+                    )
+                ) }
+                headerStore.set(Uri.parse(stream.url).host, stream.headers)
+
+                val request = DownloadRequest.Builder(id, Uri.parse(stream.url))
+                    .apply { stream.mimeType?.let { setMimeType(it) } }
+                    .build()
+                addNativeAndWait(request)
+                true
+            }
+        }
         }
     }
 
+    /**
+     * Re-pick the originally chosen quality from a fresh variant list, tolerantly: exact label
+     * match, else the best variant not above the label's height, else the lowest one (everything
+     * now exceeds it), else the best available. [variants] arrive best-first.
+     */
+    private fun pickVariant(variants: List<VideoStream>, quality: String?): VideoStream? {
+        if (variants.isEmpty()) return null
+        if (quality == null) return variants.first()
+        variants.firstOrNull { it.quality == quality }?.let { return it }
+        val wanted = quality.filter { it.isDigit() }.toIntOrNull() ?: return variants.first()
+        return variants.filter { (it.height ?: 0) <= wanted }.maxByOrNull { it.height ?: 0 }
+            ?: variants.lastOrNull()
+    }
+
     override fun resume(id: String) {
-        appScope.launch(Dispatchers.Main.immediate) {
-            listenerReady.await()
-            DownloadService.sendSetStopReason(context, AniLocalDownloadService::class.java, id, Download.STOP_REASON_NONE, true)
-            // Media3 reuses its helper across service instances, including after an API 35 timeout.
+        // Point the header store at THIS download (it may still hold another stream's headers).
+        // Async is fine: the store is read per-request on the download thread, and this tiny Room
+        // read almost always lands before the service processes the resume intent.
+        scope.launch {
+            runCatching {
+                val row = dao.getById(id)
+                headerStore.setFromJson(row?.streamUri?.let { Uri.parse(it).host }, row?.headersJson)
+            }
+        }
+        // Send synchronously from the tap handler (app is foreground). If a background start still
+        // slips through on API 31+, fall back to the shared manager directly — same pattern and
+        // reason as enqueue()'s fallback.
+        try {
+            DownloadService.sendSetStopReason(
+                context, AniLocalDownloadService::class.java, id, Download.STOP_REASON_NONE, /* foreground= */ true,
+            )
             DownloadService.sendResumeDownloads(context, AniLocalDownloadService::class.java, true)
+        } catch (e: Exception) {
+            mainScope.launch {
+                nativeReady.await()
+                downloadManager.setStopReason(id, Download.STOP_REASON_NONE)
+                downloadManager.resumeDownloads()
+            }
         }
     }
 
     override suspend fun remove(id: String) {
-        withContext(Dispatchers.Main.immediate) { startup.touch(id) }
-        // Deletion must finish even if its screen disappears. Keep the ID reserved until Media3
-        // confirms removal so its late callback cannot delete a newly enqueued episode row.
-        appScope.async {
+        // An accepted removal survives navigation; a later enqueue of this ID waits for the
+        // native callback before it creates a replacement row or subtitle files.
+        scope.async {
             operations.withLock(id) {
-                listenerReady.await()
-                val index = withContext(Dispatchers.Main.immediate) { downloadManager.downloadIndex }
-                val nativeExists = withContext(Dispatchers.IO) { index.getDownload(id) != null }
-                val removed = CompletableDeferred<Unit>()
-                try {
-                    withContext(Dispatchers.Main.immediate) {
-                        if (nativeExists) removals[id] = removed
-                        DownloadService.sendRemoveDownload(context, AniLocalDownloadService::class.java, id, false)
-                    }
-                    writes.withLock {
-                        writeQueue.forget(id)
-                        dao.deleteById(id)
-                    }
-                    if (nativeExists) removed.await()
-                    withContext(Dispatchers.IO) {
-                        File(downloadDir, "subs").listFiles { file -> file.name.startsWith("$id-") }
-                            ?.forEach { it.delete() }
-                    }
-                    writes.withLock { writeQueue.forget(id) }
-                } finally {
-                    withContext(NonCancellable + Dispatchers.Main.immediate) {
-                        if (removals[id] === removed) removals.remove(id)
-                    }
-                }
+                nativeReady.await()
+                removeNativeAndWait(id)
+                writeAndWait { dao.deleteById(id) }
+                File(downloadDir, "subs").listFiles { it.name.startsWith("$id-") }?.forEach { it.delete() }
             }
         }.await()
+    }
+
+    private suspend fun writeAndWait(write: suspend () -> Unit) {
+        val saved = CompletableDeferred<Unit>()
+        stateWrites.send {
+            try { write(); saved.complete(Unit) }
+            catch (error: Throwable) { saved.completeExceptionally(error); throw error }
+        }
+        saved.await()
+    }
+
+    private suspend fun addNativeAndWait(request: DownloadRequest) {
+        val added = CompletableDeferred<Unit>()
+        try {
+            withContext(Dispatchers.Main.immediate) {
+                additions[request.id] = added
+                // Start/notify the service without queuing a second, delayed add intent. If Android
+                // rejects a background FGS start, the shared native manager still admits the request.
+                runCatching {
+                    DownloadService.sendResumeDownloads(context, AniLocalDownloadService::class.java, true)
+                }
+                downloadManager.resumeDownloads()
+                downloadManager.addDownload(request)
+            }
+            added.await()
+        } finally {
+            additions.remove(request.id, added)
+        }
+    }
+
+    private suspend fun removeNativeAndWait(id: String) {
+        val removed = CompletableDeferred<Unit>()
+        try {
+            // Register before reading the IO index: a removal already in flight may finish while
+            // the snapshot is read, and must still complete this waiter.
+            val index = withContext(Dispatchers.Main.immediate) {
+                removals[id] = removed
+                downloadManager.downloadIndex
+            }
+            if (withContext(Dispatchers.IO) { index.getDownload(id) } == null) return
+            withContext(Dispatchers.Main.immediate) { downloadManager.removeDownload(id) }
+            removed.await()
+        } finally {
+            removals.remove(id, removed)
+        }
+    }
+
+    /**
+     * Pull sidecar subtitles into app storage and rewrite their URLs to local file:// uris. The
+     * stream's request headers ride along — subtitle CDNs are often gated on the same Referer as
+     * the video, and a header-less fetch 403s (which used to mean the episode downloaded with no
+     * captions at all). Any previous attempt's sidecars for this id are dropped first, so a retry
+     * can't leave orphans behind when the new stream names/formats its subs differently.
+     */
+    private suspend fun fetchLocalSubs(stream: VideoStream, id: String): List<Subtitle> {
+        withContext(Dispatchers.IO) {
+            File(downloadDir, "subs").listFiles { f -> f.name.startsWith("$id-") }?.forEach { it.delete() }
+        }
+        return subtitleDownloader.downloadAll(stream.subtitles, id, stream.headers)
+            .map { Subtitle(Uri.fromFile(it.file).toString(), it.subtitle.language, it.subtitle.label) }
     }
 
     private fun mapState(state: Int): Int = when (state) {
         Download.STATE_COMPLETED -> STATE_COMPLETED
         Download.STATE_FAILED -> STATE_FAILED
-        Download.STATE_STOPPED -> STATE_PAUSED
-        Download.STATE_QUEUED, Download.STATE_RESTARTING -> STATE_QUEUED
-        else -> STATE_DOWNLOADING
+        Download.STATE_STOPPED -> STATE_PAUSED      // manual stopReason set
+        Download.STATE_QUEUED -> STATE_QUEUED       // waiting (e.g. for WiFi)
+        else -> STATE_DOWNLOADING                   // DOWNLOADING / REMOVING / RESTARTING
     }
 
     private fun DownloadEntity.toItem() = DownloadItem(
@@ -424,6 +516,10 @@ class DownloadRepositoryImpl @Inject constructor(
         const val STATE_FAILED = 2
         const val STATE_PAUSED = 3
         const val STATE_QUEUED = 4
-        const val STOP_REASON_PAUSED = 1
+        const val STOP_REASON_PAUSED = 1   // any non-zero stop reason pauses a download
+        const val MAX_AUTO_RETRIES = 4               // per download id, per process
+        const val AUTO_RETRY_BASE_DELAY_MS = 4_000L  // 4s, 8s, 12s, 16s — outlives a transient blip
+        const val TAG = "AniLocalDownloads"
+        const val PROGRESS_POLL_MS = 1_000L          // live progress cadence while downloading
     }
 }

@@ -23,6 +23,16 @@ data class DownloadItem(
     val quality: String? = null,
 )
 
+/**
+ * Live, in-flight progress for a currently-downloading episode — polled from the download engine,
+ * NEVER persisted (speed/ETA are transient and meaningless after a restart). Keyed by download id.
+ */
+data class DownloadProgress(
+    val percent: Int,              // 0..100, smoother than the persisted [DownloadItem.progress]
+    val bytesPerSecond: Long,      // smoothed transfer rate
+    val etaSeconds: Long?,         // estimated time remaining; null when the total size is unknown
+)
+
 /** Everything needed to play an episode fully offline — no network calls. */
 data class OfflineEpisode(
     val streamUri: String,         // original URI; served from the offline cache

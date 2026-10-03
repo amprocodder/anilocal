@@ -1,41 +1,69 @@
 package com.anilocal.app.ui.details
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BookmarkAdded
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.annotation.VisibleForTesting
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -45,6 +73,7 @@ import coil.compose.AsyncImage
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.DownloadQuality
+import com.anilocal.app.domain.model.DownloadState
 import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.VideoStream
@@ -54,17 +83,30 @@ import com.anilocal.app.domain.repo.LibraryRepository
 import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.repo.SkipRepository
 import com.anilocal.app.domain.repo.StreamRepository
-import com.anilocal.app.ui.common.loadOrNull
-import com.anilocal.app.ui.common.CatalogFeedback
 import com.anilocal.app.ui.common.CatalogLoad
-import com.anilocal.app.ui.common.CatalogLoadState
+import com.anilocal.app.ui.common.CatalogFeedback
+import com.anilocal.app.ui.common.loadOrNull
+import com.anilocal.app.ui.common.PosterCard
+import com.anilocal.app.ui.common.SectionHeader
+import com.anilocal.app.ui.common.scoreLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
+import javax.inject.Named
 
 /** A download awaiting a quality choice (when more than one variant is available). */
 data class PendingDownload(
@@ -73,15 +115,25 @@ data class PendingDownload(
     val options: List<VideoStream>,
 )
 
+/** Progress of a one-press season download: how many episodes have been queued (or failed) so far. */
+data class SeasonDownload(
+    val queued: Int,
+    val failed: Int,
+    val total: Int,          // 0 while the pass is still working out which episodes it needs
+    val finished: Boolean = false,
+)
+
 @HiltViewModel
 class DetailsViewModel @Inject constructor(
     savedState: SavedStateHandle,
     private val catalog: CatalogRepository,
     private val library: LibraryRepository,
-    streams: StreamRepository,
-    skip: SkipRepository,
-    downloads: DownloadRepository,
-    settings: SettingsRepository,
+    private val streams: StreamRepository,
+    private val skip: SkipRepository,
+    private val downloads: DownloadRepository,
+    private val settings: SettingsRepository,
+    // Season downloads keep queuing after the user leaves the screen (viewModelScope would cancel).
+    @Named("appScope") private val appScope: CoroutineScope,
 ) : ViewModel() {
     private val animeId: String = checkNotNull(savedState["animeId"])
     private val loader = CatalogLoad<AnimeDetail?>(viewModelScope, null) { catalog.detail(animeId) }
@@ -96,31 +148,126 @@ class DetailsViewModel @Inject constructor(
         downloads.downloadedEpisodes(animeId)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
+    /**
+     * Episodes present in the downloads list in any NON-FAILED state — drives the season button's
+     * done state. Failed rows count as missing so the done check never lies and a season re-press
+     * can retry them.
+     */
+    val episodesInDownloads: StateFlow<Set<Int>> =
+        downloads.downloads
+            .map { list ->
+                list.filter { it.animeId == animeId && it.state != DownloadState.FAILED }
+                    .map { it.episodeNumber }
+                    .toSet()
+            }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
     val defaultQuality: StateFlow<DownloadQuality> =
         settings.downloadQuality.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DownloadQuality.AUTO)
 
-    private val downloadRequests = DownloadRequests(viewModelScope, { detail.value }, streams, skip, downloads)
-    val pending = downloadRequests.pending
-    val busyEpisodes = downloadRequests.busyEpisodes
-    private val _saving = MutableStateFlow(false)
-    val saving: StateFlow<Boolean> = _saving
+    private val requests = DownloadRequests(viewModelScope, { detail.value }, streams, skip, downloads)
+    val pending = requests.pending
+    val busyEpisodes = requests.busyEpisodes
 
-    fun toggleSaved() {
+    // Shared per-title pass state (see companion) so a re-entered Details screen sees the live pass.
+    private val seasonState = seasonPasses.getOrPut(animeId) { MutableStateFlow(null) }
+    val seasonDownload: StateFlow<SeasonDownload?> = seasonState
+
+    fun toggleSaved() = viewModelScope.launch {
+        detail.value?.let { library.toggle(AnimeSummary(it.id, it.title, it.posterUrl, it.idMal,
+            it.format, it.episodes.size, it.averageScore)) }
+    }
+
+    fun download(episode: Episode) = requests.download(episode)
+    fun chooseQuality(request: PendingDownload, stream: VideoStream) = requests.chooseQuality(request, stream)
+    fun dismissPicker(request: PendingDownload) = requests.dismissPicker(request)
+
+    /**
+     * One press → the whole season: resolves and enqueues every episode not already in the downloads
+     * list (failed rows count as missing, so a re-press retries them), sequentially — polite to the
+     * source — at the default download quality. Failed episodes are counted but don't stop the rest.
+     * One pass per title app-wide: the pass survives this screen closing, a re-entered screen picks
+     * up its live progress, and pressing the button mid-pass cancels it.
+     */
+    fun downloadSeason() {
         val d = detail.value ?: return
-        if (_saving.value) return
-        _saving.value = true
-        viewModelScope.launch {
+        if (seasonState.value?.finished == false) return   // a queue pass is already running
+        seasonState.value = SeasonDownload(0, 0, 0)        // claim synchronously — no double-tap window
+        seasonJobs[animeId] = appScope.launch {
             try {
-                loadOrNull { library.toggle(AnimeSummary(d.id, d.title, d.posterUrl, d.idMal)) }
+                val quality = loadOrNull { settings.downloadQuality.first() } ?: DownloadQuality.AUTO
+                val toQueue = d.episodes.filter { it.number !in episodesQueuedNow() }
+                if (toQueue.isEmpty()) {
+                    seasonState.value = null
+                    return@launch
+                }
+                seasonState.value = SeasonDownload(0, 0, toQueue.size)
+                var queued = 0
+                var failed = 0
+                suspend fun tryQueue(ep: Episode): Boolean {
+                    val ok = runCatching {
+                        // Re-check against live state: a long-press may have queued it mid-pass.
+                        if (ep.number !in episodesQueuedNow()) {
+                            coroutineScope {
+                                val markers = async { loadOrNull { skip.markers(d.idMal, ep.number, 0) }.orEmpty() }
+                                val stream = checkNotNull(pickForQuality(streams.resolveStreams(d.title, ep.number), quality))
+                                downloads.enqueue(d, ep, stream, markers.await())
+                            }
+                        }
+                    }.isSuccess
+                    ensureActive()   // runCatching swallows cancellation — don't count it as a failure
+                    return ok
+                }
+                val resolveFailed = mutableListOf<Episode>()
+                for (ep in toQueue) {
+                    if (tryQueue(ep)) queued++ else { failed++; resolveFailed += ep }
+                    seasonState.value = SeasonDownload(queued, failed, toQueue.size)
+                }
+                // Second chance for resolve-time failures (rate-limit/CF hiccups mid-pass): one
+                // more polite sequential attempt each. Episodes that fail LATER, at download time,
+                // are handled separately by the repository's auto-retry — this pass only covers
+                // the ones that never made it into the downloads list at all.
+                for (ep in resolveFailed) {
+                    if (tryQueue(ep)) {
+                        queued++; failed--
+                        seasonState.value = SeasonDownload(queued, failed, toQueue.size)
+                    }
+                }
+                seasonState.value = SeasonDownload(queued, failed, toQueue.size, finished = true)
             } finally {
-                _saving.value = false
+                seasonJobs.remove(animeId, kotlinx.coroutines.currentCoroutineContext()[Job])
             }
         }
     }
 
-    fun download(episode: Episode) = downloadRequests.download(episode)
-    fun chooseQuality(request: PendingDownload, stream: VideoStream) = downloadRequests.chooseQuality(request, stream)
-    fun dismissPicker(request: PendingDownload) = downloadRequests.dismissPicker(request)
+    /** Stops a running pass; episodes already handed to the download manager keep downloading. */
+    fun cancelSeasonDownload() {
+        seasonJobs.remove(animeId)?.cancel()
+        seasonState.value = null
+    }
+
+    /** Episode numbers of this title currently in the downloads list in any non-failed state. */
+    private suspend fun episodesQueuedNow(): Set<Int> =
+        loadOrNull { downloads.downloads.first() }.orEmpty()
+            .filter { it.animeId == animeId && it.state != DownloadState.FAILED }
+            .map { it.episodeNumber }
+            .toSet()
+
+    companion object {
+        // Keyed by animeId and static: a pass runs on appScope and outlives any single Details
+        // ViewModel, so in-flight tracking (and its progress) must too — otherwise leaving and
+        // re-entering the screen could start a second concurrent pass for the same title.
+        private val seasonPasses = ConcurrentHashMap<String, MutableStateFlow<SeasonDownload?>>()
+        private val seasonJobs = ConcurrentHashMap<String, Job>()
+
+        @VisibleForTesting
+        internal fun resetSeasonDownloadState() {
+            seasonJobs.values.forEach { it.cancel() }
+            seasonJobs.clear()
+            seasonPasses.clear()
+        }
+    }
 }
 
 /** The variant the picker pre-selects, given the user's default-quality preference. */
@@ -130,83 +277,238 @@ private fun pickForQuality(options: List<VideoStream>, quality: DownloadQuality)
         ?: options.minByOrNull { it.height ?: Int.MAX_VALUE }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+private const val EPISODE_RANGE_SIZE = 100
+private const val EPISODES_PER_ROW = 5
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailsScreen(
     onPlay: (animeId: String, episodeNumber: Int) -> Unit,
+    onOpenDetail: (animeId: String) -> Unit,
     onBack: () -> Unit,
     vm: DetailsViewModel = hiltViewModel(),
 ) {
     val detail by vm.detail.collectAsStateWithLifecycle()
     val loadState by vm.loadState.collectAsStateWithLifecycle()
     val saved by vm.saved.collectAsStateWithLifecycle()
-    val saving by vm.saving.collectAsStateWithLifecycle()
     val downloaded by vm.downloadedEpisodes.collectAsStateWithLifecycle()
+    val inDownloads by vm.episodesInDownloads.collectAsStateWithLifecycle()
     val pending by vm.pending.collectAsStateWithLifecycle()
-    val busyEpisodes by vm.busyEpisodes.collectAsStateWithLifecycle()
+    val seasonDownload by vm.seasonDownload.collectAsStateWithLifecycle()
     val defaultQuality by vm.defaultQuality.collectAsStateWithLifecycle()
     val d = detail
 
-    Scaffold(topBar = {
-        TopAppBar(
-            title = { Text(d?.title ?: if (loadState == CatalogLoadState.Failed) "Anime" else "Loading…") },
-            navigationIcon = {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            },
-        )
-    }) { padding ->
-        if (d == null) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CatalogFeedback(loadState, vm::retry)
+    Box(Modifier.fillMaxSize()) {
+        if (d != null) {
+            val showRanges = d.episodes.size > EPISODE_RANGE_SIZE
+            var rangeIndex by remember(d.id, d.episodes.size) { mutableStateOf(0) }
+            val rangeStart = if (showRanges) rangeIndex * EPISODE_RANGE_SIZE else 0
+            val episodeRows = remember(d, rangeStart) {
+                val visible =
+                    if (showRanges) {
+                        d.episodes.subList(rangeStart, minOf(rangeStart + EPISODE_RANGE_SIZE, d.episodes.size))
+                    } else {
+                        d.episodes
+                    }
+                visible.chunked(EPISODES_PER_ROW)
             }
-            return@Scaffold
-        }
-        LazyColumn(
-            Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (loadState != CatalogLoadState.Ready) {
-                item(key = "load-state", contentType = "load-state") { CatalogFeedback(loadState, vm::retry) }
-            }
-            item(key = "artwork", contentType = "artwork") {
-                AsyncImage(
-                    model = d.bannerUrl ?: d.posterUrl,
-                    contentDescription = d.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxWidth().height(200.dp),
-                )
-            }
-            item(key = "title", contentType = "text") { Text(d.title, style = MaterialTheme.typography.headlineSmall) }
-            item(key = "play", contentType = "action") {
-                Button(onClick = { onPlay(d.id, d.episodes.firstOrNull()?.number ?: 1) }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Filled.PlayArrow, null); Text("  Play")
-                }
-            }
-            item(key = "save", contentType = "action") {
-                OutlinedButton(onClick = vm::toggleSaved, enabled = !saving, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (saved) "Remove from My List" else "Add to My List")
-                }
-            }
-            item(key = "synopsis", contentType = "text") { Text(d.synopsis, style = MaterialTheme.typography.bodyMedium) }
-            item(key = "episodes", contentType = "text") { Text("Episodes", style = MaterialTheme.typography.titleMedium) }
-            items(d.episodes, key = { it.id }, contentType = { "episode" }) { ep ->
-                ListItem(
-                    headlineContent = { Text(ep.title ?: "Episode ${ep.number}") },
-                    leadingContent = { Text("${ep.number}") },
-                    trailingContent = {
-                        if (ep.number in downloaded) {
-                            Icon(Icons.Filled.DownloadDone, "Downloaded",
-                                tint = MaterialTheme.colorScheme.primary)
-                        } else {
-                            IconButton(onClick = { vm.download(ep) }, enabled = ep.number !in busyEpisodes) {
-                                Icon(Icons.Filled.Download, "Download")
+            val infoLine = listOfNotNull(d.studio, d.duration?.let { "$it min/ep" }).joinToString("  •  ")
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item(key = "hero", contentType = "hero") { DetailHero(d) }
+                item(key = "catalog-status", contentType = "status") { CatalogFeedback(loadState, vm::retry) }
+                if (d.genres.isNotEmpty()) {
+                    item {
+                        FlowRow(
+                            Modifier.padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            d.genres.forEach { genre ->
+                                Surface(
+                                    shape = RoundedCornerShape(100.dp),
+                                    color = Color.Transparent,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                ) {
+                                    Text(
+                                        genre,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    )
+                                }
                             }
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onPlay(d.id, ep.number) },
-                )
+                    }
+                }
+                item {
+                    Row(
+                        Modifier.padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Button(
+                            onClick = { onPlay(d.id, d.episodes.firstOrNull()?.number ?: 1) },
+                            shape = RoundedCornerShape(100.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ),
+                            modifier = Modifier.weight(1f).height(46.dp),
+                        ) {
+                            Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
+                            Text("  Watch", fontWeight = FontWeight.Bold)
+                        }
+                        SeasonDownloadButton(
+                            state = seasonDownload,
+                            allInDownloads = d.episodes.isNotEmpty() &&
+                                d.episodes.all { it.number in inDownloads },
+                            onDownload = vm::downloadSeason,
+                            onCancel = vm::cancelSeasonDownload,
+                        )
+                        FilledTonalIconButton(
+                            onClick = vm::toggleSaved,
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            ),
+                            modifier = Modifier.size(46.dp),
+                        ) {
+                            Icon(
+                                if (saved) Icons.Filled.BookmarkAdded else Icons.Outlined.BookmarkAdd,
+                                if (saved) "Remove from My List" else "Add to My List",
+                                tint = if (saved) MaterialTheme.colorScheme.tertiary
+                                else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+                if (d.synopsis.isNotBlank()) {
+                    item { ExpandableSynopsis(d.synopsis) }
+                }
+                if (infoLine.isNotEmpty()) {
+                    item {
+                        Text(
+                            infoLine,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
+                }
+                item {
+                    Column(
+                        Modifier.padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Episodes",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (d.episodes.isNotEmpty()) {
+                                Text(
+                                    "${d.episodes.size}",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        val sd = seasonDownload
+                        Text(
+                            when {
+                                sd != null && !sd.finished && sd.total == 0 ->
+                                    "Preparing season download…"
+                                sd != null && !sd.finished ->
+                                    "Queuing season… ${sd.queued + sd.failed}/${sd.total} — press again to cancel"
+                                sd != null && sd.failed > 0 ->
+                                    "Season queued — ${sd.failed} episode${if (sd.failed == 1) "" else "s"} failed, press to retry"
+                                else -> "Tap to play — hold to download"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (showRanges) {
+                    item(key = "ep-ranges") {
+                        val rangeCount = (d.episodes.size + EPISODE_RANGE_SIZE - 1) / EPISODE_RANGE_SIZE
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            items(rangeCount) { i ->
+                                val start = i * EPISODE_RANGE_SIZE + 1
+                                val end = minOf((i + 1) * EPISODE_RANGE_SIZE, d.episodes.size)
+                                FilterChip(
+                                    selected = i == rangeIndex,
+                                    onClick = { rangeIndex = i },
+                                    label = { Text("$start–$end") },
+                                )
+                            }
+                        }
+                    }
+                }
+                items(episodeRows.size, key = { "eps-" + episodeRows[it].first().id }, contentType = { "episodes" }) { rowIndex ->
+                    Row(
+                        Modifier.padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        episodeRows[rowIndex].forEach { ep ->
+                            EpisodeCell(
+                                episode = ep,
+                                downloaded = ep.number in downloaded,
+                                onClick = { onPlay(d.id, ep.number) },
+                                onLongClick = { vm.download(ep) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        repeat(EPISODES_PER_ROW - episodeRows[rowIndex].size) {
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+                // Franchise neighbors (prequels/sequels/seasons/movies), already in watch-order.
+                if (d.related.isNotEmpty()) {
+                    item(key = "related-header") {
+                        SectionHeader("Related", Modifier.padding(top = 8.dp))
+                    }
+                    item(key = "related-row") {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            items(d.related, key = { it.anime.id }) { rel ->
+                                PosterCard(
+                                    item = rel.anime,
+                                    badge = rel.relation,
+                                    onClick = { onOpenDetail(rel.anime.id) },
+                                    modifier = Modifier.testTag("related-${rel.anime.id}"),
+                                )
+                            }
+                        }
+                    }
+                }
+                item { Box(Modifier.navigationBarsPadding().height(8.dp)) }
+            }
+        }
+
+        if (d == null) {
+            CatalogFeedback(loadState, vm::retry, Modifier.align(Alignment.Center))
+        }
+
+        // Floating back button (over the header art; also the only chrome while loading).
+        Box(
+            Modifier
+                .statusBarsPadding()
+                .padding(8.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.45f)),
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
             }
         }
     }
@@ -237,6 +539,188 @@ fun DetailsScreen(
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { vm.dismissPicker(p) }) { Text("Cancel") } },
+        )
+    }
+}
+
+/**
+ * One-press "download the whole season" button. While a queue pass runs it shows progress and a
+ * press cancels; once every episode is in the downloads list (none failed) it flips to a tinted
+ * done check.
+ */
+@Composable
+private fun SeasonDownloadButton(
+    state: SeasonDownload?,
+    allInDownloads: Boolean,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val queuing = state != null && !state.finished
+    FilledTonalIconButton(
+        onClick = if (queuing) onCancel else onDownload,
+        colors = IconButtonDefaults.filledTonalIconButtonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ),
+        modifier = Modifier.size(46.dp).testTag("download-season"),
+    ) {
+        when {
+            queuing -> {
+                val s = state!!
+                val done = s.queued + s.failed
+                Text(
+                    when {
+                        s.total == 0 -> "…"
+                        // Three-digit seasons don't fit in a 46dp circle — fall back to percent.
+                        s.total > 99 -> "${done * 100 / s.total}%"
+                        else -> "$done/${s.total}"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Cancel season download, $done of ${s.total} queued"
+                    },
+                )
+            }
+            allInDownloads -> Icon(
+                Icons.Filled.DownloadDone,
+                "Season downloaded",
+                tint = MaterialTheme.colorScheme.tertiary,
+            )
+            else -> Icon(
+                Icons.Filled.Download,
+                "Download season",
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+/** 9anime-style hero: edge-to-edge banner with a sharp overlapping poster and meta pills. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DetailHero(d: AnimeDetail) {
+    val bg = MaterialTheme.colorScheme.background
+    Box(Modifier.fillMaxWidth().height(252.dp)) {
+        Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(210.dp)) {
+            AsyncImage(
+                model = d.bannerUrl ?: d.posterUrl,
+                contentDescription = d.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(100.dp)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, bg)))
+            )
+        }
+        Row(Modifier.align(Alignment.BottomStart).padding(horizontal = 16.dp)) {
+            AsyncImage(
+                model = d.posterUrl,
+                contentDescription = null,   // the banner already carries d.title
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(width = 104.dp, height = 148.dp)
+                    .clip(RoundedCornerShape(6.dp)),
+            )
+            Column(
+                Modifier.align(Alignment.Bottom).padding(start = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    d.title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    d.status?.let { MetaPill(it, tinted = true) }
+                    d.format?.let { MetaPill(it) }
+                    d.seasonYear?.let { MetaPill(it.toString()) }
+                    d.averageScore?.let { MetaPill(scoreLabel(it)) }
+                    if (d.episodes.isNotEmpty()) MetaPill("${d.episodes.size} eps")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetaPill(text: String, tinted: Boolean = false) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = if (tinted) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = if (tinted) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun ExpandableSynopsis(synopsis: String) {
+    var expanded by remember { mutableStateOf(false) }
+    Text(
+        synopsis,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = if (expanded) Int.MAX_VALUE else 4,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .padding(horizontal = 16.dp)
+            .animateContentSize()
+            .clickable { expanded = !expanded },
+    )
+}
+
+/** 9anime-style numbered episode cell: tap plays, long-press downloads. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun EpisodeCell(
+    episode: Episode,
+    downloaded: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val bg = if (downloaded) MaterialTheme.colorScheme.primaryContainer
+    else MaterialTheme.colorScheme.surfaceContainerHighest
+    val fg = if (downloaded) MaterialTheme.colorScheme.onPrimaryContainer
+    else MaterialTheme.colorScheme.onSurfaceVariant
+    // Downloaded state must be audible, not just a tint; the long-press action gets a label so
+    // accessibility services surface the download affordance.
+    val description =
+        if (downloaded) "Episode ${episode.number}, downloaded" else "Episode ${episode.number}"
+    Box(
+        modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(bg)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+                onLongClickLabel = "Download",
+            )
+            .testTag("ep-${episode.number}")
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "${episode.number}",
+            style = MaterialTheme.typography.labelLarge,
+            color = fg,
         )
     }
 }

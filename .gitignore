@@ -3,11 +3,9 @@ build/
 captures/
 .externalNativeBuild/
 .cxx/
-__pycache__/
 
 # Gradle
 .gradle/
-.kotlin/
 local.properties
 
 # IDE
@@ -15,9 +13,21 @@ local.properties
 .idea/
 .DS_Store
 
+# On-device dev/test chain — local-only, not committed (see devenv/scripts/README.md)
+devenv/
+
+# Kotlin compiler session metadata
+.kotlin/
+
 # Secrets / signing (never commit these)
-google-services.json
-app/google-services.json
 *.keystore
 *.jks
 keystore.properties
+# …except the DEBUG keystore: deliberately committed (standard non-secret debug key) so local
+# and CI debug APKs share one signing identity and can update-install over each other.
+!app/debug.keystore
+
+# Local development fixtures and installable exports
+/.local-dev/
+/dist/
+__pycache__/

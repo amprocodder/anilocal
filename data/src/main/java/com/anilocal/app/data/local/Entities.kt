@@ -27,13 +27,10 @@ data class DownloadEntity(
     val state: Int,                       // 0 DOWNLOADING, 1 COMPLETED, 2 FAILED
     val progress: Int,
     val createdAt: Long,
+    // Map<String,String> — the stream's request headers (Referer etc.), re-applied to the download
+    // HTTP factory after a process restart so a resumed download doesn't 403. Added in v5.
+    val headersJson: String? = null,
 )
-
-/** A projection for the progress writer; this does not add a database table. */
-data class DownloadStateUpdate(val id: String, val state: Int, val progress: Int)
-
-/** Only completed rows participate in missing-native-download reconciliation. */
-data class CompletedDownloadRow(val id: String, val createdAt: Long)
 
 @Entity(tableName = "mal_list")
 data class MalEntryEntity(

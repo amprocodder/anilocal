@@ -7,7 +7,7 @@ import retrofit2.http.Headers
 import retrofit2.http.POST
 
 /**
- * AniList public GraphQL endpoint. We POST a raw JSON body (built safely with Moshi)
+ * AniList public GraphQL endpoint. We POST a raw JSON body (built safely with JSONObject)
  * and parse a typed response with Moshi. No API key required. Could be upgraded to Apollo
  * codegen later; raw POST keeps the dependency surface minimal.
  */
@@ -22,8 +22,8 @@ data class GraphResponse(val data: AniListData?, val errors: List<GraphError>? =
 data class GraphError(val message: String?)
 
 data class AniListData(
-    @Json(name = "Page") val page: PageDto? = null,
-    @Json(name = "Media") val media: MediaDto? = null,
+    @Json(name = "Page") val page: PageDto?,
+    @Json(name = "Media") val media: MediaDto?,
     val trending: PageDto? = null,
     val popularThisSeason: PageDto? = null,
     val topAiring: PageDto? = null,
@@ -42,8 +42,32 @@ data class MediaDto(
     val description: String?,
     val genres: List<String>?,
     val episodes: Int?,
+    val format: String?,
+    val averageScore: Int?,
+    val status: String?,
+    val seasonYear: Int?,
+    val duration: Int?,
+    val studios: StudiosDto?,
+    val nextAiringEpisode: NextAiringEpisodeDto?,
+    // Only requested for relation nodes (detail query); null elsewhere.
+    val type: String?,
+    val isAdult: Boolean?,
+    val startDate: FuzzyDateDto?,
+    val relations: RelationsDto?,
 )
+
+data class RelationsDto(val edges: List<RelationEdgeDto>?)
+
+data class RelationEdgeDto(val relationType: String?, val node: MediaDto?)
+
+data class FuzzyDateDto(val year: Int?, val month: Int?)
 
 data class TitleDto(val romaji: String?, val english: String?, val native: String?)
 
 data class CoverDto(val large: String?, val extraLarge: String?)
+
+data class StudiosDto(val nodes: List<StudioNodeDto>?)
+
+data class StudioNodeDto(val name: String?)
+
+data class NextAiringEpisodeDto(val episode: Int?)

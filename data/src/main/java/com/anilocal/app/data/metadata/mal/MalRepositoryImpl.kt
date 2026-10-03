@@ -83,9 +83,12 @@ class MalRepositoryImpl internal constructor(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
+            lastFailedSyncAt = nowMillis()
             Result.failure(failure)
         }
     }
+
+    @Volatile private var lastFailedSyncAt = 0L
 
     override suspend fun syncIfDue() {
         if (!settings.malSyncEnabled.first()) return
@@ -93,6 +96,8 @@ class MalRepositoryImpl internal constructor(
         val lastSynced = settings.malLastSynced.first()
         val elapsed = nowMillis() - lastSynced
         if (lastSynced > 0 && elapsed >= 0 && elapsed < THROTTLE_MS) return
+        val failedAgo = nowMillis() - lastFailedSyncAt
+        if (lastFailedSyncAt > 0 && failedAgo >= 0 && failedAgo < FAIL_THROTTLE_MS) return
         sync()
     }
 
@@ -108,6 +113,7 @@ class MalRepositoryImpl internal constructor(
 
     private companion object {
         const val THROTTLE_MS = 30 * 60 * 1000L          // re-sync at most every 30 min on open
+        const val FAIL_THROTTLE_MS = 10 * 60 * 1000L
         const val MAX_PAGES = 50                          // ~300 entries/page
         val RESIZED_IMAGE = Regex("/r/\\d+x\\d+/")
 

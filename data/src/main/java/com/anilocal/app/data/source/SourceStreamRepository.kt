@@ -1,5 +1,8 @@
 package com.anilocal.app.data.source
 
+import android.os.SystemClock
+import com.anilocal.app.data.cache.JsonCache
+import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.VideoStream
 import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.repo.StreamRepository
@@ -7,212 +10,177 @@ import com.anilocal.app.domain.source.AnimeSource
 import com.anilocal.app.domain.source.SourceRegistry
 import com.anilocal.app.domain.source.Sources
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
-import java.util.Locale
-import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.coroutineContext
 import javax.inject.Inject
+import javax.inject.Named
 import javax.inject.Singleton
 
 /**
  * Bridges catalog metadata (AniList) to playable streams via the user's selected [AnimeSource]:
  * find the title in the source, match the episode number, resolve a server to its quality
  * variants. The active source is taken from [SourceRegistry] by the persisted selected-source id,
- * falling back to the lawful built-in sample (then any available source) so playback never depends
- * on a single compile-time binding. Playback's speed-tested resolver freshly checks every source
- * and server, preferring the selected source when speed and quality tie. Browsing stays on AniList.
+ * falling back to the first available source so playback never depends on a single compile-time
+ * binding. Browsing/metadata stay on AniList; only the stream leg routes
+ * through the chosen source, so any source — built-in or extension — works with no branching here.
+ *
+ * The title-match half of the pipeline (search → detail, i.e. "which source entry is this AniList
+ * title, and what are its episode ids") is cached per source for [MATCH_TTL_MS]: it's the slow,
+ * Cloudflare-challenged part, it's stable across episodes, and skipping it turns an episode switch
+ * or a season download from 4+ round-trips into 2. Server/stream URLs are NOT cached — they're
+ * short-lived/tokenized. A cached match that no longer resolves (source rotated its ids) is
+ * dropped and the whole pipeline re-runs live once.
  */
 @Singleton
 class SourceStreamRepository internal constructor(
     private val registry: SourceRegistry,
     private val settings: SettingsRepository,
-    private val speedProbe: StreamSpeedProbe,
-    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val cache: JsonCache,
+    private val selector: AutoSourceSelector,
+    speedProbe: StreamSpeedProbe,
+    appScope: CoroutineScope,
 ) : StreamRepository {
 
     @Inject constructor(
         registry: SourceRegistry,
         settings: SettingsRepository,
+        cache: JsonCache,
+        selector: AutoSourceSelector,
         client: OkHttpClient,
-    ) : this(registry, settings, HttpStreamSpeedProbe(client))
+        @Named("appScope") appScope: CoroutineScope,
+    ) : this(registry, settings, cache, selector, HttpStreamSpeedProbe(client), appScope)
 
-    private suspend fun activeSource(): AnimeSource {
-        val selected = settings.selectedSourceId.first()
-        return registry.get(selected)
-            ?: registry.get(Sources.SAMPLE_ID)
-            ?: registry.sources.value.firstOrNull()
-            ?: error("no stream sources available")
+    private val recovery = FreshStreamRecovery(registry, speedProbe, appScope) { block ->
+        selector.withRecoveryPermit(block)
+    }
+
+    /** Resolve the selected manual source, waiting briefly for the async extension scan to populate
+     *  the registry before falling back to the first available source (a resolve fired right after
+     *  cold start would otherwise see an empty registry and fail spuriously). */
+    private suspend fun sourceFor(selectedId: String): AnimeSource {
+        registry.get(selectedId)?.let { return it }
+        val available = withTimeoutOrNull(REGISTRY_WAIT_MS) { registry.sources.first { it.isNotEmpty() } }
+        return available?.firstOrNull() ?: error("no stream sources available")
     }
 
     override suspend fun resolveStreams(animeTitle: String, episodeNumber: Int): List<VideoStream> =
-        withContext(dispatcher) {
-            val source = activeSource()
-            val match = source.search(animeTitle, page = 1).firstOrNull()
-                ?: error("source '${source.info.name}': no match for \"$animeTitle\"")
-            val detail = source.detail(match.id)
-            val episode = detail.episodes.firstOrNull { it.number == episodeNumber }
-                ?: detail.episodes.firstOrNull()
-                ?: error("source '${source.info.name}': no episodes for \"$animeTitle\"")
-            val server = source.servers(episode).firstOrNull()
-                ?: error("source '${source.info.name}': no servers for episode of \"$animeTitle\"")
-            source.resolve(server).sortedByDescending { it.height ?: 0 }
+        withContext(Dispatchers.IO) {
+            val selected = settings.selectedSourceId.first()
+            if (selected == Sources.AUTO) {
+                // Auto mode: race installed sources / reuse the pinned winner. The per-source probe is
+                // exactly the manual pipeline below, so caching and failure shape are identical.
+                selector.resolve(animeTitle, episodeNumber) { source ->
+                    resolveVia(source, animeTitle, episodeNumber)
+                }.streams
+            } else {
+                val source = sourceFor(selected)
+                // Time the manual resolve into the same scoreboard Auto reads, so switching to Auto
+                // later starts warm instead of cold.
+                val start = SystemClock.elapsedRealtime()
+                try {
+                    val r = resolveVia(source, animeTitle, episodeNumber)
+                    selector.record(source.info.id, SystemClock.elapsedRealtime() - start, success = true)
+                    r.streams
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (e: Exception) {
+                    selector.record(source.info.id, SystemClock.elapsedRealtime() - start, success = false)
+                    throw e
+                }
+            }
         }
 
-    override suspend fun resolveStream(animeTitle: String, episodeNumber: Int): VideoStream =
-        resolveStreams(animeTitle, episodeNumber).firstOrNull()
-            ?: error("no stream for \"$animeTitle\"")
+    /** Resolve ONE source end-to-end (the cached-match fast path + a live fallback), reporting
+     *  whether the matched entry actually carried the requested episode. This is the unit the auto
+     *  selector races and the manual path runs directly — so there is exactly one pipeline. */
+    private suspend fun resolveVia(source: AnimeSource, animeTitle: String, episodeNumber: Int): SourceResolution {
+        val key = "src:${source.info.id}:${animeTitle.trim().lowercase()}"
 
-    override suspend fun resolveFastestStream(
+        // A fresh cached match is only trusted when it actually carries the requested episode —
+        // an episode that aired after the entry was cached must force a live re-fetch.
+        val cached = cache.getFresh<AnimeDetail>(key, DETAIL, MATCH_TTL_MS)
+        if (cached != null && cached.episodes.any { it.number == episodeNumber }) {
+            try {
+                return SourceResolution(resolveFrom(source, cached, episodeNumber), exactEpisode = true)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Exception) {
+                // Could be rotated ids OR a transient/offline error — the adapter flattens both
+                // to empty. Don't evict: fall through to a live run, which overwrites the entry
+                // on success and leaves it intact when the failure was transient.
+            }
+        }
+
+        val detail = liveMatch(source, animeTitle)
+        if (detail.episodes.isNotEmpty()) cache.put(key, DETAIL, detail)
+        val exact = detail.episodes.any { it.number == episodeNumber }
+        return SourceResolution(resolveFrom(source, detail, episodeNumber), exactEpisode = exact)
+    }
+
+    /** The un-cached search → detail leg (throws with a sourced message, as before). */
+    private suspend fun liveMatch(source: AnimeSource, animeTitle: String): AnimeDetail {
+        val match = source.search(animeTitle, page = 1).firstOrNull()
+            ?: error("source '${source.info.name}': no match for \"$animeTitle\"")
+        return source.detail(match.id)
+    }
+
+    /** Episode pick → servers → variants. Throws on any empty leg so callers (and the cached-match
+     *  fallback above) see one consistent failure shape. */
+    private suspend fun resolveFrom(source: AnimeSource, detail: AnimeDetail, episodeNumber: Int): List<VideoStream> {
+        val episode = detail.episodes.firstOrNull { it.number == episodeNumber }
+            ?: detail.episodes.firstOrNull()
+            ?: error("source '${source.info.name}': no episodes for \"${detail.title}\"")
+        val server = source.servers(episode).firstOrNull()
+            ?: error("source '${source.info.name}': no servers for episode of \"${detail.title}\"")
+        val variants = source.resolve(server).sortedByDescending { it.height ?: 0 }
+        if (variants.isEmpty()) error("source '${source.info.name}': no streams for episode $episodeNumber of \"${detail.title}\"")
+        // Some sources attach subtitle tracks to only one rendition (often a lower one). Union every
+        // variant's subs onto EVERY variant (deduped by url, the variant's own first so the default
+        // track stays stable) — whichever variant playback's height sort or the download quality
+        // picker selects, no caption is silently lost. Downloads especially depended on this: the
+        // picked variant used to carry only its own (often empty) list, so episodes downloaded
+        // without any subtitles.
+        return mergeSubtitles(variants)
+    }
+
+    // The union merge above already puts every known subtitle on every variant, so the best
+    // variant is complete as-is.
+    override suspend fun resolveStream(animeTitle: String, episodeNumber: Int): VideoStream =
+        resolveStreams(animeTitle, episodeNumber).first()
+
+    override suspend fun recoverStream(
         animeTitle: String,
         episodeNumber: Int,
         failedStreamUrl: String?,
-    ): VideoStream = withContext(dispatcher) {
+    ): VideoStream = withContext(Dispatchers.IO) {
         val selected = settings.selectedSourceId.first()
-        val sources = registry.sources.value.sortedBy { if (it.info.id == selected) 0 else 1 }
-        val candidates = ConcurrentHashMap<StreamKey, Candidate>()
-        val startedProbes = ConcurrentHashMap.newKeySet<StreamKey>()
-        val measured = ConcurrentHashMap<StreamKey, Double>()
-        val sourceSlots = Semaphore(3)
-        val serverSlots = Semaphore(3)
-        val probeSlots = Semaphore(3)
-
-        // Start testing each resolved URL immediately. A slow source must not prevent healthy
-        // sources' probes from using the same time, and every restart still takes fresh samples.
-        withTimeoutOrNull(SESSION_BUDGET_MS) {
-            coroutineScope {
-                val session = this
-                fun enqueueProbe(candidate: Candidate) {
-                    val stream = candidate.stream
-                    val key = StreamKey(
-                        stream.url,
-                        stream.headers.entries.associate {
-                            it.key.lowercase(Locale.ROOT) to it.value
-                        }.toSortedMap(),
-                    )
-                    candidates.compute(key) { _, previous ->
-                        if (previous == null || candidate.betterThan(previous)) candidate else previous
-                    }
-                    if (!startedProbes.add(key)) return
-                    // The probe is a sibling of resolution, so a source timeout cannot cancel it.
-                    session.launch {
-                        probeSlots.withPermit {
-                            ignoringSourceFailure {
-                                withTimeoutOrNull(PROBE_TIMEOUT_MS) {
-                                    speedProbe.bytesPerSecond(stream)
-                                        ?.takeIf { it > 0 && it.isFinite() }
-                                        ?.let { measured[key] = it }
-                                }
-                            }
-                        }
-                    }
-                }
-                launch {
-                    withTimeoutOrNull(RESOLUTION_BUDGET_MS) {
-                        coroutineScope {
-                            sources.forEachIndexed { sourceIndex, source ->
-                                launch {
-                                    sourceSlots.withPermit {
-                                        resolveCandidates(source, animeTitle, episodeNumber, serverSlots) { serverIndex, variantIndex, stream ->
-                                            enqueueProbe(Candidate(stream, sourceIndex, serverIndex, variantIndex))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Duplicate quality labels share one probe, retaining the best quality and stable tie order.
-        val healthy = measured.mapNotNull { (key, speed) ->
-            candidates[key]?.let { MeasuredStream(it, speed) }
-        }
-        val alternatives = healthy.filter { it.candidate.stream.url != failedStreamUrl }
-        (alternatives.ifEmpty { healthy }).sortedWith(
-            compareByDescending<MeasuredStream> { it.bytesPerSecond }
-                .thenByDescending { it.candidate.stream.height ?: 0 }
-                .thenBy { it.candidate.sourceIndex }
-                .thenBy { it.candidate.serverIndex }
-                .thenBy { it.candidate.variantIndex },
-        ).firstOrNull()?.candidate?.stream
-            ?: error("No reachable stream for \"$animeTitle\", episode $episodeNumber")
+        val winner = recovery.resolve(animeTitle, episodeNumber, failedStreamUrl, selected)
+        coroutineContext.ensureActive()
+        // Only the accepted winner writes shared state: abandoned extension calls cannot overwrite
+        // pins/cache after the player closes or a newer recovery starts.
+        cache.put("src:${winner.source.info.id}:${animeTitle.trim().lowercase()}", DETAIL, winner.detail)
+        coroutineContext.ensureActive()
+        if (selected == Sources.AUTO) selector.rememberRecoveryWinner(animeTitle, winner.source)
+        winner.stream
     }
-
-    private suspend fun resolveCandidates(
-        source: AnimeSource,
-        animeTitle: String,
-        episodeNumber: Int,
-        serverSlots: Semaphore,
-        onStream: (Int, Int, VideoStream) -> Unit,
-    ) = ignoringSourceFailure {
-        withTimeoutOrNull(SOURCE_TIMEOUT_MS) {
-            val match = source.search(animeTitle, page = 1).firstOrNull() ?: return@withTimeoutOrNull
-            val episodes = source.detail(match.id).episodes
-            val episode = episodes.firstOrNull { it.number == episodeNumber }
-                // Built-in demos reuse one clip for every catalog episode.
-                ?: episodes.firstOrNull().takeIf {
-                    source.info.id == Sources.SAMPLE_ID || source.info.id == "sample-sintel"
-                }
-                ?: return@withTimeoutOrNull
-            val servers = source.servers(episode)
-            coroutineScope {
-                servers.forEachIndexed { serverIndex, server ->
-                    launch {
-                        serverSlots.withPermit {
-                            ignoringSourceFailure {
-                                withTimeoutOrNull(SERVER_TIMEOUT_MS) {
-                                    source.resolve(server).forEachIndexed { variantIndex, stream ->
-                                        onStream(serverIndex, variantIndex, stream)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private suspend fun ignoringSourceFailure(block: suspend () -> Unit) {
-        try {
-            block()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            // A failed source, server or probe must not discard another server's healthy stream.
-        }
-    }
-
-    private data class Candidate(
-        val stream: VideoStream,
-        val sourceIndex: Int,
-        val serverIndex: Int,
-        val variantIndex: Int,
-    ) {
-        fun betterThan(other: Candidate): Boolean =
-            (stream.height ?: 0) > (other.stream.height ?: 0) ||
-                ((stream.height ?: 0) == (other.stream.height ?: 0) && candidateOrder.compare(this, other) < 0)
-    }
-
-    private data class StreamKey(val url: String, val headers: Map<String, String>)
-
-    private data class MeasuredStream(val candidate: Candidate, val bytesPerSecond: Double)
 
     private companion object {
-        const val RESOLUTION_BUDGET_MS = 12_000L
-        const val SOURCE_TIMEOUT_MS = 8_000L
-        const val SERVER_TIMEOUT_MS = 4_000L
-        const val SESSION_BUDGET_MS = 16_000L
-        const val PROBE_TIMEOUT_MS = 5_000L
-        val candidateOrder = compareBy<Candidate>({ it.sourceIndex }, { it.serverIndex }, { it.variantIndex })
+        val DETAIL: java.lang.reflect.Type = AnimeDetail::class.java
+        const val MATCH_TTL_MS = 4L * 60 * 60 * 1000   // episode lists grow weekly; 4h keeps them current
+        const val REGISTRY_WAIT_MS = 3_000L            // tolerate the cold-start async extension scan
+    }
+}
+
+/** Preserve each rendition's default caption first, while carrying all of the server's captions. */
+internal fun mergeSubtitles(variants: List<VideoStream>): List<VideoStream> {
+    val union = variants.flatMap { it.subtitles }.distinctBy { it.url }
+    return if (union.isEmpty()) variants else variants.map { variant ->
+        variant.copy(subtitles = (variant.subtitles + union).distinctBy { it.url })
     }
 }

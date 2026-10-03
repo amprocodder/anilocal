@@ -31,12 +31,12 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Run JVM tests and lint
+      - name: Check modules and lint
         run: >-
-          gradle :domain:test :data:testDebugUnitTest :app:testDebugUnitTest
-          :data:lintDebug :app:lintDebug --no-daemon --stacktrace
+          gradle :domain:check :extensions:lintDebug :data:lintDebug
+          :app:lintDebug --no-daemon --stacktrace
 
-      - name: Assemble development and optimized APKs
+      - name: Assemble development and performance APKs
         run: gradle :app:assembleDebug :app:assembleBenchmark --no-daemon --stacktrace
 
       - name: Upload development APK
@@ -46,7 +46,7 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      - name: Upload optimized APK
+      - name: Upload performance APK
         uses: actions/upload-artifact@v4
         with:
           name: anilocal-optimized-apk

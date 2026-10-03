@@ -8,6 +8,10 @@ interface SettingsRepository {
     val autoSkip: Flow<Boolean>
     suspend fun setAutoSkip(enabled: Boolean)
 
+    /** When true, the next episode auto-plays when the current one ends. */
+    val autoPlayNext: Flow<Boolean>
+    suspend fun setAutoPlayNext(enabled: Boolean)
+
     /** When true, downloads only run on unmetered (WiFi) networks. */
     val wifiOnlyDownloads: Flow<Boolean>
     suspend fun setWifiOnlyDownloads(enabled: Boolean)
@@ -27,6 +31,26 @@ interface SettingsRepository {
     /** Id of the [com.anilocal.app.domain.source.AnimeSource] chosen to resolve streams. */
     val selectedSourceId: Flow<String>
     suspend fun setSelectedSourceId(id: String)
+
+    /**
+     * Display name of the source the automatic selector last picked, purely for the picker's
+     * "Auto (best source) · last: <name>" subtitle. Empty until Auto mode has resolved once.
+     */
+    val lastAutoWinner: Flow<String>
+    suspend fun setLastAutoWinner(name: String)
+
+    /** Base URLs of extension repos (each serving an `index.min.json`). Pre-seeded with yuzono. */
+    val extensionRepoBaseUrls: Flow<List<String>>
+    suspend fun setExtensionRepoBaseUrls(urls: List<String>)
+
+    /** Packages the app auto-installed to seed "Auto" — the only ones auto-eviction is allowed to
+     *  remove (a user's manual installs are never touched). */
+    val autoInstalledSources: Flow<Set<String>>
+    suspend fun setAutoInstalledSources(pkgs: Set<String>)
+
+    /** Packages auto-eviction removed as dead, so provisioning won't keep re-installing them. */
+    val evictedSources: Flow<Set<String>>
+    suspend fun setEvictedSources(pkgs: Set<String>)
 
     // MyAnimeList sync — keyless, by username only (mirrors the user's PUBLIC list)
     val malUsername: Flow<String>

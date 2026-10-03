@@ -1,10 +1,10 @@
 package com.anilocal.app.domain.model
 
-/** Home shelves loaded together, in their display order. */
+/** The five Home shelves, fetched together when the catalog supports batching. */
 data class HomeCatalog(
-    val trending: List<AnimeSummary>,
-    val popularThisSeason: List<AnimeSummary>,
-    val topAiring: List<AnimeSummary>,
-    val allTimePopular: List<AnimeSummary>,
-    val upcoming: List<AnimeSummary>,
+    val trending: List<AnimeSummary> = emptyList(),
+    val popularThisSeason: List<AnimeSummary> = emptyList(),
+    val topAiring: List<AnimeSummary> = emptyList(),
+    val allTimePopular: List<AnimeSummary> = emptyList(),
+    val upcoming: List<AnimeSummary> = emptyList(),
 )

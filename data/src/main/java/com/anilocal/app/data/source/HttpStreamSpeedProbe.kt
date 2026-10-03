@@ -112,7 +112,9 @@ internal class HttpStreamSpeedProbe(client: OkHttpClient) : StreamSpeedProbe {
         val started = System.nanoTime()
         continuation.invokeOnCancellation {
             call.cancel()
-            activeResponse.get()?.close()
+            // A body may be in a buffered read on another thread; cancellation cleanup cannot
+            // throw into the coroutine's completion handlers if that read is closing it too.
+            runCatching { activeResponse.get()?.close() }
         }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {

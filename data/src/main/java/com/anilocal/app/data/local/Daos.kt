@@ -43,11 +43,18 @@ interface DownloadDao {
     @Query("SELECT * FROM downloads WHERE id = :id")
     suspend fun getById(id: String): DownloadEntity?
 
-    @Query("SELECT id, createdAt FROM downloads WHERE state = 1")
-    suspend fun getCompletedRows(): List<CompletedDownloadRow>
+    /** Newest not-yet-completed download (0 DOWNLOADING, 3 PAUSED, 4 QUEUED) — its persisted
+     *  headers seed DownloadHeaderStore after a process restart so resumes don't 403. Blocking
+     *  (non-suspend) on purpose: it's called lazily from Media3's download threads. */
+    @Query("SELECT * FROM downloads WHERE state IN (0, 3, 4) ORDER BY createdAt DESC LIMIT 1")
+    fun newestActiveNow(): DownloadEntity?
 
-    @Query("UPDATE downloads SET state = 2, progress = 0 WHERE id = :id AND state = 1 AND createdAt = :createdAt")
-    suspend fun invalidateCompleted(id: String, createdAt: Long)
+    /** Every active download (0 DOWNLOADING, 3 PAUSED, 4 QUEUED), newest first — seeds
+     *  DownloadHeaderStore's per-host headers after a process restart so each concurrent download
+     *  (possibly on a different source/host) resumes with its own Referer. Blocking on purpose,
+     *  like [newestActiveNow]. */
+    @Query("SELECT * FROM downloads WHERE state IN (0, 3, 4) ORDER BY createdAt DESC")
+    fun activeNow(): List<DownloadEntity>
 
     @Query("SELECT DISTINCT animeId FROM downloads WHERE state = 1")
     fun observeDownloadedAnimeIds(): Flow<List<String>>
@@ -61,15 +68,10 @@ interface DownloadDao {
     @Query("UPDATE downloads SET state = :state, progress = :progress WHERE id = :id AND (state != :state OR progress != :progress)")
     suspend fun updateState(id: String, state: Int, progress: Int)
 
-    @Query("DELETE FROM downloads WHERE id IN (:ids)")
-    suspend fun deleteByIds(ids: List<String>)
-
-    /** One invalidation per sampled batch; unchanged rows do not generate writes. */
-    @Transaction
-    suspend fun applyChanges(updates: List<DownloadStateUpdate>, removedIds: List<String>) {
-        updates.forEach { updateState(it.id, it.state, it.progress) }
-        if (removedIds.isNotEmpty()) deleteByIds(removedIds)
-    }
+    /** Progress-only write for the live poll: guarded on `state = 0` (DOWNLOADING) so a tick that
+     *  lands just after the row flipped to COMPLETED/FAILED can't reset it back to DOWNLOADING. */
+    @Query("UPDATE downloads SET progress = :progress WHERE id = :id AND state = 0 AND progress != :progress")
+    suspend fun updateProgress(id: String, progress: Int)
 
     @Query("DELETE FROM downloads WHERE id = :id")
     suspend fun deleteById(id: String)
@@ -89,10 +91,11 @@ interface MalDao {
     @Query("DELETE FROM mal_list")
     suspend fun clear()
 
+    /** Atomic mirror replace — process death between clear and upsert can't empty the list. */
     @Transaction
     suspend fun replaceAll(entries: List<MalEntryEntity>) {
         clear()
-        if (entries.isNotEmpty()) upsertAll(entries)
+        upsertAll(entries)
     }
 }
 

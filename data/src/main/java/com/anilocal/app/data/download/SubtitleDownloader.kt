@@ -21,7 +21,6 @@ import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -74,12 +73,11 @@ internal class SubtitleDownloader(client: OkHttpClient, private val directory: F
         headers: Map<String, String>,
     ): File = suspendCancellableCoroutine { continuation ->
         val request = Request.Builder().url(sub.url)
-            .apply { headers.forEach { (name, value) -> header(name, value) } }.build()
+            .apply { headers.forEach { (name, value) -> runCatching { header(name, value) } } }.build()
         val call = client.newCall(request)
-        val activeResponse = AtomicReference<Response?>()
         continuation.invokeOnCancellation {
             call.cancel()
-            activeResponse.getAndSet(null)?.close()
+            // Cancel the transport; the callback owns closing the response after its read ends.
         }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, error: IOException) {
@@ -87,7 +85,6 @@ internal class SubtitleDownloader(client: OkHttpClient, private val directory: F
             }
 
             override fun onResponse(call: Call, response: Response) {
-                activeResponse.set(response)
                 var temporary: File? = null
                 var saved: File? = null
                 var delivered = false
@@ -99,8 +96,8 @@ internal class SubtitleDownloader(client: OkHttpClient, private val directory: F
                         if (body.contentLength() > MAX_BYTES) throw IOException("Subtitle is too large")
                         if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Cannot create subtitle directory")
                         val extension = sub.url.substringBefore('?').substringBefore('#')
-                            .substringAfterLast('.', "vtt").lowercase(Locale.ROOT)
-                            .takeIf { it in setOf("vtt", "srt", "ass", "ssa", "ttml") } ?: "vtt"
+                            .substringAfterLast('.', "sub").lowercase(Locale.ROOT)
+                            .takeIf { it in setOf("vtt", "srt", "ass", "ssa", "ttml", "dfxp") } ?: "sub"
                         val file = File(directory, "$id-$index.$extension")
                         temporary = File.createTempFile("$id-$index-", ".part", directory)
                         body.byteStream().use { input ->
@@ -125,7 +122,6 @@ internal class SubtitleDownloader(client: OkHttpClient, private val directory: F
                 } catch (error: Exception) {
                     if (continuation.isActive) continuation.resumeWithException(error)
                 } finally {
-                    activeResponse.set(null)
                     temporary?.delete()
                     if (!delivered) saved?.delete()
                 }

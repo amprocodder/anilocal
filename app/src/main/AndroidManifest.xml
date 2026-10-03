@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -10,12 +11,26 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Lets the JobScheduler-backed download Scheduler persist jobs across reboot. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Enumerate installed Aniyomi extension APKs (by the tachiyomi.animeextension feature) so the
+         source registry can discover and load them. Sideload-only build; not Google Play eligible. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+    <!-- Install extension APKs the user chose to download in-app (sideload-only build). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- usesCleartextTraffic: user-selected sources/extensions may resolve streams to plain
+         http:// URLs (or https that redirect to http), which the platform blocks by default on
+         targetSdk 28+ (ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED). The plugin seam loads arbitrary
+         hosts, so this can't be a domain allowlist. Trade-off: HTTP streams are unencrypted —
+         an accepted tradeoff for a sideloaded player whose sources are user-chosen (catalog/
+         metadata — AniList, AniSkip, MAL — remain HTTPS regardless). -->
     <application
         android:name=".AniLocalApp"
         android:allowBackup="true"
-        android:label="AniLocal"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.AniLocal">
 
         <activity
@@ -45,6 +60,17 @@
             android:name="androidx.media3.exoplayer.scheduler.PlatformScheduler$PlatformSchedulerService"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- Shares downloaded extension APKs with the system package installer. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 </manifest>
