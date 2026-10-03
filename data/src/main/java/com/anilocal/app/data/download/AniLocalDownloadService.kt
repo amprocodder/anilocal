@@ -16,6 +16,7 @@ import dagger.hilt.components.SingletonComponent
 
 /** Unique JobScheduler id for resuming downloads in the background / after reboot. */
 private const val DOWNLOAD_JOB_ID = 1
+private const val STOP_REASON_SERVICE_TIMEOUT = 2
 
 /**
  * Foreground service that runs Media3 downloads + shows the progress notification.
@@ -29,10 +30,24 @@ class AniLocalDownloadService : DownloadService(
     R.string.download_channel_name,
     0,
 ) {
-    private val entryPoint
-        get() = EntryPointAccessors.fromApplication(applicationContext, DownloadEntryPoint::class.java)
+    private val entryPoint by lazy(LazyThreadSafetyMode.NONE) {
+        EntryPointAccessors.fromApplication(applicationContext, DownloadEntryPoint::class.java)
+    }
 
     override fun getDownloadManager(): DownloadManager = entryPoint.downloadManager()
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        val manager = entryPoint.downloadManager()
+        // Android 15's data-sync budget expires while backgrounded. Persist a resumable pause
+        // instead of leaving transfers queued with no Resume control after the service stops.
+        manager.currentDownloads.filter {
+            it.stopReason == Download.STOP_REASON_NONE &&
+                it.state in setOf(Download.STATE_DOWNLOADING, Download.STATE_QUEUED, Download.STATE_RESTARTING)
+        }.forEach { manager.setStopReason(it.request.id, STOP_REASON_SERVICE_TIMEOUT) }
+        manager.pauseDownloads()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
 
     // JobScheduler-backed: persists across reboot (requires RECEIVE_BOOT_COMPLETED) and
     // restarts the service to resume downloads when the manager's requirements are met.

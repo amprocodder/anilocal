@@ -1,77 +1,101 @@
-# AniLocal — all-in-one anime player (server-free)
+# AniLocal — Android anime player
 
-A single-APK anime app with the AniLab-style menu layout, fully local operation, and **no
-bundled scraper**. Stream resolution is an abstract `AnimeSource` plugin seam; a legal
-**SampleLocalSource** (Creative-Commons clip) ships so the app plays video out of the box.
+A Kotlin/Compose anime app with Home · Explore · Library · Downloads · More and no private
+backend or bundled scraper. AniList supplies catalog metadata; registered `AnimeSource`
+implementations supply playable streams.
 
-> Status: **authored, not yet compiled** (built outside the dev sandbox). Open in Android
-> Studio (Koala+), let Gradle sync, fix any version nits, run. See "Build" below.
+Two lawful demo sources ship: **Big Buck Bunny** and **Sintel** (Blender Foundation,
+Creative Commons), streamed from public sample hosts. Both deliberately match any catalog title
+and play their own demo clip. The small 720p Bunny test clip is silent; Sintel includes audio.
+Browsing, the first stream, and downloading require internet access. Completed downloads,
+the local library, and saved watch progress are available offline; no account is required
+for the built-in sources.
 
-## What works
-- AniLab-style **bottom-nav shell**: Home · Explore · Library · **Downloads** · More.
-- **Offline downloads (Netflix-style, fully in-app)**: tap the download icon on an episode →
-  Media3 `DownloadManager` saves the video to app storage; **subtitles** are pulled to local
-  files and **skip-times are cached** too, so playback + auto-skip work with no network. A
-  **Downloads tab** (offline-accessible) lists them with progress + **pause / resume / cancel**
-  controls, and browser posters get a **downloaded badge**. Everything the UI shows reads from
-  Room, so it works fully offline.
-- **WiFi-only downloads** setting (More tab): sets the `DownloadManager` requirement to
-  unmetered, so downloads auto-pause on mobile data and resume on WiFi.
-- **Download quality selection**: a default-quality preference (More tab) plus a per-episode
-  quality picker shown when the source offers multiple variants (pre-selected from the
-  default). The chosen quality is stored and shown on the Downloads tab.
-- **Auto-skip** toggle (More tab) persisted via **DataStore**; when on, the player seeks past
-  each intro/outro window automatically (once per marker).
-- **Real catalog** via **AniList** GraphQL (trending on Home, search in Explore, full detail
-  pages). No API key needed. *(TMDB wired as optional artwork enrichment — see config.)*
-- **Player** (Media3/ExoPlayer) with the **Skip-Intro/Outro button** (`FreakIntroButton`
-  equivalent), fed by **AniSkip** (real op/ed times by MAL id) — demo markers for the
-  keyless sample so the control always demonstrates.
-- **Room persistence**: "My List" (Library tab) + "Continue Watching" (Home), with watch
-  progress saved during playback.
-- **Google Sign-In** via **Firebase** (More tab) — guarded so it no-ops until you add your
-  own project; then it actually works.
-- **Source seam** (`AnimeSource`) + `SampleLocalSource` (plays a CC Big Buck Bunny clip), so
-  the app streams lawfully with **no scraper**.
-- Hilt DI, Compose + Material3, Coil images, OkHttp/Retrofit/Moshi.
+See [performance behavior, measurements, and validation](docs/PERFORMANCE.md) for the
+optimization work and its verification limits.
 
-## Configure optional features (the app builds & runs without these)
-- **TMDB artwork** (optional): get a free v3 key at themoviedb.org, add to
-  `~/.gradle/gradle.properties` or the project `gradle.properties`: `TMDB_API_KEY=xxxx`.
-- **Google Sign-In**: create a Firebase project, add an Android app with your package
-  (`com.anilocal.app`) and your signing **SHA-1**, download **`app/google-services.json`**
-  (the build auto-applies the plugin once it's present), and set the **Web client id**:
-  `GOOGLE_WEB_CLIENT_ID=xxxx.apps.googleusercontent.com` in `gradle.properties`.
+## Features
 
-## Deliberately absent (the "scraper-shaped hole")
-- No pirate scraper, no private backend, no Notix ads, no signature spoofing.
-- `AnimeSource` is the single drop-in point. A lawful implementation (e.g. **your own
-  Jellyfin/Plex/local files**) plugs in here. What you drop in is your responsibility.
+- **Catalog and search:** Home loads five shelves in one AniList GraphQL request. Bounded
+  process-memory caches reuse Home/browse/search results for three minutes and details/MAL
+  mappings for thirty minutes; concurrent identical requests share work. Explore waits
+  300 ms after typing, cancels obsolete requests, and applies browse filters immediately.
+  Home, Explore, and Details show loading/retry feedback, retain useful content during a
+  refresh failure, and stop waiting after a twenty-second UI deadline.
+- **Library and Continue Watching:** Room stores local titles and playback progress. Library
+  merges local titles with a public MyAnimeList mirror, with local entries winning by MAL id.
+  Large list mapping and all category projections run off the UI thread and are reused when
+  changing filters. Lists and grids compose visible items lazily and keep stable item keys.
+- **In-app downloads:** episode download buttons resolve streams and skip markers in parallel.
+  Up to three different episodes prepare at once; per-episode duplicate guards and queued
+  quality dialogs keep choices associated with the right episode. Media3 saves videos to app
+  storage, while subtitles and skip markers are stored for offline playback. Downloads show
+  progress, quality, pause/resume/retry, and removal controls; completed titles get badges.
+  WiFi-only mode pauses downloads on metered networks and resumes on unmetered networks.
+- **Playback:** Media3/ExoPlayer supports subtitles, adjustable subtitle size/background, and
+  manual or automatic intro/outro skipping through AniSkip. Initial online playback and each
+  fatal-error restart freshly resolve registered sources and servers and measure bounded
+  media samples. HLS tests use a media segment. Healthy alternatives to a failed URL are
+  preferred, and the replacement player resumes from the saved position. Recovery makes up
+  to three attempts with backoff; thirty seconds of continuous playback resets the limit.
+  A manual Retry button remains available. Offline playback/recovery uses downloaded bytes
+  and local metadata without catalog calls or source speed tests.
+- **Settings and accounts:** DataStore persists preferences; settings sections compose lazily,
+  slider movement stays local until release, and queued preference bursts coalesce. Optional
+  Google Sign-In uses your Firebase project. MyAnimeList sync needs only a username and a
+  public list, saves that username before manual sync, and replaces the local mirror atomically
+  only after fetching the complete list.
+  More → Preferred streaming source chooses the download source; playback tests available
+  connections and prefers your selection when speed and quality tie.
 
-## Build
-1. Open the project root in Android Studio (Koala+); it will generate the Gradle wrapper
-   scripts (`gradlew`) and sync. (Wrapper pinned to Gradle 8.9 for AGP 8.7.)
-2. JDK 17, Android SDK 35 installed. `minSdk 24`.
-3. Run the `app` config on a device/emulator. The Home tab → a sample title → Play
-   demonstrates playback + the skip button with no network and no account.
+## Optional configuration
 
-## Architecture — 3 Gradle modules
-The dependency direction is compile-enforced (not just convention):
+The app builds and its demo sources work without these settings.
 
+- **Google Sign-In:** create a Firebase project, register `com.anilocal.app` and your signing
+  SHA-1, then add `app/google-services.json`. The Google Services plugin applies only when
+  that file exists. Set `GOOGLE_WEB_CLIENT_ID=xxxx.apps.googleusercontent.com` in your project
+  or user `gradle.properties`. An unconfigured build shows a configuration hint when tapped.
+- **MyAnimeList:** enter your username in More → MyAnimeList Sync. Set your MAL list to Public.
+  Sync is read-only; automatic sync on app open is optional and throttled to thirty minutes.
+- **TMDB:** its API declaration and optional `TMDB_API_KEY` are scaffolding. Artwork currently
+  comes from AniList; entering a TMDB key does not yet enable enrichment.
+
+## Build and checks
+
+Use **JDK 17**, **Gradle 8.9**, and **Android SDK 35** (AGP 8.7, minimum Android API 24).
+The Gradle wrapper scripts/JAR are not committed; use an installed Gradle 8.9 or this
+workstation's ignored `.local-dev/gradle` helper. Open the project in an Android Studio
+version that supports AGP 8.7 for editing and device runs.
+
+```bash
+gradle :domain:test :data:testDebugUnitTest :app:testDebugUnitTest :data:lintDebug :app:lintDebug
+gradle :app:assembleDebug :app:assembleBenchmark
 ```
-:app  ──►  :data  ──►  :domain
-  └────────────────────►─┘
-```
 
-- **`:domain`** — pure Kotlin (`kotlin("jvm")`, no Android dependency). Models, repository
-  interfaces, the `AnimeSource` seam. `import android.*` here won't compile — that's the
-  boundary. Fast JVM unit tests.
-- **`:data`** — Android library (`com.anilocal.app.data`). All implementations: AniList/TMDB,
-  AniSkip, Room, DataStore, Firebase auth, Media3 downloads, the sample source, and the Hilt
-  wiring (`di/AppModule`). Depends only on `:domain`.
-- **`:app`** — Android application. Compose UI, navigation, ViewModels, the Media3 player UI,
-  Google Sign-In UI. Depends on `:domain` + `:data` but references **only domain interfaces**
-  (verified: 0 imports of `com.anilocal.app.data.*`), so features can't reach into impls.
+- `app/build/outputs/apk/debug/` contains the development APK.
+- `app/build/outputs/apk/benchmark/` contains the optimized APK: release R8/resource shrinking,
+  release library dependencies, and debug signing for sideloading and comparison. Use this
+  variant for performance measurements; configure your own signing for a production release.
+- GitHub Actions runs the JVM tests and lint, builds both variants, and uploads
+  `anilocal-debug-apk` and `anilocal-optimized-apk`.
 
-Build files stay small via the version catalog (`gradle/libs.versions.toml`); a `build-logic`
-convention plugin is a sensible later step if more modules are added.
+For a playback demonstration, open a catalog title → Play while online. The selected source
+supplies download variants; online playback compares available sources and plays the fastest
+healthy demo trailer. Download an episode before testing offline playback from Downloads.
+Automated tests exercise concurrency, caching, cancellation, recovery, and storage behavior
+without live services; runtime/device results are recorded in the performance document.
+
+## Architecture and source extensions
+
+Dependencies flow `:app → :data → :domain`, with `:app` also depending on `:domain` directly.
+`:domain` is pure Kotlin and defines models/repository interfaces. `:data` implements AniList,
+AniSkip, Room, DataStore, Firebase auth, Media3 downloads, and source registration. `:app`
+contains Compose screens, navigation, ViewModels, and the player UI and references domain
+interfaces rather than data implementations.
+
+Add a lawful source by implementing `AnimeSource` and contributing it with Hilt `@IntoSet`
+in `data/.../di/AppModule.kt`. `SourceRegistry` exposes available sources; More stores the
+selection used by stream resolution. The catalog stays separate. The registry currently
+contains the two built-ins; dynamic extension installation is future work. There is no
+private backend, advertising service, scraper, or signature-spoofing code.

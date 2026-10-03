@@ -24,8 +24,11 @@ import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.ProgressRepository
 import com.anilocal.app.ui.common.PosterCard
+import com.anilocal.app.ui.common.CatalogFeedback
+import com.anilocal.app.ui.common.CatalogLoad
+import com.anilocal.app.ui.common.CatalogLoadState
+import com.anilocal.app.ui.common.loadOrNull
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -41,8 +44,19 @@ class HomeViewModel @Inject constructor(
     downloads: DownloadRepository,
 ) : ViewModel() {
 
-    private val _rows = MutableStateFlow<List<HomeRow>>(emptyList())
-    val rows: StateFlow<List<HomeRow>> = _rows
+    private val loader = CatalogLoad(viewModelScope, emptyList<HomeRow>()) {
+        val home = catalog.home()
+        listOf(
+            HomeRow("Trending Now", home.trending),
+            HomeRow("Popular This Season", home.popularThisSeason),
+            HomeRow("Top Airing", home.topAiring),
+            HomeRow("All-Time Popular", home.allTimePopular),
+            HomeRow("Upcoming", home.upcoming),
+        ).filter { it.items.isNotEmpty() }
+    }
+    val rows = loader.value
+    val loadState = loader.state
+    fun retry() = loader.refresh()
 
     val continueWatching: StateFlow<List<ContinueWatching>> =
         progress.continueWatching.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -51,24 +65,8 @@ class HomeViewModel @Inject constructor(
         downloads.downloadedAnimeIds().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     /** Permanently drop an item from the Continue Watching row. */
-    fun removeFromContinue(animeId: String) = viewModelScope.launch { progress.remove(animeId) }
+    fun removeFromContinue(animeId: String) = viewModelScope.launch { loadOrNull { progress.remove(animeId) } }
 
-    init {
-        // Load the AniLab-style rows; each appears as soon as it returns (ordered).
-        val sections: List<Pair<String, suspend () -> List<AnimeSummary>>> = listOf(
-            "Trending Now" to { catalog.trending() },
-            "Popular This Season" to { catalog.popularThisSeason() },
-            "Top Airing" to { catalog.topAiring() },
-            "All-Time Popular" to { catalog.allTimePopular() },
-            "Upcoming" to { catalog.upcoming() },
-        )
-        viewModelScope.launch {
-            for ((title, loader) in sections) {
-                val items = runCatching { loader() }.getOrDefault(emptyList())
-                if (items.isNotEmpty()) _rows.value = _rows.value + HomeRow(title, items)
-            }
-        }
-    }
 }
 
 @Composable
@@ -78,6 +76,7 @@ fun HomeScreen(
     vm: HomeViewModel = hiltViewModel(),
 ) {
     val rows by vm.rows.collectAsStateWithLifecycle()
+    val loadState by vm.loadState.collectAsStateWithLifecycle()
     val continueWatching by vm.continueWatching.collectAsStateWithLifecycle()
     val downloadedIds by vm.downloadedIds.collectAsStateWithLifecycle()
 
@@ -86,12 +85,15 @@ fun HomeScreen(
         contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        item {
+        item(key = "heading", contentType = "heading") {
             Text("AniLocal", style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(horizontal = 16.dp))
         }
+        if (loadState != CatalogLoadState.Ready) {
+            item(key = "load-state", contentType = "load-state") { CatalogFeedback(loadState, vm::retry) }
+        }
         if (continueWatching.isNotEmpty()) {
-            item {
+            item(key = "continue", contentType = "shelf") {
                 ContinueWatchingShelf(
                     items = continueWatching,
                     downloadedIds = downloadedIds,
@@ -100,7 +102,7 @@ fun HomeScreen(
                 )
             }
         }
-        items(rows, key = { it.title }) { row ->
+        items(rows, key = { it.title }, contentType = { "shelf" }) { row ->
             Shelf(row.title, row.items, downloadedIds, onOpen)
         }
     }
@@ -120,7 +122,7 @@ private fun ContinueWatchingShelf(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(horizontal = 16.dp),
         ) {
-            items(items, key = { it.anime.id }) { cw ->
+            items(items, key = { it.anime.id }, contentType = { "poster" }) { cw ->
                 PosterCard(
                     item = cw.anime,
                     onClick = { onResume(cw.anime.id, cw.episodeNumber, cw.positionMs) },
@@ -147,7 +149,7 @@ private fun Shelf(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(horizontal = 16.dp),
         ) {
-            items(items, key = { it.id }) {
+            items(items, key = { it.id }, contentType = { "poster" }) {
                 PosterCard(it, onClick = { onOpen(it.id) }, downloaded = it.id in downloadedIds)
             }
         }

@@ -2,6 +2,7 @@ package com.anilocal.app.ui.details
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -53,6 +54,10 @@ import com.anilocal.app.domain.repo.LibraryRepository
 import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.repo.SkipRepository
 import com.anilocal.app.domain.repo.StreamRepository
+import com.anilocal.app.ui.common.loadOrNull
+import com.anilocal.app.ui.common.CatalogFeedback
+import com.anilocal.app.ui.common.CatalogLoad
+import com.anilocal.app.ui.common.CatalogLoadState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -73,14 +78,16 @@ class DetailsViewModel @Inject constructor(
     savedState: SavedStateHandle,
     private val catalog: CatalogRepository,
     private val library: LibraryRepository,
-    private val streams: StreamRepository,
-    private val skip: SkipRepository,
-    private val downloads: DownloadRepository,
+    streams: StreamRepository,
+    skip: SkipRepository,
+    downloads: DownloadRepository,
     settings: SettingsRepository,
 ) : ViewModel() {
     private val animeId: String = checkNotNull(savedState["animeId"])
-    private val _detail = MutableStateFlow<AnimeDetail?>(null)
-    val detail: StateFlow<AnimeDetail?> = _detail
+    private val loader = CatalogLoad<AnimeDetail?>(viewModelScope, null) { catalog.detail(animeId) }
+    val detail = loader.value
+    val loadState = loader.state
+    fun retry() = loader.refresh()
 
     val saved: StateFlow<Boolean> =
         library.isSaved(animeId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -92,35 +99,28 @@ class DetailsViewModel @Inject constructor(
     val defaultQuality: StateFlow<DownloadQuality> =
         settings.downloadQuality.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DownloadQuality.AUTO)
 
-    private val _pending = MutableStateFlow<PendingDownload?>(null)
-    val pending: StateFlow<PendingDownload?> = _pending
+    private val downloadRequests = DownloadRequests(viewModelScope, { detail.value }, streams, skip, downloads)
+    val pending = downloadRequests.pending
+    val busyEpisodes = downloadRequests.busyEpisodes
+    private val _saving = MutableStateFlow(false)
+    val saving: StateFlow<Boolean> = _saving
 
-    init { viewModelScope.launch { _detail.value = runCatching { catalog.detail(animeId) }.getOrNull() } }
-
-    fun toggleSaved() = viewModelScope.launch {
-        _detail.value?.let { library.toggle(AnimeSummary(it.id, it.title, it.posterUrl, it.idMal)) }
-    }
-
-    fun download(episode: Episode) = viewModelScope.launch {
-        val d = _detail.value ?: return@launch
-        val options = runCatching { streams.resolveStreams(d.title, episode.number) }.getOrDefault(emptyList())
-        if (options.isEmpty()) return@launch
-        val markers = runCatching { skip.markers(d.idMal, episode.number, 0) }.getOrDefault(emptyList())
-        if (options.size == 1) {
-            downloads.enqueue(d, episode, options.first(), markers)
-        } else {
-            _pending.value = PendingDownload(episode, markers, options)   // show the picker
+    fun toggleSaved() {
+        val d = detail.value ?: return
+        if (_saving.value) return
+        _saving.value = true
+        viewModelScope.launch {
+            try {
+                loadOrNull { library.toggle(AnimeSummary(d.id, d.title, d.posterUrl, d.idMal)) }
+            } finally {
+                _saving.value = false
+            }
         }
     }
 
-    fun chooseQuality(stream: VideoStream) = viewModelScope.launch {
-        val d = _detail.value ?: return@launch
-        val p = _pending.value ?: return@launch
-        downloads.enqueue(d, p.episode, stream, p.markers)
-        _pending.value = null
-    }
-
-    fun dismissPicker() { _pending.value = null }
+    fun download(episode: Episode) = downloadRequests.download(episode)
+    fun chooseQuality(request: PendingDownload, stream: VideoStream) = downloadRequests.chooseQuality(request, stream)
+    fun dismissPicker(request: PendingDownload) = downloadRequests.dismissPicker(request)
 }
 
 /** The variant the picker pre-selects, given the user's default-quality preference. */
@@ -138,26 +138,37 @@ fun DetailsScreen(
     vm: DetailsViewModel = hiltViewModel(),
 ) {
     val detail by vm.detail.collectAsStateWithLifecycle()
+    val loadState by vm.loadState.collectAsStateWithLifecycle()
     val saved by vm.saved.collectAsStateWithLifecycle()
+    val saving by vm.saving.collectAsStateWithLifecycle()
     val downloaded by vm.downloadedEpisodes.collectAsStateWithLifecycle()
     val pending by vm.pending.collectAsStateWithLifecycle()
+    val busyEpisodes by vm.busyEpisodes.collectAsStateWithLifecycle()
     val defaultQuality by vm.defaultQuality.collectAsStateWithLifecycle()
     val d = detail
 
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text(d?.title ?: "Loading…") },
+            title = { Text(d?.title ?: if (loadState == CatalogLoadState.Failed) "Anime" else "Loading…") },
             navigationIcon = {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
             },
         )
     }) { padding ->
-        if (d == null) return@Scaffold
+        if (d == null) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                CatalogFeedback(loadState, vm::retry)
+            }
+            return@Scaffold
+        }
         LazyColumn(
             Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item {
+            if (loadState != CatalogLoadState.Ready) {
+                item(key = "load-state", contentType = "load-state") { CatalogFeedback(loadState, vm::retry) }
+            }
+            item(key = "artwork", contentType = "artwork") {
                 AsyncImage(
                     model = d.bannerUrl ?: d.posterUrl,
                     contentDescription = d.title,
@@ -165,20 +176,20 @@ fun DetailsScreen(
                     modifier = Modifier.fillMaxWidth().height(200.dp),
                 )
             }
-            item { Text(d.title, style = MaterialTheme.typography.headlineSmall) }
-            item {
+            item(key = "title", contentType = "text") { Text(d.title, style = MaterialTheme.typography.headlineSmall) }
+            item(key = "play", contentType = "action") {
                 Button(onClick = { onPlay(d.id, d.episodes.firstOrNull()?.number ?: 1) }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Filled.PlayArrow, null); Text("  Play")
                 }
             }
-            item {
-                OutlinedButton(onClick = vm::toggleSaved, modifier = Modifier.fillMaxWidth()) {
+            item(key = "save", contentType = "action") {
+                OutlinedButton(onClick = vm::toggleSaved, enabled = !saving, modifier = Modifier.fillMaxWidth()) {
                     Text(if (saved) "Remove from My List" else "Add to My List")
                 }
             }
-            item { Text(d.synopsis, style = MaterialTheme.typography.bodyMedium) }
-            item { Text("Episodes", style = MaterialTheme.typography.titleMedium) }
-            items(d.episodes, key = { it.id }) { ep ->
+            item(key = "synopsis", contentType = "text") { Text(d.synopsis, style = MaterialTheme.typography.bodyMedium) }
+            item(key = "episodes", contentType = "text") { Text("Episodes", style = MaterialTheme.typography.titleMedium) }
+            items(d.episodes, key = { it.id }, contentType = { "episode" }) { ep ->
                 ListItem(
                     headlineContent = { Text(ep.title ?: "Episode ${ep.number}") },
                     leadingContent = { Text("${ep.number}") },
@@ -187,7 +198,7 @@ fun DetailsScreen(
                             Icon(Icons.Filled.DownloadDone, "Downloaded",
                                 tint = MaterialTheme.colorScheme.primary)
                         } else {
-                            IconButton(onClick = { vm.download(ep) }) {
+                            IconButton(onClick = { vm.download(ep) }, enabled = ep.number !in busyEpisodes) {
                                 Icon(Icons.Filled.Download, "Download")
                             }
                         }
@@ -203,19 +214,19 @@ fun DetailsScreen(
     pending?.let { p ->
         val preselected = remember(p, defaultQuality) { pickForQuality(p.options, defaultQuality) }
         AlertDialog(
-            onDismissRequest = vm::dismissPicker,
-            title = { Text("Download quality") },
+            onDismissRequest = { vm.dismissPicker(p) },
+            title = { Text("Episode ${p.episode.number} · Download quality") },
             text = {
                 Column {
                     p.options.forEach { stream ->
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clickable { vm.chooseQuality(stream) }
+                                .clickable { vm.chooseQuality(p, stream) }
                                 .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            RadioButton(selected = stream == preselected, onClick = { vm.chooseQuality(stream) })
+                            RadioButton(selected = stream == preselected, onClick = { vm.chooseQuality(p, stream) })
                             Text(
                                 stream.quality ?: stream.height?.let { "${it}p" } ?: "Default",
                                 modifier = Modifier.padding(start = 8.dp),
@@ -225,7 +236,7 @@ fun DetailsScreen(
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = vm::dismissPicker) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { vm.dismissPicker(p) }) { Text("Cancel") } },
         )
     }
 }

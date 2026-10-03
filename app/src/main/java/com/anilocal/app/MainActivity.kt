@@ -4,6 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.NavigationBar
@@ -14,9 +17,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavType
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -48,7 +53,6 @@ class MainActivity : ComponentActivity() {
 private fun AppRoot() {
     val appVm: AppViewModel = hiltViewModel()
     LaunchedEffect(Unit) { appVm.onAppOpen() }   // throttled MAL sync on app open
-    val resumeItem by appVm.resumeBar.collectAsStateWithLifecycle()
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
@@ -57,33 +61,7 @@ private fun AppRoot() {
     Scaffold(
         bottomBar = {
             if (showBottomBar) {
-                Column {
-                    resumeItem?.let { item ->
-                        ContinueWatchingBar(
-                            item = item,
-                            onResume = {
-                                nav.navigate(Routes.player(item.anime.id, item.episodeNumber, item.positionMs))
-                            },
-                            onDismiss = appVm::dismissBar,
-                        )
-                    }
-                    NavigationBar {
-                        TopTab.entries.forEach { tab ->
-                            NavigationBarItem(
-                                selected = currentRoute == tab.route,
-                                onClick = {
-                                    nav.navigate(tab.route) {
-                                        popUpTo(TopTab.Home.route) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                icon = { androidx.compose.material3.Icon(tab.icon, tab.label) },
-                                label = { Text(tab.label) },
-                            )
-                        }
-                    }
-                }
+                AppBottomBar(appVm, nav, currentRoute)
             }
         },
     ) { padding ->
@@ -91,6 +69,10 @@ private fun AppRoot() {
             navController = nav,
             startDestination = TopTab.Home.route,
             modifier = Modifier.padding(padding),
+            enterTransition = { fadeIn(tween(160)) },
+            exitTransition = { fadeOut(tween(120)) },
+            popEnterTransition = { fadeIn(tween(160)) },
+            popExitTransition = { fadeOut(tween(120)) },
         ) {
             composable(TopTab.Home.route) {
                 HomeScreen(
@@ -127,6 +109,39 @@ private fun AppRoot() {
                 ),
             ) {
                 PlayerScreen(onBack = { nav.popBackStack() })
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppBottomBar(appVm: AppViewModel, nav: NavHostController, currentRoute: String?) {
+    // Watch progress updates only recompose the bar, not every screen in the navigation host.
+    val resumeItem by appVm.resumeBar.collectAsStateWithLifecycle()
+    Column {
+        resumeItem?.let { item ->
+            ContinueWatchingBar(
+                item = item,
+                onResume = {
+                    nav.navigate(Routes.player(item.anime.id, item.episodeNumber, item.positionMs))
+                },
+                onDismiss = appVm::dismissBar,
+            )
+        }
+        NavigationBar {
+            TopTab.entries.forEach { tab ->
+                NavigationBarItem(
+                    selected = currentRoute == tab.route,
+                    onClick = {
+                        nav.navigate(tab.route) {
+                            popUpTo(TopTab.Home.route) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    icon = { androidx.compose.material3.Icon(tab.icon, tab.label) },
+                    label = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                )
             }
         }
     }

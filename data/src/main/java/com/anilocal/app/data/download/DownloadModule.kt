@@ -13,6 +13,9 @@ import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadNotificationHelper
+import androidx.media3.exoplayer.offline.DefaultDownloadIndex
+import androidx.media3.exoplayer.offline.DefaultDownloaderFactory
+import androidx.media3.exoplayer.offline.DownloaderFactory
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -59,11 +62,23 @@ object DownloadModule {
         @ApplicationContext context: Context,
         db: DatabaseProvider,
         cache: Cache,
-        http: DefaultHttpDataSource.Factory,
-    ): DownloadManager =
-        DownloadManager(context, db, cache, http, Executors.newFixedThreadPool(3)).apply {
+    ): DownloadManager {
+        val executor = Executors.newFixedThreadPool(3)
+        val downloaders = DownloaderFactory { request ->
+            // Each download owns its HTTP factory. Header changes cannot leak into simultaneous
+            // downloads, and persisted requests retain their source headers after a restart.
+            val http = DefaultHttpDataSource.Factory()
+                .setUserAgent("AniLocal")
+                .setAllowCrossProtocolRedirects(true)
+                .setDefaultRequestProperties(DownloadRequestMetadata.headers(request.data))
+            val dataSource = CacheDataSource.Factory().setCache(cache)
+                .setUpstreamDataSourceFactory(DefaultDataSource.Factory(context, http))
+            DefaultDownloaderFactory(dataSource, executor).createDownloader(request)
+        }
+        return DownloadManager(context, DefaultDownloadIndex(db), downloaders).apply {
             maxParallelDownloads = 2
         }
+    }
 
     @OptIn(UnstableApi::class)
     @Provides @Singleton

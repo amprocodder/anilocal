@@ -12,7 +12,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * A fully LAWFUL built-in source so the app plays video out of the box with no network,
+ * A fully LAWFUL built-in source so the app streams video out of the box,
  * no account, and no scraping. Streams a Creative-Commons "Big Buck Bunny" clip (Blender
  * Foundation, CC-BY). Demonstrates the player + skip button end to end.
  *
@@ -25,7 +25,7 @@ class SampleLocalSource @Inject constructor() : AnimeSource {
     override val info = SourceInfo(id = Sources.SAMPLE_ID, name = "Sample (CC clip)", isExternal = false)
 
     private val sampleMp4 =
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+        "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4"
     private val poster =
         "https://upload.wikimedia.org/wikipedia/commons/c/c5/Big_buck_bunny_poster_big.jpg"
 

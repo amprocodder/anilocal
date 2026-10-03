@@ -22,7 +22,7 @@ class SampleSintelSource @Inject constructor() : AnimeSource {
     override val info = SourceInfo(id = "sample-sintel", name = "Sample · Sintel (CC)", isExternal = false)
 
     private val sintelMp4 =
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
+        "https://media.w3.org/2010/05/sintel/trailer.mp4"
     private val poster =
         "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/Sintel.jpg"
 

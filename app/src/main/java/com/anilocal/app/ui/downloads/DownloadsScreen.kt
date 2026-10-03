@@ -38,6 +38,7 @@ import coil.compose.AsyncImage
 import com.anilocal.app.domain.model.DownloadItem
 import com.anilocal.app.domain.model.DownloadState
 import com.anilocal.app.domain.repo.DownloadRepository
+import com.anilocal.app.ui.common.loadOrNull
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -51,10 +52,20 @@ class DownloadsViewModel @Inject constructor(
 ) : ViewModel() {
     val items: StateFlow<List<DownloadItem>> =
         downloads.downloads.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val removing = mutableSetOf<String>()
 
     fun pause(id: String) = downloads.pause(id)
     fun resume(id: String) = downloads.resume(id)
-    fun remove(id: String) = viewModelScope.launch { downloads.remove(id) }
+    fun remove(id: String) {
+        if (!removing.add(id)) return
+        viewModelScope.launch {
+            try {
+                loadOrNull { downloads.remove(id) }
+            } finally {
+                removing.remove(id)
+            }
+        }
+    }
 }
 
 @Composable
@@ -76,8 +87,8 @@ fun DownloadsScreen(
         Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { Text("Downloads", style = MaterialTheme.typography.titleLarge) }
-        items(items, key = { it.id }) { d ->
+        item(key = "heading", contentType = "heading") { Text("Downloads", style = MaterialTheme.typography.titleLarge) }
+        items(items, key = { it.id }, contentType = { "download" }) { d ->
             DownloadRow(
                 item = d,
                 onClick = { if (d.state == DownloadState.COMPLETED) onPlay(d.animeId, d.episodeNumber) },

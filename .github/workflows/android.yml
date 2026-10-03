@@ -1,11 +1,12 @@
-name: Build debug APK
+name: Build and verify APKs
 
-# Builds an installable debug APK on every push and exposes it as a downloadable
-# artifact. Download it on the tablet's browser and sideload it — no on-device toolchain.
 on:
   push:
     branches: [ "**" ]
-  workflow_dispatch: {}        # lets you trigger a build manually from the Actions tab
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -27,12 +28,24 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Assemble debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Run JVM tests and lint
+        run: >-
+          gradle :domain:test :data:testDebugUnitTest :app:testDebugUnitTest
+          :data:lintDebug :app:lintDebug --no-daemon --stacktrace
 
-      - name: Upload APK
+      - name: Assemble development and optimized APKs
+        run: gradle :app:assembleDebug :app:assembleBenchmark --no-daemon --stacktrace
+
+      - name: Upload development APK
         uses: actions/upload-artifact@v4
         with:
           name: anilocal-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload optimized APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: anilocal-optimized-apk
+          path: app/build/outputs/apk/benchmark/*.apk
           if-no-files-found: error

@@ -1,5 +1,6 @@
 package com.anilocal.app.data.remote
 
+import com.anilocal.app.data.BuildConfig
 import com.anilocal.app.data.metadata.anilist.AniListApi
 import com.anilocal.app.data.metadata.mal.MalApi
 import com.anilocal.app.data.metadata.tmdb.TmdbApi
@@ -25,7 +26,11 @@ object NetworkModule {
 
     @Provides @Singleton
     fun okHttp(): OkHttpClient = OkHttpClient.Builder()
-        .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC })
+        .apply {
+            if (BuildConfig.DEBUG) addInterceptor(HttpLoggingInterceptor().apply {
+                level = HttpLoggingInterceptor.Level.BASIC
+            })
+        }
         .build()
 
     private fun retrofit(baseUrl: String, client: OkHttpClient, moshi: Moshi): Retrofit =

@@ -19,7 +19,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -29,31 +32,28 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.anilocal.app.domain.model.AnimeSummary
-import com.anilocal.app.domain.model.MalListEntry
 import com.anilocal.app.domain.model.MalStatus
 import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.LibraryRepository
 import com.anilocal.app.domain.repo.MalRepository
 import com.anilocal.app.ui.common.PosterCard
+import com.anilocal.app.ui.common.loadOrNull
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     library: LibraryRepository,
     downloads: DownloadRepository,
-    private val mal: MalRepository,
+    mal: MalRepository,
     private val catalog: CatalogRepository,
 ) : ViewModel() {
 
@@ -65,42 +65,35 @@ class LibraryViewModel @Inject constructor(
      * library with the entire MAL mirror — deduped by MAL id, with the local entry winning so it
      * opens directly. A status chip shows just that MAL category.
      */
-    val items: StateFlow<List<AnimeSummary>> =
-        filter.flatMapLatest { f ->
-            if (f == null) {
-                combine(library.library, mal.all()) { local, malAll ->
-                    val localMalIds = local.mapNotNull { it.idMal }.toSet()
-                    local + malAll.filter { it.malId !in localMalIds }.map { it.toSummary() }
-                }
-            } else {
-                mal.list(f).map { entries -> entries.map { it.toSummary() } }
-            }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val projection = libraryProjections(library.library, mal.all())
+
+    val items: StateFlow<List<AnimeSummary>> = combine(filter, projection) { status, projection ->
+        projection.items(status)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val downloadedIds: StateFlow<Set<String>> =
         downloads.downloadedAnimeIds().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     fun setFilter(status: MalStatus?) { filter.value = status }
 
-    suspend fun anilistIdForMal(malId: Int): String? = catalog.anilistIdForMal(malId)
-
-    private fun MalListEntry.toSummary() = AnimeSummary("mal-$malId", title, posterUrl, malId)
+    suspend fun anilistIdForMal(malId: Int): String? = loadOrNull { catalog.anilistIdForMal(malId) }
 }
 
 @Composable
 fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel()) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var openingJob by remember { mutableStateOf<Job?>(null) }
     val filter by vm.filter.collectAsStateWithLifecycle()
     val gridItems by vm.items.collectAsStateWithLifecycle()
     val downloadedIds by vm.downloadedIds.collectAsStateWithLifecycle()
 
     Column(Modifier.fillMaxSize().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
-            item {
+            item(key = "my-list", contentType = "filter") {
                 FilterChip(selected = filter == null, onClick = { vm.setFilter(null) }, label = { Text("My List") })
             }
-            items(MalStatus.entries, key = { it.name }) { s ->
+            items(MalStatus.entries, key = { it.name }, contentType = { "filter" }) { s ->
                 FilterChip(selected = filter == s, onClick = { vm.setFilter(s) }, label = { Text(s.label) })
             }
         }
@@ -114,14 +107,15 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
                     Hint("Nothing here yet — sync from Settings → MyAnimeList Sync.")
 
                 else -> Grid {
-                    items(gridItems, key = { it.id }) { summary ->
+                    items(gridItems, key = { it.id }, contentType = { "poster" }) { summary ->
                         PosterCard(
                             summary,
                             onClick = {
+                                openingJob?.cancel()
                                 val malId = summary.idMal
                                 if (summary.id.startsWith("mal-") && malId != null) {
                                     // MAL-only entry: resolve its AniList id before opening detail.
-                                    scope.launch {
+                                    openingJob = scope.launch {
                                         val id = vm.anilistIdForMal(malId)
                                         if (id != null) onOpen(id)
                                         else Toast.makeText(context, "\"${summary.title}\" not found on AniList", Toast.LENGTH_SHORT).show()

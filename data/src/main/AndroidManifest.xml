@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- :data declares no components or permissions of its own; the download service is
-     registered in :app's manifest (and runs in the app process). Namespace is set in
-     build.gradle.kts. -->
-<manifest />
+<!-- The app registers the service; this module declares the scheduler's permission
+     so its API contract is also checked when the library is linted independently. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+</manifest>

@@ -15,12 +15,10 @@ import com.anilocal.app.domain.model.SkipMarker
  */
 @Composable
 fun SkipButton(
-    positionMs: Long,
-    markers: List<SkipMarker>,
+    active: SkipMarker?,
     onSkip: (SkipMarker) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val active = markers.firstOrNull { positionMs in it.startMs until it.endMs }
     AnimatedVisibility(visible = active != null, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
         if (active != null) {
             Button(onClick = { onSkip(active) }) {

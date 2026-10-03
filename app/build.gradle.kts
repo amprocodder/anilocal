@@ -25,8 +25,14 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
         }
     }
     compileOptions {
@@ -77,4 +83,7 @@ dependencies {
 
     // Google Sign-In UI (the Firebase exchange lives in :data).
     implementation(libs.play.services.auth)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
 }

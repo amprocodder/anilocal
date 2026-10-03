@@ -1,6 +1,8 @@
 package com.anilocal.app.data.settings
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -12,6 +14,7 @@ import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.source.Sources
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -19,9 +22,11 @@ import javax.inject.Singleton
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
 @Singleton
-class DataStoreSettingsRepository @Inject constructor(
-    @ApplicationContext private val context: Context,
+class DataStoreSettingsRepository internal constructor(
+    private val store: DataStore<Preferences>,
 ) : SettingsRepository {
+
+    @Inject constructor(@ApplicationContext context: Context) : this(context.dataStore)
 
     private object Keys {
         val AUTO_SKIP = booleanPreferencesKey("auto_skip")
@@ -36,68 +41,87 @@ class DataStoreSettingsRepository @Inject constructor(
     }
 
     override val autoSkip: Flow<Boolean> =
-        context.dataStore.data.map { it[Keys.AUTO_SKIP] ?: true }
+        preference(Keys.AUTO_SKIP, true)
 
     override suspend fun setAutoSkip(enabled: Boolean) {
-        context.dataStore.edit { it[Keys.AUTO_SKIP] = enabled }
+        setPreference(Keys.AUTO_SKIP, enabled, true)
     }
 
     override val wifiOnlyDownloads: Flow<Boolean> =
-        context.dataStore.data.map { it[Keys.WIFI_ONLY] ?: true }
+        preference(Keys.WIFI_ONLY, true)
 
     override suspend fun setWifiOnlyDownloads(enabled: Boolean) {
-        context.dataStore.edit { it[Keys.WIFI_ONLY] = enabled }
+        setPreference(Keys.WIFI_ONLY, enabled, true)
     }
 
     override val downloadQuality: Flow<DownloadQuality> =
-        context.dataStore.data.map { prefs ->
-            runCatching { DownloadQuality.valueOf(prefs[Keys.DOWNLOAD_QUALITY] ?: DownloadQuality.AUTO.name) }
+        preference(Keys.DOWNLOAD_QUALITY, DownloadQuality.AUTO.name).map { name ->
+            runCatching { DownloadQuality.valueOf(name) }
                 .getOrDefault(DownloadQuality.AUTO)
-        }
+        }.distinctUntilChanged()
 
     override suspend fun setDownloadQuality(quality: DownloadQuality) {
-        context.dataStore.edit { it[Keys.DOWNLOAD_QUALITY] = quality.name }
+        setPreference(Keys.DOWNLOAD_QUALITY, quality.name, DownloadQuality.AUTO.name)
     }
 
     override val subtitleScale: Flow<Float> =
-        context.dataStore.data.map { it[Keys.SUBTITLE_SCALE] ?: 1.0f }
+        preference(Keys.SUBTITLE_SCALE, 1.0f)
 
     override suspend fun setSubtitleScale(scale: Float) {
-        context.dataStore.edit { it[Keys.SUBTITLE_SCALE] = scale }
+        setPreference(Keys.SUBTITLE_SCALE, scale, 1.0f)
     }
 
     override val subtitleBackground: Flow<Boolean> =
-        context.dataStore.data.map { it[Keys.SUBTITLE_BG] ?: true }
+        preference(Keys.SUBTITLE_BG, true)
 
     override suspend fun setSubtitleBackground(enabled: Boolean) {
-        context.dataStore.edit { it[Keys.SUBTITLE_BG] = enabled }
+        setPreference(Keys.SUBTITLE_BG, enabled, true)
     }
 
     override val selectedSourceId: Flow<String> =
-        context.dataStore.data.map { it[Keys.SELECTED_SOURCE] ?: Sources.SAMPLE_ID }
+        preference(Keys.SELECTED_SOURCE, Sources.SAMPLE_ID)
 
     override suspend fun setSelectedSourceId(id: String) {
-        context.dataStore.edit { it[Keys.SELECTED_SOURCE] = id }
+        setPreference(Keys.SELECTED_SOURCE, id, Sources.SAMPLE_ID)
     }
 
     override val malUsername: Flow<String> =
-        context.dataStore.data.map { it[Keys.MAL_USERNAME] ?: "" }
+        preference(Keys.MAL_USERNAME, "")
 
     override suspend fun setMalUsername(username: String) {
-        context.dataStore.edit { it[Keys.MAL_USERNAME] = username }
+        val normalized = username.trim()
+        store.edit { prefs ->
+            val previous = prefs[Keys.MAL_USERNAME] ?: ""
+            if (previous != normalized) {
+                prefs[Keys.MAL_USERNAME] = normalized
+                if (previous.trim() != normalized && (prefs[Keys.MAL_LAST_SYNCED] ?: 0L) != 0L) {
+                    prefs[Keys.MAL_LAST_SYNCED] = 0L
+                }
+            }
+        }
     }
 
     override val malSyncEnabled: Flow<Boolean> =
-        context.dataStore.data.map { it[Keys.MAL_SYNC] ?: false }
+        preference(Keys.MAL_SYNC, false)
 
     override suspend fun setMalSyncEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[Keys.MAL_SYNC] = enabled }
+        setPreference(Keys.MAL_SYNC, enabled, false)
     }
 
     override val malLastSynced: Flow<Long> =
-        context.dataStore.data.map { it[Keys.MAL_LAST_SYNCED] ?: 0L }
+        preference(Keys.MAL_LAST_SYNCED, 0L)
 
     override suspend fun setMalLastSynced(epochMs: Long) {
-        context.dataStore.edit { it[Keys.MAL_LAST_SYNCED] = epochMs }
+        setPreference(Keys.MAL_LAST_SYNCED, epochMs, 0L)
+    }
+
+    // An unrelated preference write must not restart consumers such as the download manager.
+    private fun <T> preference(key: Preferences.Key<T>, default: T): Flow<T> =
+        store.data.map { it[key] ?: default }.distinctUntilChanged()
+
+    private suspend fun <T> setPreference(key: Preferences.Key<T>, value: T, default: T) {
+        store.edit { prefs ->
+            if ((prefs[key] ?: default) != value) prefs[key] = value
+        }
     }
 }

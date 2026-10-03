@@ -13,6 +13,7 @@ android {
         minSdk = 24
         consumerProguardFiles("consumer-rules.pro")
     }
+    buildFeatures { buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -47,4 +48,7 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.coroutines.play.services)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
 }

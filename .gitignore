@@ -3,9 +3,11 @@ build/
 captures/
 .externalNativeBuild/
 .cxx/
+__pycache__/
 
 # Gradle
 .gradle/
+.kotlin/
 local.properties
 
 # IDE

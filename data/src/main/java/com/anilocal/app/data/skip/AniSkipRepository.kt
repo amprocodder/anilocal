@@ -1,16 +1,27 @@
 package com.anilocal.app.data.skip
 
+import com.anilocal.app.data.cache.SuspendingLruCache
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.repo.SkipRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class AniSkipRepository @Inject constructor(
+class AniSkipRepository internal constructor(
     private val api: AniSkipApi,
+    nowMillis: () -> Long,
+    dispatcher: CoroutineDispatcher,
 ) : SkipRepository {
+    @Inject constructor(api: AniSkipApi) : this(api, { System.nanoTime() / 1_000_000 }, Dispatchers.IO)
+
+    // Different source cuts can have different opening/ending times, so duration is part of the key.
+    private data class MarkerKey(val malId: Int, val episode: Int, val durationSec: Long)
+    private val cache = SuspendingLruCache<MarkerKey, List<SkipMarker>>(
+        maxEntries = 100, ttlMillis = 30 * 60 * 1000L, nowMillis = nowMillis, dispatcher = dispatcher,
+    )
 
     override suspend fun markers(
         idMal: Int?,
@@ -21,17 +32,22 @@ class AniSkipRepository @Inject constructor(
         // skip control is still exercised. Real titles get real AniSkip data (or none).
         if (idMal == null) return demo(episodeLengthSec)
 
-        return withContext(Dispatchers.IO) {
-            runCatching {
+        return try {
+            cache.getOrLoad(MarkerKey(idMal, episodeNumber, episodeLengthSec)) {
                 val resp = api.skipTimes(idMal, episodeNumber, listOf("op", "ed"), episodeLengthSec)
                 if (resp.found == true) resp.results.orEmpty().mapNotNull { it.toMarker() } else emptyList()
-            }.getOrDefault(emptyList())
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
     private fun AniSkipResult.toMarker(): SkipMarker? {
         val start = interval?.startTime ?: return null
         val end = interval.endTime ?: return null
+        if (!start.isFinite() || !end.isFinite() || start < 0 || end <= start) return null
         val type = when (skipType?.lowercase()) {
             "op", "mixed-op" -> SkipMarker.Type.INTRO
             "ed", "mixed-ed" -> SkipMarker.Type.OUTRO

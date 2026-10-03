@@ -23,46 +23,37 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.anilocal.app.domain.model.AniListGenres
-import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.BrowseSort
 import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.ui.common.PosterCard
+import com.anilocal.app.ui.common.CatalogFeedback
+import com.anilocal.app.ui.common.CatalogLoadState
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class ExploreViewModel @Inject constructor(
-    private val catalog: CatalogRepository,
+    catalog: CatalogRepository,
     downloads: DownloadRepository,
 ) : ViewModel() {
-    val query = MutableStateFlow("")
-    val genre = MutableStateFlow<String?>(null)
-    val sort = MutableStateFlow(BrowseSort.POPULAR)
-
-    private val _results = MutableStateFlow<List<AnimeSummary>>(emptyList())
-    val results: StateFlow<List<AnimeSummary>> = _results
+    private val browser = ExploreResults(viewModelScope, catalog)
+    val query = browser.query
+    val genre = browser.genre
+    val sort = browser.sort
+    val results = browser.results
+    val loadState = browser.loadState
 
     val downloadedIds: StateFlow<Set<String>> =
         downloads.downloadedAnimeIds().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
-    init { reload() }
-
-    fun onQuery(q: String) { query.value = q; reload() }
-    fun onGenre(g: String?) { genre.value = g; reload() }
-    fun onSort(s: BrowseSort) { sort.value = s; reload() }
-
-    private fun reload() = viewModelScope.launch {
-        _results.value = runCatching {
-            val q = query.value
-            if (q.isNotBlank()) catalog.search(q) else catalog.browse(genre.value, sort.value)
-        }.getOrDefault(emptyList())
-    }
+    fun onQuery(q: String) = browser.onQuery(q)
+    fun onGenre(g: String?) = browser.onGenre(g)
+    fun onSort(s: BrowseSort) = browser.onSort(s)
+    fun retry() = browser.retry()
 }
 
 @Composable
@@ -71,6 +62,7 @@ fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = hiltViewModel
     val genre by vm.genre.collectAsStateWithLifecycle()
     val sort by vm.sort.collectAsStateWithLifecycle()
     val results by vm.results.collectAsStateWithLifecycle()
+    val loadState by vm.loadState.collectAsStateWithLifecycle()
     val downloadedIds by vm.downloadedIds.collectAsStateWithLifecycle()
 
     Column(Modifier.fillMaxSize().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -78,25 +70,28 @@ fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = hiltViewModel
             value = query,
             onValueChange = vm::onQuery,
             label = { Text("Search") },
+            singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         )
 
         // Sort chips
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
-            items(BrowseSort.entries, key = { it.name }) { s ->
+            items(BrowseSort.entries, key = { it.name }, contentType = { "filter" }) { s ->
                 FilterChip(selected = sort == s, onClick = { vm.onSort(s) }, label = { Text(s.label) })
             }
         }
 
         // Genre chips
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
-            item {
+            item(key = "all", contentType = "filter") {
                 FilterChip(selected = genre == null, onClick = { vm.onGenre(null) }, label = { Text("All") })
             }
-            items(AniListGenres, key = { it }) { g ->
+            items(AniListGenres, key = { it }, contentType = { "filter" }) { g ->
                 FilterChip(selected = genre == g, onClick = { vm.onGenre(if (genre == g) null else g) }, label = { Text(g) })
             }
         }
+
+        if (loadState != CatalogLoadState.Ready) CatalogFeedback(loadState, vm::retry)
 
         LazyVerticalGrid(
             columns = GridCells.Adaptive(120.dp),
@@ -105,7 +100,7 @@ fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = hiltViewModel
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(results, key = { it.id }) {
+            items(results, key = { it.id }, contentType = { "poster" }) {
                 PosterCard(it, onClick = { onOpen(it.id) }, downloaded = it.id in downloadedIds)
             }
         }

@@ -4,12 +4,33 @@ import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.BrowseSort
 import com.anilocal.app.domain.model.ContinueWatching
+import com.anilocal.app.domain.model.HomeCatalog
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.VideoStream
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 
 /** Catalog/browse/detail — backed by AniList (public metadata), not the stream source. */
 interface CatalogRepository {
+    /** Implementations can batch all shelves into one request. Failed shelves stay empty. */
+    suspend fun home(): HomeCatalog = supervisorScope {
+        suspend fun shelf(load: suspend () -> List<AnimeSummary>) = try {
+            load()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val trending = async { shelf { trending() } }
+        val seasonal = async { shelf { popularThisSeason() } }
+        val airing = async { shelf { topAiring() } }
+        val popular = async { shelf { allTimePopular() } }
+        val upcoming = async { shelf { upcoming() } }
+        HomeCatalog(trending.await(), seasonal.await(), airing.await(), popular.await(), upcoming.await())
+    }
+
     suspend fun popular(page: Int = 1): List<AnimeSummary>
     suspend fun search(query: String): List<AnimeSummary>
     suspend fun detail(animeId: String): AnimeDetail
@@ -28,13 +49,23 @@ interface CatalogRepository {
     suspend fun anilistIdForMal(malId: Int): String?
 }
 
-/** Resolves a playable stream for a title+episode via the active AnimeSource plugin. */
+/** Resolves playable streams for a title+episode via registered AnimeSource plugins. */
 interface StreamRepository {
-    /** Best single stream (highest quality) — used for online playback. */
+    /** Highest-quality stream from the selected source, without a speed test. */
     suspend fun resolveStream(animeTitle: String, episodeNumber: Int): VideoStream
 
     /** All available quality variants (highest first) — used by the download quality picker. */
     suspend fun resolveStreams(animeTitle: String, episodeNumber: Int): List<VideoStream>
+
+    /**
+     * Resolve fresh URLs from all available sources/servers and measure media download speed.
+     * A healthy alternative to [failedStreamUrl] is preferred when recovering playback.
+     */
+    suspend fun resolveFastestStream(
+        animeTitle: String,
+        episodeNumber: Int,
+        failedStreamUrl: String? = null,
+    ): VideoStream
 }
 
 /** Opening/ending skip windows — AniSkip-backed. */

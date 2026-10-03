@@ -29,6 +29,12 @@ data class DownloadEntity(
     val createdAt: Long,
 )
 
+/** A projection for the progress writer; this does not add a database table. */
+data class DownloadStateUpdate(val id: String, val state: Int, val progress: Int)
+
+/** Only completed rows participate in missing-native-download reconciliation. */
+data class CompletedDownloadRow(val id: String, val createdAt: Long)
+
 @Entity(tableName = "mal_list")
 data class MalEntryEntity(
     @PrimaryKey val malId: Int,
@@ -51,3 +57,8 @@ data class WatchProgressEntity(
     val durationMs: Long,
     val updatedAt: Long,
 )
+
+internal fun WatchProgressEntity.sameProgressAs(other: WatchProgressEntity): Boolean =
+    animeId == other.animeId && title == other.title && posterUrl == other.posterUrl &&
+        idMal == other.idMal && episodeNumber == other.episodeNumber &&
+        positionMs == other.positionMs && durationMs == other.durationMs

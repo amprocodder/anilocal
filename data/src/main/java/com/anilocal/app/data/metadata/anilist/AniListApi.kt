@@ -7,7 +7,7 @@ import retrofit2.http.Headers
 import retrofit2.http.POST
 
 /**
- * AniList public GraphQL endpoint. We POST a raw JSON body (built safely with JSONObject)
+ * AniList public GraphQL endpoint. We POST a raw JSON body (built safely with Moshi)
  * and parse a typed response with Moshi. No API key required. Could be upgraded to Apollo
  * codegen later; raw POST keeps the dependency surface minimal.
  */
@@ -17,11 +17,18 @@ interface AniListApi {
     suspend fun query(@Body body: RequestBody): GraphResponse
 }
 
-data class GraphResponse(val data: AniListData?)
+data class GraphResponse(val data: AniListData?, val errors: List<GraphError>? = null)
+
+data class GraphError(val message: String?)
 
 data class AniListData(
-    @Json(name = "Page") val page: PageDto?,
-    @Json(name = "Media") val media: MediaDto?,
+    @Json(name = "Page") val page: PageDto? = null,
+    @Json(name = "Media") val media: MediaDto? = null,
+    val trending: PageDto? = null,
+    val popularThisSeason: PageDto? = null,
+    val topAiring: PageDto? = null,
+    val allTimePopular: PageDto? = null,
+    val upcoming: PageDto? = null,
 )
 
 data class PageDto(val media: List<MediaDto>?)

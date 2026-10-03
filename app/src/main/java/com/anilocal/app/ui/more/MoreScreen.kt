@@ -6,13 +6,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -29,7 +29,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,24 +48,16 @@ import com.google.android.gms.common.api.ApiException
 @Composable
 fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
     val context = LocalContext.current
-    val user by vm.user.collectAsStateWithLifecycle()
-    val autoSkip by vm.autoSkip.collectAsStateWithLifecycle()
-    val wifiOnly by vm.wifiOnly.collectAsStateWithLifecycle()
-    val downloadQuality by vm.downloadQuality.collectAsStateWithLifecycle()
-    val subtitleScale by vm.subtitleScale.collectAsStateWithLifecycle()
-    val subtitleBackground by vm.subtitleBackground.collectAsStateWithLifecycle()
-
     val webClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
-    val signInClient = remember(webClientId) {
+    val signInClient = remember(webClientId, context) {
         if (webClientId.isBlank()) null else {
-            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
                 .requestIdToken(webClientId)
                 .requestEmail()
                 .build()
-            GoogleSignIn.getClient(context, gso)
+            GoogleSignIn.getClient(context, options)
         }
     }
-
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         runCatching {
             val account = GoogleSignIn.getSignedInAccountFromIntent(result.data)
@@ -74,158 +68,160 @@ fun MoreScreen(vm: MoreViewModel = hiltViewModel()) {
         }
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+    // Offscreen sections stop composing/collecting; typing and dragging invalidate one section.
+    LazyColumn(
+        Modifier.fillMaxSize().imePadding(),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("More", style = MaterialTheme.typography.titleLarge)
+        item(key = "heading", contentType = "heading") {
+            Text("More", style = MaterialTheme.typography.titleLarge)
+        }
+        item(key = "skip", contentType = "switch") {
+            val enabled by vm.autoSkip.collectAsStateWithLifecycle()
+            SettingSwitch("Auto-skip intro/outro", "Skip automatically when a marker is reached", enabled, vm::setAutoSkip)
+        }
+        item(key = "wifi", contentType = "switch") {
+            val enabled by vm.wifiOnly.collectAsStateWithLifecycle()
+            SettingSwitch("Download over WiFi only", "Pause downloads on mobile data; resume on WiFi", enabled, vm::setWifiOnly)
+        }
+        item(key = "quality", contentType = "section") { DownloadQualitySettings(vm) }
+        item(key = "subtitles", contentType = "section") { SubtitleSettings(vm) }
+        item(key = "mal", contentType = "section") { MalSyncSettings(vm) }
+        item(key = "account", contentType = "section") {
+            AccountSettings(vm) {
+                val client = signInClient
+                if (client == null) {
+                    Toast.makeText(context, "Add your Firebase project (GOOGLE_WEB_CLIENT_ID) to enable sign-in.", Toast.LENGTH_LONG).show()
+                } else {
+                    launcher.launch(client.signInIntent)
+                }
+            }
+        }
+        item(key = "sources", contentType = "section") { StreamingSourceSettings(vm) }
+    }
+}
 
+@Composable
+private fun SettingSwitch(title: String, description: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Auto-skip intro/outro", style = MaterialTheme.typography.bodyLarge)
-                Text("Skip automatically when a marker is reached",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                description?.let { Hint(it) }
             }
-            Switch(checked = autoSkip, onCheckedChange = vm::setAutoSkip)
+            Switch(checked = checked, onCheckedChange = onChange)
         }
         HorizontalDivider()
+    }
+}
 
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Download over WiFi only", style = MaterialTheme.typography.bodyLarge)
-                Text("Pause downloads on mobile data; resume on WiFi",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Switch(checked = wifiOnly, onCheckedChange = vm::setWifiOnly)
-        }
-        HorizontalDivider()
-
+@Composable
+private fun DownloadQualitySettings(vm: MoreViewModel) {
+    val quality by vm.downloadQuality.collectAsStateWithLifecycle()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Default download quality", style = MaterialTheme.typography.bodyLarge)
-        DownloadQuality.entries.forEach { q ->
-            Row(
-                Modifier.fillMaxWidth().clickable { vm.setDownloadQuality(q) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                RadioButton(selected = downloadQuality == q, onClick = { vm.setDownloadQuality(q) })
-                Text(q.label, modifier = Modifier.padding(start = 8.dp))
+        DownloadQuality.entries.forEach { option ->
+            Row(Modifier.fillMaxWidth().clickable { vm.setDownloadQuality(option) }, verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(selected = quality == option, onClick = { vm.setDownloadQuality(option) })
+                Text(option.label, modifier = Modifier.padding(start = 8.dp))
             }
         }
         HorizontalDivider()
+    }
+}
 
+@Composable
+private fun SubtitleSettings(vm: MoreViewModel) {
+    val savedScale by vm.subtitleScale.collectAsStateWithLifecycle()
+    val background by vm.subtitleBackground.collectAsStateWithLifecycle()
+    var sliderScale by rememberSaveable(savedScale) { mutableFloatStateOf(savedScale) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Subtitles", style = MaterialTheme.typography.titleMedium)
-        Text("Text size: ${(subtitleScale * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
-        var sliderScale by remember(subtitleScale) { mutableStateOf(subtitleScale) }
+        Text("Text size: ${(sliderScale * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
         Slider(
             value = sliderScale,
             onValueChange = { sliderScale = it },
             onValueChangeFinished = { vm.setSubtitleScale(sliderScale) },
             valueRange = 0.6f..2.0f,
         )
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Subtitle background", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-            Switch(checked = subtitleBackground, onCheckedChange = vm::setSubtitleBackground)
-        }
-        HorizontalDivider()
+        SettingSwitch("Subtitle background", null, background, vm::setSubtitleBackground)
+    }
+}
 
-        // MyAnimeList Sync — expandable subsection.
-        var malExpanded by remember { mutableStateOf(false) }
-        val malUsername by vm.malUsername.collectAsStateWithLifecycle()
-        val malSyncEnabled by vm.malSyncEnabled.collectAsStateWithLifecycle()
-        val syncStatus by vm.syncStatus.collectAsStateWithLifecycle()
-        Row(
-            Modifier.fillMaxWidth().clickable { malExpanded = !malExpanded },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+@Composable
+private fun MalSyncSettings(vm: MoreViewModel) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) {
             Text("MyAnimeList Sync", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            Icon(if (malExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, "Toggle")
+            Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, "Toggle")
         }
-        if (malExpanded) {
-            var usernameField by remember(malUsername) { mutableStateOf(malUsername) }
+        if (expanded) {
+            val username by vm.malUsername.collectAsStateWithLifecycle()
+            val enabled by vm.malSyncEnabled.collectAsStateWithLifecycle()
+            val status by vm.syncStatus.collectAsStateWithLifecycle()
+            val syncing by vm.syncing.collectAsStateWithLifecycle()
+            var field by rememberSaveable(username) { mutableStateOf(username) }
             OutlinedTextField(
-                value = usernameField,
-                onValueChange = { usernameField = it },
+                value = field,
+                onValueChange = { field = it },
                 label = { Text("MAL username") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Active sync (on app open)", style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f))
-                Switch(checked = malSyncEnabled, onCheckedChange = vm::setMalSyncEnabled)
+                Text("Active sync (on app open)", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                Switch(checked = enabled, onCheckedChange = vm::setMalSyncEnabled)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
-                    vm.setMalUsername(usernameField.trim())
-                }) { Text("Save") }
-                OutlinedButton(onClick = {
-                    vm.setMalUsername(usernameField.trim()); vm.syncMalNow()
-                }) { Text("Sync now") }
+                Button(onClick = { vm.setMalUsername(field) }, enabled = !syncing) { Text("Save") }
+                OutlinedButton(onClick = { vm.syncMalNow(field) }, enabled = !syncing) { Text("Sync now") }
             }
-            syncStatus?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Text("Enter your MAL username to mirror your PUBLIC list (read-only) — no API key " +
-                "needed. Make sure your list privacy is Public on MAL, then filter it on the Library tab.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            status?.let { Hint(it) }
+            Hint("Enter your MAL username to mirror your PUBLIC list (read-only) — no API key needed. Make sure your list privacy is Public on MAL, then filter it on the Library tab.")
         }
         HorizontalDivider()
+    }
+}
 
+@Composable
+private fun AccountSettings(vm: MoreViewModel, onSignIn: () -> Unit) {
+    val user by vm.user.collectAsStateWithLifecycle()
+    val signingIn by vm.signingIn.collectAsStateWithLifecycle()
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Account", style = MaterialTheme.typography.titleMedium)
         if (user != null) {
-            Text(user?.displayName ?: user?.email ?: "Signed in",
-                style = MaterialTheme.typography.bodyLarge)
+            Text(user?.displayName ?: user?.email ?: "Signed in", style = MaterialTheme.typography.bodyLarge)
             OutlinedButton(onClick = vm::signOut) { Text("Sign out") }
         } else {
-            Button(onClick = {
-                val client = signInClient
-                if (client == null) {
-                    Toast.makeText(
-                        context,
-                        "Add your Firebase project (GOOGLE_WEB_CLIENT_ID) to enable sign-in.",
-                        Toast.LENGTH_LONG,
-                    ).show()
-                } else {
-                    launcher.launch(client.signInIntent)
-                }
-            }) { Text("Sign in with Google") }
-            Text("Sign-in uses YOUR Firebase project, so it actually works (unlike a re-signed mod).",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(onClick = onSignIn, enabled = !signingIn) { Text("Sign in with Google") }
+            Hint("Sign-in uses your Firebase project.")
         }
         HorizontalDivider()
+    }
+}
 
-        val sources by vm.sources.collectAsStateWithLifecycle()
-        val selectedSourceId by vm.selectedSourceId.collectAsStateWithLifecycle()
-        Text("Streaming source", style = MaterialTheme.typography.titleMedium)
-        Text("Where video is resolved from. Browsing and metadata always come from AniList.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        sources.forEach { src ->
-            Row(
-                Modifier.fillMaxWidth().clickable { vm.setSelectedSource(src.id) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                RadioButton(
-                    selected = selectedSourceId == src.id,
-                    onClick = { vm.setSelectedSource(src.id) },
-                )
+@Composable
+private fun StreamingSourceSettings(vm: MoreViewModel) {
+    val sources by vm.sources.collectAsStateWithLifecycle()
+    val selected by vm.selectedSourceId.collectAsStateWithLifecycle()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Preferred streaming source", style = MaterialTheme.typography.titleMedium)
+        Hint("Playback chooses the fastest available connection. Downloads use your selected source.")
+        sources.forEach { source ->
+            Row(Modifier.fillMaxWidth().clickable { vm.setSelectedSource(source.id) }, verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(selected = selected == source.id, onClick = { vm.setSelectedSource(source.id) })
                 Column(Modifier.padding(start = 8.dp)) {
-                    Text(src.name, style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        if (src.isExternal) "Extension · ${src.lang}" else "Built-in",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Text(source.name, style = MaterialTheme.typography.bodyLarge)
+                    Hint(if (source.isExternal) "Extension · ${source.lang}" else "Built-in")
                 }
             }
         }
     }
+}
+
+@Composable
+private fun Hint(text: String) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
