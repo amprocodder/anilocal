@@ -11,6 +11,7 @@ import com.anilocal.app.domain.source.SourceRegistry
 import com.anilocal.app.extensions.loader.AnimeExtensionLoader
 import com.squareup.moshi.Types
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -42,11 +43,15 @@ class ExtensionRepositoryImpl @Inject constructor(
         settings.extensionRepoBaseUrls.first()
             .flatMap { base ->
                 val root = base.trimEnd('/')
-                runCatching {
+                try {
                     cache.cached("extrepo:$root", ENTRIES, REPO_TTL_MS, preferStaleOverEmpty = true) {
                         api.index("$root/index.min.json").map { it.toEntry(root) }
                     }
-                }.getOrDefault(emptyList())
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    emptyList()
+                }
             }
             .distinctBy { it.pkg }
             .sortedBy { it.name.lowercase() }
@@ -170,7 +175,9 @@ class ExtensionRepositoryImpl @Inject constructor(
 
     override suspend fun installRecommended(target: Int): Int = withContext(Dispatchers.IO) {
         val evicted = settings.evictedSources.first()
-        val index = runCatching { available() }.getOrDefault(emptyList())
+        // [available] already isolates ordinary repo failures. Preserve cancellation so leaving
+        // the settings screen cannot continue provisioning in the background.
+        val index = available()
         val installedNow = installedPackages()
         // Ranked recommended entries present in the repos, minus any we auto-evicted as dead (so
         // provisioning doesn't just keep re-installing a source eviction already judged a loser).
@@ -184,7 +191,14 @@ class ExtensionRepositoryImpl @Inject constructor(
             if (alreadySeeded + installed >= target) break
             if (entry.pkg in installedNow) continue
             // requireVerified: auto-install must never run code from a repo without a signing fingerprint.
-            if (runCatching { privateInstall(entry, requireVerified = true) }.getOrDefault(false)) {
+            val installedEntry = try {
+                privateInstall(entry, requireVerified = true)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
+            if (installedEntry) {
                 installed++
                 autoSet += entry.pkg   // mark as app-installed → eligible for later auto-eviction
                 Log.i(TAG, "installRecommended: added ${entry.pkg}")
@@ -202,7 +216,13 @@ class ExtensionRepositoryImpl @Inject constructor(
         val extensionPkgs = sources.mapNotNull { it.info.pkg }.toSet()
         if (extensionPkgs.size <= MIN_KEPT_PACKAGES) return@withContext 0   // keep a floor to race against
 
-        val pinned = runCatching { selector.pinnedSourceIds() }.getOrDefault(emptySet())
+        val pinned = try {
+            selector.pinnedSourceIds()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptySet()
+        }
         val byPkg = sources.filter { it.info.pkg != null }.groupBy { it.info.pkg!! }
 
         // Candidate losers: app-installed packages, currently loaded, NOT pinned as any title's best,
@@ -253,7 +273,7 @@ class ExtensionRepositoryImpl @Inject constructor(
     }
 
     override suspend fun recommendedNotInstalled(): List<ExtensionEntry> = withContext(Dispatchers.IO) {
-        val index = runCatching { available() }.getOrDefault(emptyList())
+        val index = available()
         val installedNow = installedPackages()
         RecommendedSources.RANKED
             .mapNotNull { pkg -> index.firstOrNull { it.pkg == pkg } }
@@ -269,12 +289,19 @@ class ExtensionRepositoryImpl @Inject constructor(
             ?: emptySet()
 
     /** The repo's published signing-cert SHA-256, or null if the repo has no `repo.json`/fingerprint. */
-    private suspend fun repoFingerprint(entry: ExtensionEntry): String? = runCatching {
+    private suspend fun repoFingerprint(entry: ExtensionEntry): String? {
         val root = entry.repoRoot.ifBlank { entry.apkUrl.substringBefore("/apk/") }.trimEnd('/')
         if (root.isBlank()) return null
-        cache.cached("extmeta:$root", META_TYPE, REPO_TTL_MS) { api.repoMeta("$root/repo.json") }
-            .meta?.signingKeyFingerprint?.lowercase()?.replace(":", "")?.trim()?.takeIf { it.isNotBlank() }
-    }.getOrNull()
+        return try {
+            cache.cached("extmeta:$root", META_TYPE, REPO_TTL_MS) { api.repoMeta("$root/repo.json") }
+                .meta?.signingKeyFingerprint?.lowercase()?.replace(":", "")?.trim()
+                ?.takeIf { it.isNotBlank() }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     /** Stream [url] to [dest] via a temp file, renaming only on success so an interrupted transfer
      *  never leaves a truncated APK behind. */
