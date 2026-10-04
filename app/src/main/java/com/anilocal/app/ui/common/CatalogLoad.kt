@@ -36,7 +36,14 @@ internal class CatalogLoad<T>(
     init { refresh() }
 
     fun refresh() {
-        if (!scope.isActive || active?.isActive == true) return
+        if (!scope.isActive) return
+        if (active?.isActive == true) {
+            // A failed load may be sleeping before its automatic retry. A user retry should
+            // interrupt that wait and run now; duplicate taps during an active request still
+            // share the one in-flight operation.
+            if (_state.value != CatalogLoadState.Failed) return
+            active?.cancel()
+        }
         _state.value = CatalogLoadState.Loading
         active = scope.launch {
             var attempt = 0
@@ -48,15 +55,19 @@ internal class CatalogLoad<T>(
                         return@launch
                     },
                     {
+                        // Expose the failure while the automatic retry is waiting. This keeps
+                        // the retry affordance usable: a tap cancels the pending delay and starts
+                        // the request immediately instead of being ignored as "already loading".
+                        _state.value = CatalogLoadState.Failed
                         if (attempt >= autoRetryAttempts.coerceAtLeast(0)) {
-                            _state.value = CatalogLoadState.Failed
                             return@launch
                         }
                         attempt++
-                        // Keep stale content and the Loading state visible while a transient
-                        // connection failure is retried. Cancellation from a leaving screen
-                        // propagates through delay and aborts the retry loop.
+                        // Keep stale content visible while a transient connection failure is
+                        // retried. Cancellation from a leaving screen propagates through delay
+                        // and aborts the retry loop.
                         delay(retryDelayMs.coerceAtLeast(0L) * attempt)
+                        _state.value = CatalogLoadState.Loading
                     },
                 )
             }

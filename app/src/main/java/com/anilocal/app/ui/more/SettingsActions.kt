@@ -7,7 +7,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,7 +45,14 @@ internal class ConflatedSetting<T>(scope: CoroutineScope, persist: suspend (T) -
                     } catch (_: Exception) {
                         currentCoroutineContext().ensureActive()
                         attempt++
-                        if (attempt < MAX_WRITE_ATTEMPTS) delay(WRITE_RETRY_DELAY_MS * attempt)
+                        if (attempt < MAX_WRITE_ATTEMPTS) {
+                            // Prefer a newer user value immediately when one arrives, while
+                            // still retrying the failed value automatically after a short delay
+                            // if the channel stays quiet.
+                            withTimeoutOrNull(WRITE_RETRY_DELAY_MS) {
+                                updates.receiveCatching().getOrNull()
+                            }?.let { latest = it }
+                        }
                     }
                 }
             }
