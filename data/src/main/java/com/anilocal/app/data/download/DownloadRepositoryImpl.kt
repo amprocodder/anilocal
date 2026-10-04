@@ -301,9 +301,19 @@ class DownloadRepositoryImpl @Inject constructor(
     }
 
     override fun pause(id: String) {
-        DownloadService.sendSetStopReason(
-            context, AniLocalDownloadService::class.java, id, STOP_REASON_PAUSED, /* foreground= */ false,
-        )
+        try {
+            DownloadService.sendSetStopReason(
+                context, AniLocalDownloadService::class.java, id, STOP_REASON_PAUSED, /* foreground= */ true,
+            )
+        } catch (_: Exception) {
+            // A background service start can be rejected on newer Android releases. The shared
+            // manager is already initialized for active downloads, so apply the same pause
+            // directly instead of leaving the row apparently downloading after a tap.
+            mainScope.launch {
+                nativeReady.await()
+                downloadManager.setStopReason(id, STOP_REASON_PAUSED)
+            }
+        }
     }
 
     override suspend fun retry(id: String): Boolean {
