@@ -604,6 +604,13 @@ class PlayerViewModel @Inject constructor(
         if (autoPlayNextEnabled && hasEpisode(next)) {
             playEpisode(next)
         } else {
+            // Media3 keeps playWhenReady=true after reaching END, which would leave the custom
+            // control showing Pause even though this episode has no next item. Make the ended
+            // state explicit; togglePlay() below can still replay it from the beginning.
+            session.playWhenReady = false
+            _playWhenReady.value = false
+            _isPlaying.value = false
+            currentPlayer.playWhenReady = false
             summary?.let { progress.remove(it.id) }
         }
     }
@@ -745,6 +752,11 @@ class PlayerViewModel @Inject constructor(
     // ---- Overlay control surface --------------------------------------------------------------
 
     fun togglePlay() {
+        if (!session.playWhenReady && currentPlayer.playbackState == Player.STATE_ENDED) {
+            session.seek(0L)
+            currentPlayer.seekTo(0L)
+            _position.value = 0L
+        }
         session.playWhenReady = !session.playWhenReady
         _playWhenReady.value = session.playWhenReady
         currentPlayer.playWhenReady = session.playWhenReady
