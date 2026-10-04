@@ -89,8 +89,11 @@ class SourcePreferencesViewModel @Inject constructor(
     }
 
     private suspend fun readPreferences(): Boolean {
-        val result = source?.let { retrySource { it.preferences() } }
-            ?: return false
+        val activeSource = source ?: run {
+            _status.value = "This source is no longer installed."
+            return false
+        }
+        val result = retrySource { activeSource.preferences() }
         return result.fold(
             onSuccess = { preferences ->
                 _prefs.value = preferences.distinctBy(SourcePreference::key)
