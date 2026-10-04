@@ -185,6 +185,10 @@ class PlayerViewModel @Inject constructor(
     private var detail: AnimeDetail? = null
     private var summary: AnimeSummary? = null
     private var idMal: Int? = null
+    // Keep metadata from an offline row so a damaged cache entry can fall back to live source
+    // discovery even while AniList is unavailable. The failed local media is never retried.
+    private var offlineEpisode: OfflineEpisode? = null
+    private var offlineRecoveryActive = false
     // Remember the failed URI so a fresh source test can prefer a healthy alternative.
     private var currentUri: String? = null
     private var autoSkipEnabled = true
@@ -291,6 +295,9 @@ class PlayerViewModel @Inject constructor(
             override fun onPlaybackStateChanged(state: Int) {
                 if (!active()) return
                 if (state == Player.STATE_READY) {
+                    // A replacement reached READY, so a previously failed offline file is no
+                    // longer the active media. Future episode switches may use their own downloads.
+                    offlineRecoveryActive = false
                     session.ready(replacement.currentPosition, replacement.duration)
                     _error.value = null
                     recovery.onPlayerReady()
@@ -341,7 +348,15 @@ class PlayerViewModel @Inject constructor(
         prefetched?.second?.cancel()
         prefetched = null
         markersJob?.cancel()
-        if (!_offline.value) {
+        if (_offline.value || offlineRecoveryActive) {
+            // A completed Room row may still point to a truncated/corrupt cache entry. Leave the
+            // row intact for Downloads, but switch this player to fresh online source discovery.
+            offlineRecoveryActive = true
+            _offline.value = false
+            _markers.value = emptyList()
+            markersFetched = false
+            firstReadyAtMs = 0L
+        } else {
             _markers.value = emptyList()
             markersFetched = false
             firstReadyAtMs = 0L
@@ -374,9 +389,11 @@ class PlayerViewModel @Inject constructor(
         val episode = episodeNumber
         loading = true
         try {
-            val cached = optional { downloads.getOffline(animeId, episode) }
+            // Once local media has failed, every retry must reach recoverStream. Selecting the
+            // same completed row again would loop forever on a corrupt/truncated cache file.
+            val cached = if (recovering && offlineRecoveryActive) null
+            else optional { downloads.getOffline(animeId, episode) }
             checkSession(generation)
-            check(cached != null || !recovering || !_offline.value) { "Downloaded episode is no longer available" }
             if (cached != null) {
                 _offline.value = true
                 playOffline(cached, generation)
@@ -412,7 +429,36 @@ class PlayerViewModel @Inject constructor(
     // Resolve the title's AniList detail at most once; populate idMal/totalEpisodes/summary/title.
     private suspend fun ensureTitle(): AnimeDetail? {
         detail?.let { return it }
-        val d = optional { catalog.detail(animeId) } ?: return null
+        val d = optional { catalog.detail(animeId) }
+        if (d == null) {
+            // Offline launches can have no AniList connection. Preserve the downloaded title and
+            // episode metadata long enough for FreshStreamRecovery to search live sources by
+            // title; it performs the exact episode match independently.
+            val cached = offlineEpisode ?: return null
+            val episodes = _episodes.value.ifEmpty {
+                listOf(
+                    Episode(
+                        id = "offline-${cached.episodeNumber}",
+                        number = cached.episodeNumber,
+                        title = "Episode ${cached.episodeNumber}",
+                    ),
+                )
+            }
+            return AnimeDetail(
+                id = animeId,
+                title = cached.title,
+                posterUrl = cached.posterUrl,
+                idMal = cached.idMal,
+                episodes = episodes,
+            ).also { fallback ->
+                idMal = fallback.idMal
+                totalEpisodes = episodes.maxOfOrNull { it.number }
+                summary = AnimeSummary(animeId, fallback.title, fallback.posterUrl, fallback.idMal)
+                _title.value = fallback.title
+                _episodes.value = episodes
+                updateNavState()
+            }
+        }
         coroutineContext.ensureActive()
         if (cleared) throw CancellationException("Player closed")
         detail = d
@@ -426,6 +472,8 @@ class PlayerViewModel @Inject constructor(
     }
 
     private suspend fun playOffline(ep: OfflineEpisode, generation: Int) {
+        offlineEpisode = ep
+        offlineRecoveryActive = false
         idMal = ep.idMal
         summary = AnimeSummary(animeId, ep.title, ep.posterUrl, ep.idMal)
         _title.value = ep.title
@@ -590,6 +638,8 @@ class PlayerViewModel @Inject constructor(
         _duration.value = 0L
         _error.value = null
         _offline.value = false
+        offlineEpisode = null
+        offlineRecoveryActive = false
         currentUri = null
         updateNavState()
         // Keep the captured episode number even if teardown occurs while Room saves this snapshot.
