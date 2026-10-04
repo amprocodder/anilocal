@@ -109,7 +109,14 @@ class MoreViewModel @Inject constructor(
                     if (isNotEmpty()) append(" · ")
                     append("removed $removed dead")
                 }
-            }.ifBlank { null }
+            }.ifBlank {
+                "No verified recommended sources available yet. Tap Install recommended to retry."
+            }
+        } catch (_: Exception) {
+            // Provisioning is best-effort: a dead repo, unavailable network, or failed signature
+            // check must leave Auto usable and give the user a safe retry affordance instead of an
+            // unhandled coroutine exception or a silent empty source list.
+            _provisionStatus.value = "Couldn't update sources. Tap Install recommended to retry."
         } finally {
             _provisioning.value = false
         }
