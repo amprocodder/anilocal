@@ -225,8 +225,12 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             recovery.state.collect { state ->
                 when (state) {
-                    is PlaybackRecoveryState.Restarting -> _error.value = "Reconnecting… checking sources (${state.attempt}/3)"
-                    PlaybackRecoveryState.Failed -> _error.value = "Playback couldn't reconnect. Try again."
+                    is PlaybackRecoveryState.Restarting -> _error.value = if (state.automatic) {
+                        "Reconnecting… checking sources automatically"
+                    } else {
+                        "Reconnecting… checking sources (${state.attempt}/3)"
+                    }
+                    PlaybackRecoveryState.Failed -> _error.value = "Playback couldn't reconnect. Retrying automatically…"
                     PlaybackRecoveryState.Idle -> Unit
                 }
             }

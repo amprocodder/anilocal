@@ -17,7 +17,14 @@ internal data class PlaybackRestart(
 
 sealed interface PlaybackRecoveryState {
     data object Idle : PlaybackRecoveryState
-    data class Restarting(val attempt: Int) : PlaybackRecoveryState
+    /**
+     * A source replacement is being prepared. [automatic] is true for a retry made by the
+     * background watchdog after the initial bounded retry budget was exhausted.
+     *
+     * The default keeps the state source-compatible with callers that only care about the
+     * attempt number (and with the first three foreground retries).
+     */
+    data class Restarting(val attempt: Int, val automatic: Boolean = false) : PlaybackRecoveryState
     data object Failed : PlaybackRecoveryState
 }
 
@@ -26,10 +33,21 @@ internal class PlaybackRecovery(
     private val scope: CoroutineScope,
     private val restart: suspend (PlaybackRestart) -> Unit,
 ) {
+    private var backgroundRetryDelayMs: Long = BACKGROUND_RETRY_DELAY_MS
+    /** Constructor used by local tests to shorten the watchdog interval without changing the
+     * production call shape (which intentionally ends in a trailing restart lambda). */
+    internal constructor(
+        scope: CoroutineScope,
+        restart: suspend (PlaybackRestart) -> Unit,
+        backgroundRetryDelayMs: Long,
+    ) : this(scope, restart) {
+        this.backgroundRetryDelayMs = backgroundRetryDelayMs.coerceAtLeast(0L)
+    }
     private val _state = MutableStateFlow<PlaybackRecoveryState>(PlaybackRecoveryState.Idle)
     val state = _state.asStateFlow()
 
     private var recoveryJob: Job? = null
+    private var backgroundRetryJob: Job? = null
     private var stablePlaybackJob: Job? = null
     private var pending: PlaybackRestart? = null
     private var lastRequest: PlaybackRestart? = null
@@ -42,9 +60,18 @@ internal class PlaybackRecovery(
         onPlaybackStopped()
         lastRequest = request
         pending = request
+        // A real new fatal error should be retried immediately. It may arrive while the
+        // watchdog is waiting between background attempts, so cancel that wait before deciding
+        // whether an existing foreground recovery job can consume the request.
+        backgroundRetryJob?.cancel()
+        backgroundRetryJob = null
         if (recoveryJob?.isActive == true) return
 
-        val session = generation
+        launchRecovery(generation)
+    }
+
+    private fun launchRecovery(session: Int, automaticFirstAttempt: Boolean = false) {
+        if (closed || session != generation || recoveryJob?.isActive == true) return
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 while (pending != null && session == generation) {
@@ -52,10 +79,14 @@ internal class PlaybackRecovery(
                     pending = null
                     if (attempts >= MAX_ATTEMPTS) {
                         _state.value = PlaybackRecoveryState.Failed
+                        scheduleBackgroundRetry(session)
                         return@launch
                     }
                     val attempt = ++attempts
-                    _state.value = PlaybackRecoveryState.Restarting(attempt)
+                    _state.value = PlaybackRecoveryState.Restarting(
+                        attempt = attempt,
+                        automatic = automaticFirstAttempt,
+                    )
                     delay(1_000L shl (attempt - 1))
                     // Duplicate notifications during the delay are the same stopped session.
                     pending = null
@@ -81,6 +112,8 @@ internal class PlaybackRecovery(
 
     fun onPlaybackStarted() {
         if (closed || pending != null) return
+        backgroundRetryJob?.cancel()
+        backgroundRetryJob = null
         _state.value = PlaybackRecoveryState.Idle
         if (stablePlaybackJob?.isActive == true) return
         val session = generation
@@ -97,11 +130,17 @@ internal class PlaybackRecovery(
 
     /** Ready can mean paused or audio-focus suppression. It earns no retry-budget reset. */
     fun onPlayerReady() {
-        if (!closed && pending == null) _state.value = PlaybackRecoveryState.Idle
+        if (!closed && pending == null) {
+            backgroundRetryJob?.cancel()
+            backgroundRetryJob = null
+            _state.value = PlaybackRecoveryState.Idle
+        }
     }
 
     fun retry() {
         if (closed || _state.value != PlaybackRecoveryState.Failed) return
+        backgroundRetryJob?.cancel()
+        backgroundRetryJob = null
         attempts = 0
         lastRequest?.let(::onError)
     }
@@ -119,13 +158,50 @@ internal class PlaybackRecovery(
         val previous = recoveryJob
         recoveryJob = null
         previous?.cancel()
+        backgroundRetryJob?.cancel()
+        backgroundRetryJob = null
         onPlaybackStopped()
         attempts = 0
         _state.value = PlaybackRecoveryState.Idle
     }
 
+    /**
+     * Keep trying while the player remains on the same episode. A source can be temporarily
+     * unavailable for much longer than the initial 1/2/4 second retry sequence (for example when
+     * an extension host is rate-limited), and leaving the player permanently failed would force a
+     * needless manual restart. The watchdog sleeps between complete recovery attempts, so source
+     * discovery and speed probes are run afresh on every pass.
+     */
+    private fun scheduleBackgroundRetry(session: Int) {
+        if (closed || session != generation || backgroundRetryJob?.isActive == true) return
+        backgroundRetryJob = scope.launch {
+            try {
+                while (!closed && session == generation) {
+                    delay(backgroundRetryDelayMs)
+                    if (closed || session != generation) return@launch
+                    val request = lastRequest ?: return@launch
+                    // A callback may have arrived while the watchdog was asleep. Let the active
+                    // foreground loop consume it rather than starting a second recovery job.
+                    if (recoveryJob?.isActive == true) continue
+                    attempts = 0
+                    pending = request
+                    launchRecovery(session, automaticFirstAttempt = true)
+                    // Wait for this bounded sequence to finish. If playback becomes ready,
+                    // onPlayerReady cancels this watchdog and this loop exits on its next check.
+                    while (session == generation && recoveryJob?.isActive == true) delay(100L)
+                    if (session != generation || closed || _state.value != PlaybackRecoveryState.Failed) {
+                        return@launch
+                    }
+                }
+            } finally {
+                if (session == generation) backgroundRetryJob = null
+            }
+        }
+    }
+
     private companion object {
         const val MAX_ATTEMPTS = 3
         const val STABLE_PLAYBACK_MS = 30_000L
+        const val BACKGROUND_RETRY_DELAY_MS = 30_000L
     }
 }
