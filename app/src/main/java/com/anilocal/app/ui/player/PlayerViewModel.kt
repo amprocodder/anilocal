@@ -244,6 +244,13 @@ class PlayerViewModel @Inject constructor(
                 }
                 _position.value = session.positionMs
                 _duration.value = session.durationMs
+                // AniSkip responses are cached independently of the media cut. Once Media3 reports
+                // a real duration, discard any stale window before the Skip pill/auto-skip can seek
+                // beyond this episode (offline records need the same protection).
+                if (session.durationMs > 0L && _markers.value.isNotEmpty()) {
+                    val playable = playableMarkers(_markers.value, session.durationMs)
+                    if (playable.size != _markers.value.size) _markers.value = playable
+                }
                 _bufferedPosition.value = if (session.prepared) currentPlayer.bufferedPosition else session.positionMs
                 _isBuffering.value = loading || recoveryState.value is PlaybackRecoveryState.Restarting ||
                     currentPlayer.playbackState == Player.STATE_BUFFERING
@@ -434,6 +441,8 @@ class PlayerViewModel @Inject constructor(
             if (!_hasNext.value) _hasNext.value = downloadedNumbers.any { it > episodeNumber }
             if (!_hasPrev.value) _hasPrev.value = downloadedNumbers.any { it < episodeNumber }
         }
+        // The duration is normally unknown until the offline media prepares; the tick loop applies
+        // the same playable-window filter once Media3 reports it.
         _markers.value = ep.markers
         markersFetched = true   // offline markers come from the cached record; don't re-fetch online.
         play(ep.streamUri, ep.mimeType, ep.subtitles, generation = generation)
@@ -624,7 +633,9 @@ class PlayerViewModel @Inject constructor(
         markersJob = viewModelScope.launch {
             val m = optional { skip.markers(idMal, ep, lengthSec) }.orEmpty()
             checkSession(generation)
-            if (!_offline.value) _markers.value = m
+            if (!_offline.value) {
+                _markers.value = if (durMs > 0L) playableMarkers(m, durMs) else m
+            }
         }
     }
 
