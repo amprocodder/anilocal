@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import com.anilocal.app.ui.common.loadOrNull
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -101,9 +102,11 @@ class MoreViewModel @Inject constructor(
         _provisioning.value = true
         _provisionStatus.value = "Updating sources…"
         try {
-            val added = loadOrNull { extensions.installRecommended() } ?: 0
-            val removed = loadOrNull { extensions.pruneLosers() } ?: 0
-            _provisionStatus.value = buildString {
+            val added = loadOrNull { extensions.installRecommended() }
+            val removed = loadOrNull { extensions.pruneLosers() }
+            _provisionStatus.value = if (added == null || removed == null) {
+                "Couldn't update sources. Tap Install recommended to retry."
+            } else buildString {
                 if (added > 0) append("Added $added source${if (added == 1) "" else "s"}")
                 if (removed > 0) {
                     if (isNotEmpty()) append(" · ")
@@ -112,6 +115,8 @@ class MoreViewModel @Inject constructor(
             }.ifBlank {
                 "No verified recommended sources available yet. Tap Install recommended to retry."
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             // Provisioning is best-effort: a dead repo, unavailable network, or failed signature
             // check must leave Auto usable and give the user a safe retry affordance instead of an
