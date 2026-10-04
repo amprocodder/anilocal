@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
@@ -32,6 +33,10 @@ class SourceRegistryImpl @Inject constructor(
     private val builtInList = builtIns.toList()
     private val _sources = MutableStateFlow(sortSources(builtInList))
     override val sources: StateFlow<List<AnimeSource>> = _sources.asStateFlow()
+    // A refresh is fire-and-forget because installs happen off the main thread. Keep a generation
+    // so a slower scan started before a newer install/uninstall can never publish stale sources
+    // after the newer scan has completed.
+    private val refreshGeneration = AtomicLong(0)
 
     init {
         refresh()
@@ -39,9 +44,12 @@ class SourceRegistryImpl @Inject constructor(
 
     /** Re-scan installed extensions and merge them with the built-ins. */
     override fun refresh() {
+        val generation = refreshGeneration.incrementAndGet()
         scope.launch(Dispatchers.IO) {
             val loaded = runCatching { AnimeExtensionLoader.loadSources(context) }.getOrDefault(emptyList())
-            _sources.value = sortSources(builtInList + loaded)
+            if (generation == refreshGeneration.get()) {
+                _sources.value = sortSources(builtInList + loaded)
+            }
         }
     }
 

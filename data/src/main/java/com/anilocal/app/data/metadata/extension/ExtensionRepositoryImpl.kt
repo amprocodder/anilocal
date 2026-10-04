@@ -99,21 +99,55 @@ class ExtensionRepositoryImpl @Inject constructor(
 
                 // Update guard: never downgrade, never accept a changed signer, vs an existing private copy.
                 if (target.exists()) {
-                    ExtensionSignatures.identifyApk(pm, target.absolutePath)?.let { cur ->
-                        if (id.versionCode < cur.versionCode) {
-                            Log.w(TAG, "privateInstall ${entry.pkg}: downgrade blocked"); return@withContext false
+                    val cur = ExtensionSignatures.identifyApk(pm, target.absolutePath)
+                        ?: run {
+                            // Never delete a working private source just because an update is
+                            // temporarily unreadable. Keep the old APK and let a later retry repair it.
+                            Log.w(TAG, "privateInstall ${entry.pkg}: existing APK unreadable")
+                            return@withContext false
                         }
-                        if (cur.signatures.isNotEmpty() && !id.signatures.containsAll(cur.signatures)) {
-                            Log.w(TAG, "privateInstall ${entry.pkg}: signer changed, blocked"); return@withContext false
-                        }
+                    if (cur.pkg != entry.pkg) {
+                        Log.w(TAG, "privateInstall ${entry.pkg}: existing APK declares ${cur.pkg}")
+                        return@withContext false
+                    }
+                    if (id.versionCode < cur.versionCode) {
+                        Log.w(TAG, "privateInstall ${entry.pkg}: downgrade blocked")
+                        return@withContext false
+                    }
+                    if (cur.signatures.isEmpty() || !id.signatures.containsAll(cur.signatures)) {
+                        Log.w(TAG, "privateInstall ${entry.pkg}: signer changed, blocked")
+                        return@withContext false
                     }
                 }
 
                 // Commit: read-only APK in app-private storage. Android 14+ (targetSdk 34+) refuses to
-                // class-load a writable dex, so setReadOnly() is mandatory, not hygiene.
-                if (target.exists()) target.delete()
-                if (!staging.renameTo(target)) staging.copyTo(target, overwrite = true)
-                target.setReadOnly()
+                // class-load a writable dex, so setReadOnly() is mandatory, not hygiene. Keep the
+                // previous copy until the new file is safely in place so an interrupted update never
+                // removes the only working source.
+                val backup = File(dir, "${target.name}.old")
+                backup.delete()
+                val hadPrevious = target.exists()
+                if (hadPrevious && !target.renameTo(backup)) {
+                    Log.w(TAG, "privateInstall ${entry.pkg}: couldn't stage existing APK")
+                    return@withContext false
+                }
+                val committed = staging.renameTo(target) || runCatching {
+                    staging.copyTo(target, overwrite = false)
+                    true
+                }.getOrDefault(false)
+                if (!committed) {
+                    target.delete()
+                    if (hadPrevious) backup.renameTo(target)
+                    Log.w(TAG, "privateInstall ${entry.pkg}: couldn't finalize APK")
+                    return@withContext false
+                }
+                if (!target.setReadOnly()) {
+                    target.delete()
+                    if (hadPrevious) backup.renameTo(target)
+                    Log.w(TAG, "privateInstall ${entry.pkg}: couldn't make APK read-only")
+                    return@withContext false
+                }
+                backup.delete()
             } finally {
                 staging.delete()
             }

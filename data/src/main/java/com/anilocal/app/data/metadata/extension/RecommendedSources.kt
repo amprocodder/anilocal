@@ -22,7 +22,7 @@ object RecommendedSources {
         "en.kickassanime",   // Wotaku's first-listed site; most-updated EN extension in the repo
         "en.anikoto",        // EverythingMoe #1 site as of mid-2026; the post-shutdown replacement
         "all.anizone",       // recommended by Wotaku + EverythingMoe; reliable
-        "en.allanime",       // huge catalog, sub+dub, softsubs (canonical Aniyomi source)
+        "en.animesogo",      // current English source with a broad catalogue and active updates
         "en.kotokai",        // AnimeKai clone (animekaitv.to), same codebase as Anikoto
         "en.animeparadise",  // official-sub rips; good secondary
     ).map { PREFIX + it }

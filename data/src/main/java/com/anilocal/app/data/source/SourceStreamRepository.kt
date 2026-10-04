@@ -131,11 +131,10 @@ class SourceStreamRepository internal constructor(
     }
 
     /** Episode pick → servers → variants. Throws on any empty leg so callers (and the cached-match
-     *  fallback above) see one consistent failure shape. */
+    *  fallback above) see one consistent failure shape. */
     private suspend fun resolveFrom(source: AnimeSource, detail: AnimeDetail, episodeNumber: Int): List<VideoStream> {
         val episode = detail.episodes.firstOrNull { it.number == episodeNumber }
-            ?: detail.episodes.firstOrNull()
-            ?: error("source '${source.info.name}': no episodes for \"${detail.title}\"")
+            ?: error("source '${source.info.name}': episode $episodeNumber is unavailable for \"${detail.title}\"")
         val server = source.servers(episode).firstOrNull()
             ?: error("source '${source.info.name}': no servers for episode of \"${detail.title}\"")
         val variants = source.resolve(server).sortedByDescending { it.height ?: 0 }
