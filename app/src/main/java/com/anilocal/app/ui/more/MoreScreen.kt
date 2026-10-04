@@ -223,8 +223,11 @@ fun MoreScreen(
                 Text("Where video is resolved from. Browsing and metadata always come from AniList.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                // "Auto" only helps when there's a choice to make — hide it with 0/1 source installed.
-                if (sources.size > 1) {
+                // "Auto" only helps when there's a choice to make — hide it with 0/1 source
+                // installed. Keep it visible when it is already selected, though: extension
+                // removal can reduce the list after the preference was saved, and hiding the
+                // selected row leaves the settings screen with no selected option.
+                if (sources.size > 1 || selectedSourceId == Sources.AUTO) {
                     Row(
                         Modifier.fillMaxWidth().clickable { vm.setSelectedSource(Sources.AUTO) },
                         verticalAlignment = Alignment.CenterVertically,
