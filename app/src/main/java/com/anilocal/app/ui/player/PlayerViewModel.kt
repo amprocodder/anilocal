@@ -237,6 +237,13 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             var tick = 0
             while (isActive) {
+                // AniSkip responses are cached independently of the media cut. Once Media3 reports
+                // a real duration, discard any stale window BEFORE auto-skip can seek beyond this
+                // episode (offline records need the same protection).
+                if (session.durationMs > 0L && _markers.value.isNotEmpty()) {
+                    val playable = playableMarkers(_markers.value, session.durationMs)
+                    if (playable.size != _markers.value.size) _markers.value = playable
+                }
                 if (!loading && recoveryState.value == PlaybackRecoveryState.Idle) {
                     captureProgress()
                     maybeAutoSkip(session.positionMs)
@@ -244,13 +251,6 @@ class PlayerViewModel @Inject constructor(
                 }
                 _position.value = session.positionMs
                 _duration.value = session.durationMs
-                // AniSkip responses are cached independently of the media cut. Once Media3 reports
-                // a real duration, discard any stale window before the Skip pill/auto-skip can seek
-                // beyond this episode (offline records need the same protection).
-                if (session.durationMs > 0L && _markers.value.isNotEmpty()) {
-                    val playable = playableMarkers(_markers.value, session.durationMs)
-                    if (playable.size != _markers.value.size) _markers.value = playable
-                }
                 _bufferedPosition.value = if (session.prepared) currentPlayer.bufferedPosition else session.positionMs
                 _isBuffering.value = loading || recoveryState.value is PlaybackRecoveryState.Restarting ||
                     currentPlayer.playbackState == Player.STATE_BUFFERING
