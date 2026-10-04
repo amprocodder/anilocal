@@ -45,7 +45,7 @@ class ExploreViewModel @Inject constructor(
     private val catalog: CatalogRepository,
     downloads: DownloadRepository,
 ) : ViewModel() {
-    private val loader = ExploreResults(viewModelScope, catalog)
+    private val loader = ExploreResults(viewModelScope, catalog, autoRetryAttempts = 2)
     val query = loader.query
     val genre = loader.genre
     val sort = loader.sort

@@ -43,6 +43,7 @@ import com.anilocal.app.ui.common.catalogResult
 import com.anilocal.app.ui.common.CATALOG_LOAD_TIMEOUT_MS
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -79,7 +80,7 @@ class ExtensionsViewModel @Inject constructor(
         _status.value = null
         viewModelScope.launch {
             try {
-                catalogResult(CATALOG_LOAD_TIMEOUT_MS) { extensions.available() }.fold(
+                retryCatalog { extensions.available() }.fold(
                     { _available.value = it.distinctBy(ExtensionEntry::pkg) },
                     { _status.value = "Couldn't load repos: ${it.message}" },
                 )
@@ -125,6 +126,22 @@ class ExtensionsViewModel @Inject constructor(
         val privateInstalled = async { loadOrNull { extensions.privatelyInstalled() } }
         installed.await()?.let { _installed.value = it }
         privateInstalled.await()?.let { _privateInstalled.value = it }
+    }
+
+    /** Retry repository discovery briefly so a transient index/network outage needs no user tap. */
+    private suspend fun <T> retryCatalog(block: suspend () -> T): Result<T> {
+        var attempt = 0
+        while (true) {
+            val result = catalogResult(CATALOG_LOAD_TIMEOUT_MS, block)
+            if (result.isSuccess || attempt >= AUTO_RETRY_ATTEMPTS) return result
+            attempt++
+            delay(AUTO_RETRY_DELAY_MS * attempt)
+        }
+    }
+
+    private companion object {
+        const val AUTO_RETRY_ATTEMPTS = 2
+        const val AUTO_RETRY_DELAY_MS = 1_000L
     }
 
 }

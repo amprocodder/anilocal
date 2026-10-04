@@ -23,6 +23,9 @@ internal class ExploreResults(
     private val catalog: CatalogRepository,
     private val searchDelayMs: Long = 300,
     private val timeoutMs: Long = CATALOG_LOAD_TIMEOUT_MS,
+    /** Number of bounded retries for transient catalog/network failures. */
+    private val autoRetryAttempts: Int = 0,
+    private val retryDelayMs: Long = 1_000L,
 ) {
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query
@@ -46,16 +49,35 @@ internal class ExploreResults(
             }.distinctUntilChanged().collectLatest { request ->
                 if (request.query.isNotEmpty()) delay(searchDelayMs)
                 _loadState.value = CatalogLoadState.Loading
-                val result = catalogResult(timeoutMs) {
-                    if (request.query.isEmpty()) catalog.browse(request.genre, request.sort)
-                    else catalog.search(request.query)
+                var attempt = 0
+                while (true) {
+                    val result = catalogResult(timeoutMs) {
+                        if (request.query.isEmpty()) catalog.browse(request.genre, request.sort)
+                        else catalog.search(request.query)
+                    }
+                    // Also protects against a repository implementation that swallowed cancellation.
+                    currentCoroutineContext().ensureActive()
+                    var succeeded = false
+                    result.fold(
+                        { items ->
+                            _results.value = items
+                            _loadState.value = CatalogLoadState.Ready
+                            succeeded = true
+                        },
+                        {
+                            if (attempt >= autoRetryAttempts.coerceAtLeast(0)) {
+                                _loadState.value = CatalogLoadState.Failed
+                                succeeded = true // terminal; leave the loop below
+                            } else {
+                                attempt++
+                            }
+                        },
+                    )
+                    if (succeeded) break
+                    // Keep stale results visible and leave the retry indicator up while waiting.
+                    // collectLatest cancellation aborts this delay when the query/filter changes.
+                    delay(retryDelayMs.coerceAtLeast(0L) * attempt)
                 }
-                // Also protects against a repository implementation that swallowed cancellation.
-                currentCoroutineContext().ensureActive()
-                result.fold(
-                    { items -> _results.value = items; _loadState.value = CatalogLoadState.Ready },
-                    { _loadState.value = CatalogLoadState.Failed },
-                )
             }
         }
     }

@@ -136,7 +136,11 @@ class DetailsViewModel @Inject constructor(
     @Named("appScope") private val appScope: CoroutineScope,
 ) : ViewModel() {
     private val animeId: String = checkNotNull(savedState["animeId"])
-    private val loader = CatalogLoad<AnimeDetail?>(viewModelScope, null) { catalog.detail(animeId) }
+    private val loader = CatalogLoad<AnimeDetail?>(
+        viewModelScope,
+        null,
+        autoRetryAttempts = 2,
+    ) { catalog.detail(animeId) }
     val detail = loader.value
     val loadState = loader.state
     fun retry() = loader.refresh()
