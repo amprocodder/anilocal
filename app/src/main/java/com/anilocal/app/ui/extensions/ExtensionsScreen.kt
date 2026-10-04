@@ -41,6 +41,7 @@ import com.anilocal.app.domain.repo.ExtensionRepository
 import com.anilocal.app.ui.common.loadOrNull
 import com.anilocal.app.ui.common.catalogResult
 import com.anilocal.app.ui.common.CATALOG_LOAD_TIMEOUT_MS
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -97,9 +98,13 @@ class ExtensionsViewModel @Inject constructor(
         _status.value = "Installing ${entry.name}…"
         viewModelScope.launch {
             try {
-                val ok = loadOrNull { extensions.privateInstall(entry) } == true
-                _status.value = if (ok) "Installed ${entry.name}"
-                else "Couldn't install ${entry.name} — download or signature check failed"
+                when (val result = installWithRetry(entry)) {
+                    true -> _status.value = "Installed ${entry.name}"
+                    false -> _status.value =
+                        "Couldn't install ${entry.name} — download or signature check failed"
+                    null -> _status.value =
+                        "Couldn't install ${entry.name} after automatic retries. Try again later."
+                }
                 refreshInstalled()
             } finally {
                 _busy.value = _busy.value - entry.pkg
@@ -112,8 +117,12 @@ class ExtensionsViewModel @Inject constructor(
         _busy.value = _busy.value + entry.pkg
         viewModelScope.launch {
             try {
-                val removed = loadOrNull { extensions.privateUninstall(entry.pkg); true } == true
-                _status.value = if (removed) "Removed ${entry.name}" else "Couldn't remove ${entry.name}"
+                when (uninstallWithRetry(entry.pkg)) {
+                    true -> _status.value = "Removed ${entry.name}"
+                    false -> _status.value = "Couldn't remove ${entry.name}"
+                    null -> _status.value =
+                        "Couldn't remove ${entry.name} after automatic retries. Try again later."
+                }
                 refreshInstalled()
             } finally {
                 _busy.value = _busy.value - entry.pkg
@@ -126,6 +135,39 @@ class ExtensionsViewModel @Inject constructor(
         val privateInstalled = async { loadOrNull { extensions.privatelyInstalled() } }
         installed.await()?.let { _installed.value = it }
         privateInstalled.await()?.let { _privateInstalled.value = it }
+    }
+
+    /** Retry only thrown transient failures; a false install result is a real verification failure. */
+    private suspend fun installWithRetry(entry: ExtensionEntry): Boolean? {
+        repeat(ACTION_RETRY_ATTEMPTS + 1) { attempt ->
+            try {
+                return extensions.privateInstall(entry)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (attempt < ACTION_RETRY_ATTEMPTS) {
+                    delay(ACTION_RETRY_DELAY_MS * (attempt + 1))
+                }
+            }
+        }
+        return null
+    }
+
+    /** Returns null only when every attempt threw; successful no-op uninstalls remain true. */
+    private suspend fun uninstallWithRetry(pkg: String): Boolean? {
+        repeat(ACTION_RETRY_ATTEMPTS + 1) { attempt ->
+            try {
+                extensions.privateUninstall(pkg)
+                return true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (attempt < ACTION_RETRY_ATTEMPTS) {
+                    delay(ACTION_RETRY_DELAY_MS * (attempt + 1))
+                }
+            }
+        }
+        return null
     }
 
     /** Retry repository discovery briefly so a transient index/network outage needs no user tap. */
@@ -142,6 +184,8 @@ class ExtensionsViewModel @Inject constructor(
     private companion object {
         const val AUTO_RETRY_ATTEMPTS = 2
         const val AUTO_RETRY_DELAY_MS = 1_000L
+        const val ACTION_RETRY_ATTEMPTS = 2
+        const val ACTION_RETRY_DELAY_MS = 750L
     }
 
 }
