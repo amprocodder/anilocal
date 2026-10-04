@@ -71,6 +71,7 @@ object AnimeExtensionLoader {
      *  sourceDir/publicSourceDir the classloader needs (getPackageArchiveInfo leaves them null on
      *  API 33+). A file that no longer parses / isn't an anime extension is skipped silently. */
     private fun privatePackages(context: Context, pm: PackageManager): List<PackageInfo> {
+        recoverOrphanedBackups(context, pm)
         val files = privateDir(context)
             .listFiles { f -> f.isFile && f.name.endsWith(PRIVATE_APK_SUFFIX) }
             ?: return emptyList()
@@ -84,6 +85,35 @@ object AnimeExtensionLoader {
                 info.takeIf { it.isAnimeExtension() }
             }.getOrNull()
         }
+    }
+
+    /**
+     * [AnimeExtensionLoader] stages an existing APK as `<pkg>.apk.old` before replacing it. If the
+     * process is killed between those two renames, restore that verified previous copy before
+     * scanning so an interrupted update never makes a source disappear until the user retries.
+     */
+    @Suppress("DEPRECATION")
+    private fun recoverOrphanedBackups(context: Context, pm: PackageManager) {
+        val dir = privateDir(context)
+        dir.listFiles { f -> f.isFile && f.name.endsWith("$PRIVATE_APK_SUFFIX.old") }
+            ?.forEach { backup ->
+                val target = File(dir, backup.name.removeSuffix(".old"))
+                if (target.exists()) {
+                    backup.delete()
+                    return@forEach
+                }
+                val info = runCatching {
+                    pm.getPackageArchiveInfo(backup.absolutePath, PACKAGE_FLAGS)
+                }.getOrNull()
+                val expectedPkg = target.name.removeSuffix(PRIVATE_APK_SUFFIX)
+                if (info?.packageName == expectedPkg && info.isAnimeExtension()) {
+                    if (backup.renameTo(target)) target.setReadOnly()
+                } else {
+                    // A malformed/orphaned file is not a source and should not linger in the
+                    // private extension directory indefinitely.
+                    backup.delete()
+                }
+            }
     }
 
     /** Merge shared + private by package name: prefer the higher versionCode; a system install wins a
