@@ -824,7 +824,7 @@ class PlayerViewModel @Inject constructor(
     // so it works for both http(s) and offline file:// subs and reuses the stream's request headers.
     // Returns null on any failure (→ caller falls back to VTT).
     private suspend fun sniffSubtitleMime(url: String, dataSource: CacheDataSource.Factory): String? = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             val ds = dataSource.createDataSource()
             try {
                 ds.open(DataSpec(Uri.parse(url)))
@@ -839,7 +839,11 @@ class PlayerViewModel @Inject constructor(
             } finally {
                 runCatching { ds.close() }
             }
-        }.getOrNull()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun sniffSubtitleFormat(raw: String): String? {
