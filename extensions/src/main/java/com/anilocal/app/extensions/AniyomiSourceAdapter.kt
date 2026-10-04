@@ -27,6 +27,7 @@ import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.preferenceKey
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import uy.kohesive.injekt.Injekt
@@ -71,22 +72,21 @@ class AniyomiSourceAdapter(
 
     override suspend fun popular(page: Int): List<AnimeSummary> = withContext(Dispatchers.IO) {
         val cat = src as? AnimeCatalogueSource ?: return@withContext emptyList()
-        runCatching { cat.getPopularAnime(page).animes.map { it.toSummary() } }.getOrDefault(emptyList())
+        sourceOrEmpty { cat.getPopularAnime(page).animes.map { it.toSummary() } }
     }
 
     override suspend fun search(query: String, page: Int): List<AnimeSummary> = withContext(Dispatchers.IO) {
         val cat = src as? AnimeCatalogueSource ?: return@withContext emptyList()
-        runCatching { cat.getSearchAnime(page, query, AnimeFilterList()).animes.map { it.toSummary() } }
-            .getOrDefault(emptyList())
+        sourceOrEmpty { cat.getSearchAnime(page, query, AnimeFilterList()).animes.map { it.toSummary() } }
     }
 
     override suspend fun detail(animeId: String): AnimeDetail = withContext(Dispatchers.IO) {
         val seed = SAnime.create().apply { url = animeId; title = "" }
-        val full = runCatching { src.getAnimeDetails(seed) }.getOrDefault(seed)
+        val full = sourceOr(seed) { src.getAnimeDetails(seed) }
         // A few extensions use fields populated by getAnimeDetails (language/season metadata or a
         // normalized URL) while enumerating episodes. Pass the enriched object through; falling back
         // to the seed above still keeps older sources working when details fail.
-        val episodes = runCatching { src.getEpisodeList(full) }.getOrDefault(emptyList())
+        val episodes = sourceOrEmpty { src.getEpisodeList(full) }
         AnimeDetail(
             id = animeId,
             title = full.title.ifBlank { animeId },
@@ -115,7 +115,7 @@ class AniyomiSourceAdapter(
         // lib-16 hoster API. Fall back to the lib-16 getHosterList → getVideoList(hoster) pipeline for
         // sources that implement it. Wrapped so an unimplemented-API AbstractMethodError (lib mismatch)
         // degrades to empty, never a crash.
-        val videos = runCatching { src.getVideoList(sEpisode) }.getOrNull()?.takeIf { it.isNotEmpty() }
+        val videos = sourceOrNull { src.getVideoList(sEpisode) }?.takeIf { it.isNotEmpty() }
             ?: resolveViaHosters(sEpisode)
         // Extensions occasionally return a placeholder Video with an empty URL when a hoster
         // failed. Drop it here so the source pipeline can try another source instead of handing an
@@ -125,14 +125,14 @@ class AniyomiSourceAdapter(
 
     /** ext-lib-16 fallback: the first hoster that yields videos wins (sources order them by preference). */
     private suspend fun resolveViaHosters(sEpisode: SEpisode): List<Video> {
-        val hosters = runCatching { src.getHosterList(sEpisode) }.getOrDefault(emptyList())
+        val hosters = sourceOrEmpty { src.getHosterList(sEpisode) }
         for (hoster in hosters) {
             // A single broken hoster must not suppress later mirrors. Some extensions lazily
             // populate videoList and others throw while reading a stale hoster; isolate each one.
-            val vids = runCatching {
+            val vids = sourceOrEmpty {
                 if (hoster.videoList != null && !hoster.lazy) hoster.videoList!!
                 else src.getVideoList(hoster)
-            }.getOrDefault(emptyList())
+            }
             if (vids.isNotEmpty()) return vids
         }
         return emptyList()
@@ -218,6 +218,22 @@ class AniyomiSourceAdapter(
 
     private fun Array<CharSequence>?.orEmptyStrings(): List<String> =
         this?.map(CharSequence::toString) ?: emptyList()
+
+    /** Extension failures are isolated so one broken plugin cannot abort a source race, but caller
+     * cancellation must still propagate to stop in-flight network work when the player closes. */
+    private suspend inline fun <T> sourceOr(default: T, crossinline block: suspend () -> T): T = try {
+        block()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Throwable) {
+        default
+    }
+
+    private suspend inline fun <T> sourceOrEmpty(crossinline block: suspend () -> List<T>): List<T> =
+        sourceOr(emptyList(), block)
+
+    private suspend inline fun <T> sourceOrNull(crossinline block: suspend () -> T): T? =
+        sourceOr(null, block)
 
     // ---- model mapping ----
 
