@@ -24,9 +24,9 @@ import javax.inject.Singleton
 /**
  * Lists extensions from each configured repo's `index.min.json` (pre-seeded with the yuzono repo)
  * and downloads their APKs to app cache. Each repo's parsed index is cached ([JsonCache]) so the
- * Browse list still renders offline / when a repo host is down — installs need the network, but
- * discovery doesn't. Repo/network failures with no cache degrade to an empty list, matching the
- * app's silent-degrade convention.
+ * Browse list still renders offline when a repo has previously been seen. A cold, unavailable
+ * set of repos is surfaced as a failure so the UI can retry automatically instead of showing an
+ * indistinguishable empty catalog.
  */
 @Singleton
 class ExtensionRepositoryImpl @Inject constructor(
@@ -40,7 +40,7 @@ class ExtensionRepositoryImpl @Inject constructor(
 ) : ExtensionRepository {
 
     override suspend fun available(): List<ExtensionEntry> = withContext(Dispatchers.IO) {
-        loadAvailable(failWhenAllReposUnavailable = false)
+        loadAvailable(failWhenAllReposUnavailable = true)
     }
 
     /**
