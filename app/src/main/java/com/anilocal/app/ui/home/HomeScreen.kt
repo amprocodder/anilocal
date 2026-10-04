@@ -100,7 +100,11 @@ class HomeViewModel @Inject constructor(
     downloads: DownloadRepository,
 ) : ViewModel() {
 
-    private val loader = CatalogLoad(viewModelScope, HomeCatalog()) {
+    private val loader = CatalogLoad(
+        viewModelScope,
+        HomeCatalog(),
+        autoRetryAttempts = 2,
+    ) {
         catalog.home().also {
             check(listOf(it.trending, it.popularThisSeason, it.topAiring, it.allTimePopular, it.upcoming)
                 .any { row -> row.isNotEmpty() }) { "AniList: home unavailable" }

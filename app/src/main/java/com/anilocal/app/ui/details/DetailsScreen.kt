@@ -91,6 +91,7 @@ import com.anilocal.app.ui.common.SectionHeader
 import com.anilocal.app.ui.common.scoreLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -104,6 +105,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Named
@@ -177,10 +181,34 @@ class DetailsViewModel @Inject constructor(
     // Shared per-title pass state (see companion) so a re-entered Details screen sees the live pass.
     private val seasonState = seasonPasses.getOrPut(animeId) { MutableStateFlow(null) }
     val seasonDownload: StateFlow<SeasonDownload?> = seasonState
+    private val savedWrites = Mutex()
 
     fun toggleSaved() = viewModelScope.launch {
-        detail.value?.let { library.toggle(AnimeSummary(it.id, it.title, it.posterUrl, it.idMal,
-            it.format, it.episodes.size, it.averageScore)) }
+        savedWrites.withLock {
+            detail.value?.let { anime ->
+                val summary = AnimeSummary(
+                    anime.id,
+                    anime.title,
+                    anime.posterUrl,
+                    anime.idMal,
+                    anime.format,
+                    anime.episodes.size,
+                    anime.averageScore,
+                )
+                repeat(SAVED_WRITE_ATTEMPTS) { attempt ->
+                    try {
+                        library.toggle(summary)
+                        return@withLock
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        if (attempt + 1 < SAVED_WRITE_ATTEMPTS) {
+                            delay(SAVED_WRITE_DELAY_MS * (attempt + 1))
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun download(episode: Episode) = requests.download(episode)
@@ -259,6 +287,8 @@ class DetailsViewModel @Inject constructor(
             .toSet()
 
     companion object {
+        private const val SAVED_WRITE_ATTEMPTS = 3
+        private const val SAVED_WRITE_DELAY_MS = 250L
         // Keyed by animeId and static: a pass runs on appScope and outlives any single Details
         // ViewModel, so in-flight tracking (and its progress) must too — otherwise leaving and
         // re-entering the screen could start a second concurrent pass for the same title.

@@ -44,6 +44,8 @@ import com.anilocal.app.ui.common.PosterCard
 import com.anilocal.app.ui.common.SearchField
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -103,7 +105,24 @@ class LibraryViewModel @Inject constructor(
 
     fun setQuery(q: String) { query.value = q }
 
-    suspend fun anilistIdForMal(malId: Int): String? = catalog.anilistIdForMal(malId)
+    /** Resolve a MAL-only row without making a transient AniList outage require another tap. */
+    suspend fun anilistIdForMal(malId: Int): String? {
+        repeat(MAL_RESOLVE_ATTEMPTS) { attempt ->
+            try {
+                return catalog.anilistIdForMal(malId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (attempt + 1 < MAL_RESOLVE_ATTEMPTS) delay(MAL_RESOLVE_DELAY_MS * (attempt + 1))
+            }
+        }
+        return null
+    }
+
+    private companion object {
+        const val MAL_RESOLVE_ATTEMPTS = 3
+        const val MAL_RESOLVE_DELAY_MS = 500L
+    }
 
 }
 
