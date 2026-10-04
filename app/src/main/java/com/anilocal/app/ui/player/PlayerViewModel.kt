@@ -318,6 +318,7 @@ class PlayerViewModel @Inject constructor(
                 if (active()) {
                     session.playWhenReady = playWhenReady
                     _playWhenReady.value = playWhenReady
+                    recovery.onPlaybackIntentChanged(playWhenReady)
                 }
             }
 
@@ -574,6 +575,9 @@ class PlayerViewModel @Inject constructor(
         session.attach()
         replacement.setMediaSource(media, session.positionMs)
         replacement.playWhenReady = session.playWhenReady
+        // A prepare can remain in BUFFERING without ever emitting a fatal callback. Let the
+        // recovery watchdog retry this replacement when the user's intent is to keep playing.
+        recovery.onReplacementPrepared(replacement.playWhenReady)
         replacement.prepare()
     }
 

@@ -49,6 +49,10 @@ internal class PlaybackRecovery(
     private var recoveryJob: Job? = null
     private var backgroundRetryJob: Job? = null
     private var stablePlaybackJob: Job? = null
+    private var readinessWatchdogJob: Job? = null
+    private var readinessToken = 0L
+    private var preparedRequest: PlaybackRestart? = null
+    private var preparedPlayWhenReady = false
     private var pending: PlaybackRestart? = null
     private var lastRequest: PlaybackRestart? = null
     private var attempts = 0
@@ -57,6 +61,7 @@ internal class PlaybackRecovery(
 
     fun onError(request: PlaybackRestart) {
         if (closed) return
+        cancelReadinessWatchdog(clearPrepared = true)
         onPlaybackStopped()
         lastRequest = request
         pending = request
@@ -95,6 +100,10 @@ internal class PlaybackRecovery(
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (_: Exception) {
+                        // A synchronous prepare/resolve failure has no Media3 error callback to
+                        // cancel the readiness timer, so discard that timer before queuing the
+                        // next bounded attempt.
+                        cancelReadinessWatchdog(clearPrepared = true)
                         // The replacement can synchronously report a newer fatal error through
                         // [onError] before throwing (for example, a prepare failure followed by
                         // an error callback). Keep that newer request's position/play intent and
@@ -112,6 +121,7 @@ internal class PlaybackRecovery(
 
     fun onPlaybackStarted() {
         if (closed || pending != null) return
+        cancelReadinessWatchdog(clearPrepared = true)
         backgroundRetryJob?.cancel()
         backgroundRetryJob = null
         _state.value = PlaybackRecoveryState.Idle
@@ -128,9 +138,33 @@ internal class PlaybackRecovery(
         stablePlaybackJob = null
     }
 
+    /**
+     * Called immediately before a replacement player starts [ExoPlayer.prepare]. A prepare call can
+     * return successfully while the player remains stuck in BUFFERING forever (for example when
+     * a server accepts the connection but never sends media bytes), so fatal callbacks alone are
+     * not enough to recover every stopped-playback path. The watchdog is only armed while the
+     * replacement intends to play; a deliberately paused replacement must wait for the user to
+     * resume before it is considered stuck.
+     */
+    fun onReplacementPrepared(playWhenReady: Boolean) {
+        if (closed || state.value !is PlaybackRecoveryState.Restarting) return
+        preparedRequest = lastRequest
+        preparedPlayWhenReady = playWhenReady
+        scheduleReadinessWatchdog()
+    }
+
+    /** Keep the readiness watchdog aligned with the user's play/pause intent. */
+    fun onPlaybackIntentChanged(playWhenReady: Boolean) {
+        if (closed || preparedRequest == null) return
+        preparedPlayWhenReady = playWhenReady
+        if (playWhenReady) scheduleReadinessWatchdog()
+        else cancelReadinessWatchdog(clearPrepared = false)
+    }
+
     /** Ready can mean paused or audio-focus suppression. It earns no retry-budget reset. */
     fun onPlayerReady() {
         if (!closed && pending == null) {
+            cancelReadinessWatchdog(clearPrepared = true)
             backgroundRetryJob?.cancel()
             backgroundRetryJob = null
             _state.value = PlaybackRecoveryState.Idle
@@ -158,6 +192,7 @@ internal class PlaybackRecovery(
         val previous = recoveryJob
         recoveryJob = null
         previous?.cancel()
+        cancelReadinessWatchdog(clearPrepared = true)
         backgroundRetryJob?.cancel()
         backgroundRetryJob = null
         onPlaybackStopped()
@@ -199,9 +234,41 @@ internal class PlaybackRecovery(
         }
     }
 
+    private fun scheduleReadinessWatchdog() {
+        readinessWatchdogJob?.cancel()
+        if (closed || !preparedPlayWhenReady || preparedRequest == null) return
+        val session = generation
+        val token = ++readinessToken
+        val request = checkNotNull(preparedRequest)
+        readinessWatchdogJob = scope.launch {
+            try {
+                delay(READINESS_TIMEOUT_MS)
+                if (closed || session != generation || token != readinessToken ||
+                    !preparedPlayWhenReady || pending != null || state.value !is PlaybackRecoveryState.Restarting
+                ) return@launch
+                // Route the timeout through onError so it shares serialization, the current
+                // failed URL, and the same fresh source/speed-probe path as Media3 fatal errors.
+                onError(lastRequest ?: request)
+            } finally {
+                if (token == readinessToken) readinessWatchdogJob = null
+            }
+        }
+    }
+
+    private fun cancelReadinessWatchdog(clearPrepared: Boolean) {
+        readinessToken++
+        readinessWatchdogJob?.cancel()
+        readinessWatchdogJob = null
+        if (clearPrepared) {
+            preparedRequest = null
+            preparedPlayWhenReady = false
+        }
+    }
+
     private companion object {
         const val MAX_ATTEMPTS = 3
         const val STABLE_PLAYBACK_MS = 30_000L
         const val BACKGROUND_RETRY_DELAY_MS = 30_000L
+        const val READINESS_TIMEOUT_MS = 15_000L
     }
 }
