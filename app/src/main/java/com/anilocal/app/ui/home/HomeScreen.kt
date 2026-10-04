@@ -73,6 +73,8 @@ import com.anilocal.app.ui.common.SectionHeader
 import com.anilocal.app.ui.common.scoreLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -130,9 +132,35 @@ class HomeViewModel @Inject constructor(
 
     val downloadedIds: StateFlow<Set<String>> =
         downloads.downloadedAnimeIds().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+    private val _actionStatus = MutableStateFlow<String?>(null)
+    val actionStatus: StateFlow<String?> = _actionStatus
 
     /** Permanently drop an item from the Continue Watching row. */
-    fun removeFromContinue(animeId: String) = viewModelScope.launch { progress.remove(animeId) }
+    fun removeFromContinue(animeId: String) = viewModelScope.launch {
+        _actionStatus.value = null
+        if (!removeWithRetry(animeId)) {
+            _actionStatus.value = "Couldn't remove this item yet. Try again later."
+        }
+    }
+
+    private suspend fun removeWithRetry(animeId: String): Boolean {
+        repeat(REMOVE_ATTEMPTS) { attempt ->
+            try {
+                progress.remove(animeId)
+                return true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (attempt + 1 < REMOVE_ATTEMPTS) delay(REMOVE_RETRY_DELAY_MS * (attempt + 1))
+            }
+        }
+        return false
+    }
+
+    private companion object {
+        const val REMOVE_ATTEMPTS = 3
+        const val REMOVE_RETRY_DELAY_MS = 250L
+    }
 
 
 }
@@ -149,6 +177,7 @@ fun HomeScreen(
     val loadState by vm.loadState.collectAsStateWithLifecycle()
     val continueWatching by vm.continueWatching.collectAsStateWithLifecycle()
     val downloadedIds by vm.downloadedIds.collectAsStateWithLifecycle()
+    val actionStatus by vm.actionStatus.collectAsStateWithLifecycle()
 
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -164,6 +193,16 @@ fun HomeScreen(
             }
         }
         item(key = "catalog-status", contentType = "status") { CatalogFeedback(loadState, vm::retry) }
+        actionStatus?.let { message ->
+            item(key = "action-status", contentType = "status") {
+                Text(
+                    message,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+        }
         if (continueWatching.isNotEmpty()) {
             item(key = "continue-watching", contentType = "continue-watching") {
                 ContinueWatchingShelf(
