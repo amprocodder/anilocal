@@ -1,5 +1,6 @@
 package com.anilocal.app.ui.more
 
+import com.anilocal.app.ui.common.loadOrNull
 import com.anilocal.app.domain.repo.MalRepository
 import com.anilocal.app.domain.repo.SettingsRepository
 import kotlinx.coroutines.CancellationException
