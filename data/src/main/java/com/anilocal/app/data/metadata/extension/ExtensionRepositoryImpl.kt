@@ -40,21 +40,38 @@ class ExtensionRepositoryImpl @Inject constructor(
 ) : ExtensionRepository {
 
     override suspend fun available(): List<ExtensionEntry> = withContext(Dispatchers.IO) {
-        settings.extensionRepoBaseUrls.first()
-            .flatMap { base ->
+        loadAvailable(failWhenAllReposUnavailable = false)
+    }
+
+    /**
+     * Load all configured indexes while retaining the distinction between an empty index and a
+     * failed network/cache read. The normal browse path degrades to an empty list, but automatic
+     * provisioning must retry when every configured repo is currently unavailable instead of
+     * treating that outage as a successful "zero sources" result.
+     */
+    private suspend fun loadAvailable(failWhenAllReposUnavailable: Boolean): List<ExtensionEntry> {
+        val bases = settings.extensionRepoBaseUrls.first()
+        var successfulRepo = false
+        val entries = buildList {
+            for (base in bases) {
                 val root = base.trimEnd('/')
                 try {
-                    cache.cached("extrepo:$root", ENTRIES, REPO_TTL_MS, preferStaleOverEmpty = true) {
+                    addAll(cache.cached("extrepo:$root", ENTRIES, REPO_TTL_MS, preferStaleOverEmpty = true) {
                         api.index("$root/index.min.json").map { it.toEntry(root) }
-                    }
+                    })
+                    successfulRepo = true
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
-                    emptyList()
+                    // Browse remains usable when one repo is dead; strict provisioning checks
+                    // whether every configured repo failed below.
                 }
             }
-            .distinctBy { it.pkg }
-            .sortedBy { it.name.lowercase() }
+        }
+        if (failWhenAllReposUnavailable && bases.isNotEmpty() && !successfulRepo) {
+            error("all extension repositories are unavailable")
+        }
+        return entries.distinctBy { it.pkg }.sortedBy { it.name.lowercase() }
     }
 
     override suspend fun downloadApk(entry: ExtensionEntry): File = withContext(Dispatchers.IO) {
@@ -177,7 +194,7 @@ class ExtensionRepositoryImpl @Inject constructor(
         val evicted = settings.evictedSources.first()
         // [available] already isolates ordinary repo failures. Preserve cancellation so leaving
         // the settings screen cannot continue provisioning in the background.
-        val index = available()
+        val index = loadAvailable(failWhenAllReposUnavailable = true)
         val installedNow = installedPackages()
         // Ranked recommended entries present in the repos, minus any we auto-evicted as dead (so
         // provisioning doesn't just keep re-installing a source eviction already judged a loser).

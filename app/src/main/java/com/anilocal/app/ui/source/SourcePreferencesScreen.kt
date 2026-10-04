@@ -44,8 +44,9 @@ import androidx.lifecycle.viewModelScope
 import com.anilocal.app.domain.source.AnimeSource
 import com.anilocal.app.domain.source.SourcePreference
 import com.anilocal.app.domain.source.SourceRegistry
-import com.anilocal.app.ui.common.loadOrNull
 import com.anilocal.app.ui.more.ConflatedSetting
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -74,6 +75,8 @@ class SourcePreferencesViewModel @Inject constructor(
     val prefs: StateFlow<List<SourcePreference>> = _prefs
     private val _loading = MutableStateFlow(true)
     val loading: StateFlow<Boolean> = _loading
+    private val _status = MutableStateFlow<String?>(null)
+    val status: StateFlow<String?> = _status
 
     private val writes = Mutex()
     private val updates = mutableMapOf<String, ConflatedSetting<Any?>>()
@@ -85,9 +88,38 @@ class SourcePreferencesViewModel @Inject constructor(
         }
     }
 
-    private suspend fun readPreferences() {
-        val preferences = source?.let { loadOrNull { it.preferences() } } ?: return
-        _prefs.value = preferences.distinctBy(SourcePreference::key)
+    private suspend fun readPreferences(): Boolean {
+        val result = source?.let { retrySource { it.preferences() } }
+            ?: return false
+        return result.fold(
+            onSuccess = { preferences ->
+                _prefs.value = preferences.distinctBy(SourcePreference::key)
+                true
+            },
+            onFailure = {
+                _status.value = "Couldn't load source settings. Retrying later."
+                false
+            },
+        )
+    }
+
+    /**
+     * Source preference calls are extension code and can fail transiently (for example while an
+     * extension is still starting after an APK update). Retry them in-process without ever
+     * converting coroutine cancellation into a successful write.
+     */
+    private suspend fun <T> retrySource(block: suspend () -> T): Result<T> {
+        repeat(SOURCE_RETRY_ATTEMPTS + 1) { attempt ->
+            try {
+                return Result.success(block())
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (attempt == SOURCE_RETRY_ATTEMPTS) return Result.failure(error)
+                delay(SOURCE_RETRY_DELAY_MS * (attempt + 1))
+            }
+        }
+        error("unreachable")
     }
 
     /** Serial writes preserve ordering; a burst of edits to one preference keeps its newest value. */
@@ -95,11 +127,27 @@ class SourcePreferencesViewModel @Inject constructor(
         updates.getOrPut(key) {
             ConflatedSetting(viewModelScope) { latest ->
                 writes.withLock {
-                    source?.setPreference(key, latest)
-                    readPreferences()
+                    val activeSource = source
+                    if (activeSource == null) {
+                        _status.value = "This source is no longer installed."
+                        return@withLock
+                    }
+                    val saved = retrySource { activeSource.setPreference(key, latest) }
+                    if (saved.isFailure) {
+                        _status.value = "Couldn't save source settings. Retrying later."
+                        return@withLock
+                    }
+                    if (readPreferences()) {
+                        _status.value = null
+                    }
                 }
             }
         }.set(value)
+    }
+
+    private companion object {
+        const val SOURCE_RETRY_ATTEMPTS = 2
+        const val SOURCE_RETRY_DELAY_MS = 750L
     }
 
 }
@@ -109,6 +157,7 @@ class SourcePreferencesViewModel @Inject constructor(
 fun SourcePreferencesScreen(onBack: () -> Unit, vm: SourcePreferencesViewModel = hiltViewModel()) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
+    val status by vm.status.collectAsStateWithLifecycle()
     // The pref currently being edited in a dialog (EditText/Select/MultiSelect); Toggle is inline.
     var editing by remember { mutableStateOf<SourcePreference?>(null) }
 
@@ -129,20 +178,40 @@ fun SourcePreferencesScreen(onBack: () -> Unit, vm: SourcePreferencesViewModel =
             loading && prefs.isEmpty() ->
                 Text("Loading…", Modifier.padding(padding).padding(16.dp))
             prefs.isEmpty() ->
-                Text(
-                    "This source has no settings.",
-                    Modifier.padding(padding).padding(16.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            else -> LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-                items(prefs, key = { it.key }, contentType = { it.javaClass }) { pref ->
-                    PreferenceRow(
-                        pref = pref,
-                        onToggle = { vm.set(pref.key, it) },
-                        onClick = { editing = pref },
+                Column(Modifier.fillMaxSize().padding(padding)) {
+                    Text(
+                        "This source has no settings.",
+                        Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    HorizontalDivider()
+                    status?.let {
+                        Text(
+                            it,
+                            Modifier.padding(horizontal = 16.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            else -> Column(Modifier.fillMaxSize().padding(padding)) {
+                status?.let {
+                    Text(
+                        it,
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                    items(prefs, key = { it.key }, contentType = { it.javaClass }) { pref ->
+                        PreferenceRow(
+                            pref = pref,
+                            onToggle = { vm.set(pref.key, it) },
+                            onClick = { editing = pref },
+                        )
+                        HorizontalDivider()
+                    }
                 }
             }
         }
@@ -217,7 +286,7 @@ private fun labelFor(value: String, entries: List<String>, entryValues: List<Str
 
 @Composable
 private fun EditTextDialog(pref: SourcePreference.EditText, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
-    var text by remember { mutableStateOf(pref.value) }
+    var text by remember(pref.key) { mutableStateOf(pref.value) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(pref.title) },
@@ -264,7 +333,7 @@ private fun MultiSelectDialog(
     onConfirm: (Set<String>) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val selected = remember { pref.values.toMutableStateList() }
+    val selected = remember(pref.key) { pref.values.toMutableStateList() }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(pref.title) },

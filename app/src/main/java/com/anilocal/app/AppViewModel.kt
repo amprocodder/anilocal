@@ -6,6 +6,7 @@ import com.anilocal.app.domain.model.ContinueWatching
 import com.anilocal.app.domain.repo.MalRepository
 import com.anilocal.app.domain.repo.ProgressRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -41,7 +42,15 @@ class AppViewModel @Inject constructor(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun onAppOpen() {
-        viewModelScope.launch { runCatching { mal.syncIfDue() } }
+        viewModelScope.launch {
+            try {
+                mal.syncIfDue()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // MAL sync is a background convenience; a network outage must not crash the UI.
+            }
+        }
     }
 
     /** Hide the resume bar for the current item only — does NOT remove it from Continue Watching. */

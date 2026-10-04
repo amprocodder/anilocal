@@ -16,8 +16,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
-import com.anilocal.app.ui.common.loadOrNull
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -103,8 +103,10 @@ class MoreViewModel @Inject constructor(
         if (!_provisioning.compareAndSet(expect = false, update = true)) return
         _provisionStatus.value = "Updating sources…"
         try {
-            val added = loadOrNull { extensions.installRecommended() }
-            val removed = loadOrNull { extensions.pruneLosers() }
+            // Repo fetches and APK verification are network/disk work. Keep the provisioning
+            // claim held while retrying so a second tap cannot duplicate installs or pruning.
+            val added = retryProvision { extensions.installRecommended() }
+            val removed = retryProvision { extensions.pruneLosers() }
             _provisionStatus.value = if (added == null || removed == null) {
                 "Couldn't update sources. Tap Install recommended to retry."
             } else buildString {
@@ -126,6 +128,25 @@ class MoreViewModel @Inject constructor(
         } finally {
             _provisioning.value = false
         }
+    }
+
+    private suspend fun <T> retryProvision(block: suspend () -> T): T? {
+        repeat(PROVISION_RETRY_ATTEMPTS + 1) { attempt ->
+            try {
+                return block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (attempt == PROVISION_RETRY_ATTEMPTS) return null
+                delay(PROVISION_RETRY_DELAY_MS * (attempt + 1))
+            }
+        }
+        return null
+    }
+
+    private companion object {
+        const val PROVISION_RETRY_ATTEMPTS = 2
+        const val PROVISION_RETRY_DELAY_MS = 1_000L
     }
 
     fun setMalUsername(username: String) = malActions.setUsername(username)

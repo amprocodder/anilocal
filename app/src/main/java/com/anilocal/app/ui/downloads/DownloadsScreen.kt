@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -55,6 +57,7 @@ import com.anilocal.app.domain.model.DownloadState
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.ui.common.SearchField
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,6 +68,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -125,6 +129,14 @@ class DownloadsViewModel @Inject constructor(
     val activeProgress: StateFlow<Map<String, DownloadProgress>> =
         downloads.activeProgress.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
+    /** Operations that are being retried in the app scope so leaving Downloads cannot strand them. */
+    private val _retrying = MutableStateFlow<Set<String>>(emptySet())
+    val retrying: StateFlow<Set<String>> = _retrying
+    private val _removing = MutableStateFlow<Set<String>>(emptySet())
+    val removing: StateFlow<Set<String>> = _removing
+    private val _operationStatus = MutableStateFlow<String?>(null)
+    val operationStatus: StateFlow<String?> = _operationStatus
+
     fun setQuery(q: String) { query.value = q }
 
     // Folders start expanded; the set remembers what the user collapsed (in the VM so it
@@ -140,22 +152,87 @@ class DownloadsViewModel @Inject constructor(
 
     fun pause(id: String) = downloads.pause(id)
     fun resume(id: String) = downloads.resume(id)
-    fun remove(id: String) { appScope.launch { downloads.remove(id) } }
+
+    /** A failed delete is retried automatically so a transient service/IO error cannot strand a row. */
+    fun remove(id: String) {
+        if (id in _removing.value) return
+        _operationStatus.value = null
+        _removing.update { it + id }
+        appScope.launch {
+            try {
+                if (!retryOperation { downloads.remove(id); true }) {
+                    _operationStatus.value = "Couldn't remove this download yet. Try again later."
+                }
+            } finally {
+                _removing.update { it - id }
+            }
+        }
+    }
 
     // appScope: the retry re-resolves the stream (multi-second network work) and must survive
     // navigating away mid-flight. Failure leaves the row FAILED — the button stays available.
-    fun retry(id: String) { appScope.launch { runCatching { downloads.retry(id) } } }
+    fun retry(id: String) {
+        if (id in _retrying.value || id in _removing.value) return
+        _operationStatus.value = null
+        _retrying.update { it + id }
+        appScope.launch {
+            try {
+                if (!retryOperation { downloads.retry(id) }) {
+                    _operationStatus.value = "Couldn't refresh this download yet. It remains available to retry."
+                }
+            } finally {
+                _retrying.update { it - id }
+            }
+        }
+    }
 
     /**
      * Deletes by live lookup, not the dialog's UI snapshot — an episode that finished queuing after
-     * the confirm dialog opened is deleted too, instead of surviving as an orphan row.
+     * the confirm dialog opened is deleted too, instead of surviving as an orphan row. Every item
+     * gets its own bounded retry so one failed file cleanup cannot stop the rest of the season.
      */
     fun removeSeason(animeId: String) {
         appScope.launch {
-            runCatching { downloads.downloads.first() }.getOrDefault(emptyList())
-                .filter { it.animeId == animeId }
-                .forEach { downloads.remove(it.id) }
+            val ids = try {
+                downloads.downloads.first().filter { it.animeId == animeId }.map { it.id }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return@launch
+            }
+            if (ids.isEmpty()) return@launch
+            _operationStatus.value = null
+            _removing.update { it + ids }
+            try {
+                val failed = ids.count { id -> !retryOperation { downloads.remove(id); true } }
+                if (failed > 0) {
+                    _operationStatus.value = "Couldn't remove $failed download${if (failed == 1) "" else "s"} yet."
+                }
+            } finally {
+                _removing.update { it - ids.toSet() }
+            }
         }
+    }
+
+    private suspend fun retryOperation(operation: suspend () -> Boolean): Boolean {
+        repeat(MAX_OPERATION_ATTEMPTS) { attempt ->
+            try {
+                if (operation()) return true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // A transient Media3/service or source failure is retried below.
+            }
+            if (attempt + 1 < MAX_OPERATION_ATTEMPTS) {
+                kotlinx.coroutines.delay(OPERATION_RETRY_DELAY_MS * (attempt + 1))
+            }
+        }
+        return false
+    }
+
+    private companion object {
+        const val MAX_OPERATION_ATTEMPTS = 3
+        const val OPERATION_RETRY_DELAY_MS = 750L
     }
 }
 
@@ -168,6 +245,9 @@ fun DownloadsScreen(
     val collapsed by vm.collapsed.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     val hasDownloads by vm.hasDownloads.collectAsStateWithLifecycle()
+    val retrying by vm.retrying.collectAsStateWithLifecycle()
+    val removing by vm.removing.collectAsStateWithLifecycle()
+    val operationStatus by vm.operationStatus.collectAsStateWithLifecycle()
     var pendingDelete by remember { mutableStateOf<SeasonFolder?>(null) }
 
     if (!hasDownloads) {
@@ -185,6 +265,9 @@ fun DownloadsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Downloads", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        operationStatus?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
         SearchField(value = query, onValueChange = vm::setQuery, placeholder = "Search downloads…")
         if (folders.isEmpty()) {
             // Query matched nothing (there ARE downloads — the !hasDownloads case returned above).
@@ -206,6 +289,7 @@ fun DownloadsScreen(
                             expanded = expanded,
                             onToggle = { vm.toggleFolder(folder.animeId) },
                             onDeleteAll = { pendingDelete = folder },
+                            deleting = folder.episodes.any { it.id in removing },
                         )
                     }
                     if (expanded) {
@@ -223,6 +307,8 @@ fun DownloadsScreen(
                                 onResume = { vm.resume(d.id) },
                                 onRetry = { vm.retry(d.id) },
                                 onDelete = { vm.remove(d.id) },
+                                retrying = d.id in retrying,
+                                removing = d.id in removing,
                             )
                         }
                     }
@@ -262,6 +348,7 @@ private fun SeasonHeader(
     expanded: Boolean,
     onToggle: () -> Unit,
     onDeleteAll: () -> Unit,
+    deleting: Boolean,
 ) {
     Surface(
         shape = RoundedCornerShape(10.dp),
@@ -310,7 +397,11 @@ private fun SeasonHeader(
                     ProgressBar(inFlight.sumOf { it.progress } / inFlight.size.coerceAtLeast(1))
                 }
             }
-            IconButton(onClick = onDeleteAll) { Icon(Icons.Filled.Delete, "Delete season") }
+            if (deleting) {
+                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+            } else {
+                IconButton(onClick = onDeleteAll) { Icon(Icons.Filled.Delete, "Delete season") }
+            }
             Icon(
                 if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                 if (expanded) "Collapse" else "Expand",
@@ -330,6 +421,8 @@ private fun EpisodeRow(
     onResume: () -> Unit,
     onRetry: () -> Unit,
     onDelete: () -> Unit,
+    retrying: Boolean,
+    removing: Boolean,
 ) {
     Surface(
         shape = RoundedCornerShape(10.dp),
@@ -366,8 +459,12 @@ private fun EpisodeRow(
                     }
                     DownloadState.COMPLETED -> Text("Downloaded — tap to play offline",
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                    DownloadState.FAILED -> Text("Failed", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error)
+                    DownloadState.FAILED -> Text(
+                        if (retrying) "Retrying…" else "Failed",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (retrying) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.error,
+                    )
                 }
             }
             // State-dependent controls.
@@ -378,11 +475,18 @@ private fun EpisodeRow(
                     IconButton(onClick = onResume) { Icon(Icons.Filled.PlayArrow, "Resume") }
                 // Retry must NOT be resume(): a failed download's stop-reason change is a no-op in
                 // Media3, and its URL is usually an expired token anyway — retry() re-resolves.
-                DownloadState.FAILED ->
+                DownloadState.FAILED -> if (retrying) {
+                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else {
                     IconButton(onClick = onRetry) { Icon(Icons.Filled.Refresh, "Retry") }
+                }
                 DownloadState.COMPLETED -> Unit
             }
-            IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Remove") }
+            if (removing) {
+                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+            } else {
+                IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Remove") }
+            }
         }
     }
 }
