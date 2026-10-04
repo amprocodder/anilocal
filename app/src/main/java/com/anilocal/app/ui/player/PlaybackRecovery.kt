@@ -64,7 +64,11 @@ internal class PlaybackRecovery(
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (_: Exception) {
-                        pending = next
+                        // The replacement can synchronously report a newer fatal error through
+                        // [onError] before throwing (for example, a prepare failure followed by
+                        // an error callback). Keep that newer request's position/play intent and
+                        // failed URL instead of replaying the stale request that just threw.
+                        if (pending == null) pending = next
                     }
                 }
             } finally {
