@@ -98,8 +98,9 @@ class MoreViewModel @Inject constructor(
     fun installRecommended() = viewModelScope.launch { provision() }
 
     private suspend fun provision() {
-        if (_provisioning.value) return
-        _provisioning.value = true
+        // The Auto radio and the explicit button can trigger provisioning from separate
+        // coroutines. Claim the run atomically so they cannot install/prune the same set twice.
+        if (!_provisioning.compareAndSet(expect = false, update = true)) return
         _provisionStatus.value = "Updating sources…"
         try {
             val added = loadOrNull { extensions.installRecommended() }
