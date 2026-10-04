@@ -183,7 +183,8 @@ fun SourcePreferencesScreen(onBack: () -> Unit, vm: SourcePreferencesViewModel =
             prefs.isEmpty() ->
                 Column(Modifier.fillMaxSize().padding(padding)) {
                     Text(
-                        "This source has no settings.",
+                        if (status == null) "This source has no settings."
+                        else "Couldn't load this source's settings.",
                         Modifier.padding(16.dp),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
