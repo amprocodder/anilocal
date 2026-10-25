@@ -28,6 +28,15 @@ import javax.inject.Singleton
 const val DOWNLOAD_CHANNEL_ID = "downloads"
 
 /**
+ * Used ONLY when a source supplies no User-Agent of its own. The HTTP factories deliberately set no
+ * user-agent (see [DownloadModule.downloadHttpFactory]), so without this the connection would send
+ * HttpURLConnection's "Dalvik/..." default, which scraper CDNs reject. A source's own UA always wins.
+ */
+const val FALLBACK_USER_AGENT =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+/**
  * Provides the Media3 offline-download stack. The same [Cache] is shared by the
  * [DownloadManager] (writes downloaded bytes) and the playback [CacheDataSource.Factory]
  * (reads them back offline). Bytes live in app-specific storage.
@@ -60,13 +69,21 @@ object DownloadModule {
     @OptIn(UnstableApi::class)
     @Provides @Singleton
     fun httpFactory(): DefaultHttpDataSource.Factory =
-        DefaultHttpDataSource.Factory().setUserAgent("AniLocal").setAllowCrossProtocolRedirects(true)
+        DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)   // see downloadHttpFactory: no user-agent on purpose
 
     /** DOWNLOAD http factory — only reached through [downloadDataSourceFactory]'s header resolver. */
     @OptIn(UnstableApi::class)
     @Provides @Singleton @Named("downloadHttp")
     fun downloadHttpFactory(): DefaultHttpDataSource.Factory =
-        DefaultHttpDataSource.Factory().setUserAgent("AniLocal").setAllowCrossProtocolRedirects(true)
+        DefaultHttpDataSource.Factory()
+            // NO setUserAgent. Media3 1.4.1's makeConnection() applies the default request properties
+            // and the DataSpec's headers first, THEN
+            //     if (userAgent != null) connection.setRequestProperty(USER_AGENT, userAgent);
+            // and setRequestProperty REPLACES — so a constructor user-agent silently clobbered the UA
+            // the source supplied, which scraper CDNs gate on and a cf_clearance cookie is bound to.
+            // Left null, Media3 skips that line; the resolver below fills in a browser default.
+            .setAllowCrossProtocolRedirects(true)
 
     /**
      * The DownloadManager's upstream: every manifest/segment request is resolved through
@@ -81,9 +98,13 @@ object DownloadModule {
         headerStore: DownloadHeaderStore,
     ): DataSource.Factory =
         ResolvingDataSource.Factory(http) { dataSpec ->
-            val headers = headerStore.current(dataSpec.uri.host)
-            if (headers.isEmpty()) dataSpec
-            else dataSpec.buildUpon().setHttpRequestHeaders(headers + dataSpec.httpRequestHeaders).build()
+            val merged = headerStore.current(dataSpec.uri.host) + dataSpec.httpRequestHeaders
+            // The factory forces no user-agent (it would clobber the source's), so supply a browser
+            // default only when the source didn't set one.
+            val withUa =
+                if (merged.keys.any { it.equals("User-Agent", ignoreCase = true) }) merged
+                else merged + ("User-Agent" to FALLBACK_USER_AGENT)
+            dataSpec.buildUpon().setHttpRequestHeaders(withUa).build()
         }
 
     @OptIn(UnstableApi::class)

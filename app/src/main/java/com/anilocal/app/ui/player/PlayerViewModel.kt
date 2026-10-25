@@ -269,7 +269,10 @@ class PlayerViewModel @Inject constructor(
     }
 
     private fun playbackDataSource(headers: Map<String, String>, offline: Boolean): CacheDataSource.Factory {
-        val agent = headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value ?: "AniLocal"
+        // The source's own UA, which scraper CDNs gate on and a cf_clearance cookie is bound to. Only
+        // when it gave none, a browser UA — never "AniLocal", which UA-gated CDNs reject outright.
+        val agent = headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value
+            ?: FALLBACK_USER_AGENT
         val http = DefaultHttpDataSource.Factory().setUserAgent(agent)
             .setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(headers)
         // READ-ONLY over the downloads cache: Media3 builds a write sink by default, which made
@@ -884,6 +887,12 @@ class PlayerViewModel @Inject constructor(
         const val END_THRESHOLD_MS = 5_000L
         const val MARKER_GRACE_MS = 2_500L
         const val SNIFF_TIMEOUT_MS = 1_500L
+
+        // Duplicated from :data's DownloadModule rather than shared: :app must not import
+        // com.anilocal.app.data.*, and a user-agent string is not domain logic.
+        const val FALLBACK_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
 
     // Resolve a subtitle's MIME: trust a known file extension on the URL path, else sniff the actual

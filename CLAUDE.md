@@ -221,7 +221,12 @@ for the old MAL client id).
   constructs `DownloadRepositoryImpl` — the store lazily restores them from Room on the download
   thread itself.
 
-- **The source's own request headers must reach the media host intact.** Playback and downloads run on
+- **The source's own request headers must reach the media host intact.** Neither download HTTP factory
+  sets a User-Agent: Media3 1.4.1 applies a constructor UA *after* the request properties and overwrites
+  the source's (the header scraper CDNs gate on, and the one `cf_clearance` is bound to).
+  `FALLBACK_USER_AGENT` (a browser UA) is added only when the source supplied none — by the download
+  resolver in `DownloadModule` and by `PlayerViewModel.playbackDataSource`, deliberately duplicated since
+  `:app` can't import `:data`; never "AniLocal", which UA-gated CDNs reject. Playback and downloads run on
   `HttpURLConnection`, not OkHttp, so they share no cookie jar or `CloudflareInterceptor` with the
   resolve legs (and Android installs no default `CookieHandler`); instead `AniyomiSourceAdapter` copies
   the jar's cookies for the stream host (e.g. a solved `cf_clearance`) into `VideoStream.headers` — host-
