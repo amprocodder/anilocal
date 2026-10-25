@@ -226,8 +226,10 @@ for the old MAL client id).
 - **Player has a dual online/offline path** (`app/.../player/PlayerViewModel.kt`): on load it first
   checks `downloads.getOffline(...)`. Offline → skip markers and subtitles come from the cached Room
   record. Online → AniList resolves the title, the bound `AnimeSource` resolves the stream, and AniSkip
-  markers are fetched once on `STATE_READY` (gated on `markers.isEmpty() && !offline`, so the fetch never
-  re-runs or overrides offline markers). When a title has **no MAL id** (anything AniSkip can't key),
+  markers are fetched once per episode from the tick loop once the player is `STATE_READY`. An offline
+  record latches `markersFetched` only if it actually carried markers (downloads snapshot markers once
+  at enqueue, best-effort, so an empty snapshot means "unknown" and gets one online lookup), and only a
+  non-empty result is ever assigned, so a lookup never overrides markers already shown. When a title has **no MAL id** (anything AniSkip can't key),
   `AniSkipRepository` returns **hard-coded demo markers** instead of an empty list so
   the Skip control always demonstrates — that `idMal == null` branch is intentional, not a bug. Auto-skip
   fires at most once per marker. AniSkip is queried with the player's real `episodeLengthSec` first and

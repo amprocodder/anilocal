@@ -497,7 +497,14 @@ class PlayerViewModel @Inject constructor(
         // The duration is normally unknown until the offline media prepares; the tick loop applies
         // the same playable-window filter once Media3 reports it.
         _markers.value = ep.markers
-        markersFetched = true   // offline markers come from the cached record; don't re-fetch online.
+        // Latch ONLY when the cached record actually carried markers. An empty list means "nothing
+        // was known at enqueue time" — not "this episode has no intro/outro". Downloads capture
+        // markers best-effort (a failed lookup becomes an empty list), so an AniSkip outage, or a
+        // season queued the day an episode airs (before submissions land), bakes [] into
+        // skipMarkersJson. That column has exactly one writer and no refresh path — even a download
+        // retry carries it forward — so latching here made the Skip control permanently dead for
+        // that episode, recoverable only by deleting and re-downloading.
+        markersFetched = ep.markers.isNotEmpty()
         play(ep.streamUri, ep.mimeType, ep.subtitles, generation = generation)
     }
 
@@ -685,7 +692,10 @@ class PlayerViewModel @Inject constructor(
     // (so the length-matched query pins us to the same cut). After a short grace, accept a still-unknown
     // duration (length=0, best-effort) so the Skip control never wedges to "never appears".
     private fun maybeFetchMarkers() {
-        if (markersFetched || _offline.value) return
+        // No `_offline` guard: markersFetched already covers it — it is true whenever the offline
+        // record supplied real markers. A downloaded episode whose cached list is EMPTY gets one
+        // lookup (cache-first; with no network it fails to empty and changes nothing).
+        if (markersFetched) return
         if (currentPlayer.playbackState != Player.STATE_READY) return
         if (firstReadyAtMs == 0L) firstReadyAtMs = SystemClock.elapsedRealtime()
         val durMs = currentPlayer.duration
@@ -698,9 +708,10 @@ class PlayerViewModel @Inject constructor(
         markersJob = viewModelScope.launch {
             val m = optional { skip.markers(idMal, ep, lengthSec) }.orEmpty()
             checkSession(generation)
-            if (!_offline.value) {
-                _markers.value = if (durMs > 0L) playableMarkers(m, durMs) else m
-            }
+            // Assign only a non-empty result, so a failed or empty lookup can never clobber markers
+            // already on screen (the old `!_offline` guard's intent, without blocking the case above).
+            val playable = if (durMs > 0L) playableMarkers(m, durMs) else m
+            if (playable.isNotEmpty()) _markers.value = playable
         }
     }
 
