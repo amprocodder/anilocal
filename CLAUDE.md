@@ -221,6 +221,14 @@ for the old MAL client id).
   constructs `DownloadRepositoryImpl` — the store lazily restores them from Room on the download
   thread itself.
 
+- **The source's own request headers must reach the media host intact.** Playback and downloads run on
+  `HttpURLConnection`, not OkHttp, so they share no cookie jar or `CloudflareInterceptor` with the
+  resolve legs (and Android installs no default `CookieHandler`); instead `AniyomiSourceAdapter` copies
+  the jar's cookies for the stream host (e.g. a solved `cf_clearance`) into `VideoStream.headers` — host-
+  scoped, and a source's own `Cookie` header wins. Don't "fix" this by moving playback onto
+  `OkHttpDataSource`: that needs a Hilt→Injekt bridge, and Injekt is only seeded lazily when the
+  extension loader first runs.
+
 - **The download service crosses the module/manifest boundary.** `AniLocalDownloadService` (code in
   `:data`) plus its permissions (`FOREGROUND_SERVICE*`, `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`)
   and the `PlatformScheduler` JobService are declared in **`:app`'s `AndroidManifest.xml`** — `:data`'s

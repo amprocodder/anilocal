@@ -27,9 +27,11 @@ import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.preferenceKey
+import eu.kanade.tachiyomi.network.NetworkHelper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import eu.kanade.tachiyomi.animesource.AnimeSource as AniyomiSource
@@ -254,12 +256,29 @@ class AniyomiSourceAdapter(
         return VideoStream(
             url = videoUrl,
             mimeType = inferStreamMime(videoUrl),
-            headers = headers?.toMap() ?: emptyMap(),
+            headers = withJarCookies(videoUrl, headers?.toMap() ?: emptyMap()),
             subtitles = subtitleTracks.filter { it.url.isNotBlank() }
                 .map { Subtitle(url = it.url, language = it.lang, label = it.lang) },
             quality = videoTitle.ifBlank { resolution?.let { "${it}p" } },
             height = resolution,
         )
+    }
+
+    /**
+     * Carry the cookie jar's cookies for the stream host into the stream's own headers. The resolve
+     * legs run on NetworkHelper's OkHttpClient (AndroidCookieJar + CloudflareInterceptor), so a
+     * solved challenge leaves cf_clearance in webkit's CookieManager; playback runs on Media3's
+     * HttpURLConnection, which never consults it (Android installs no default CookieHandler), so a
+     * CF-gated media host resolved fine and then 403'd. Host-scoped, and a source's own Cookie
+     * header always wins.
+     */
+    private fun withJarCookies(url: String, headers: Map<String, String>): Map<String, String> {
+        if (headers.keys.any { it.equals("Cookie", ignoreCase = true) }) return headers
+        val httpUrl = url.toHttpUrlOrNull() ?: return headers
+        val cookies = runCatching { Injekt.get<NetworkHelper>().cookieJar.get(httpUrl) }
+            .getOrNull().orEmpty()
+        if (cookies.isEmpty()) return headers
+        return headers + ("Cookie" to cookies.joinToString("; ") { "${it.name}=${it.value}" })
     }
 
     // Aniyomi's Video carries no format field, so infer the container from the URL. "m3u8" is a
