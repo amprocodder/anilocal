@@ -31,11 +31,16 @@ import javax.inject.Singleton
  * through the chosen source, so any source — built-in or extension — works with no branching here.
  *
  * The title-match half of the pipeline (search → detail, i.e. "which source entry is this AniList
- * title, and what are its episode ids") is cached per source for [MATCH_TTL_MS]: it's the slow,
- * Cloudflare-challenged part, it's stable across episodes, and skipping it turns an episode switch
- * or a season download from 4+ round-trips into 2. Server/stream URLs are NOT cached — they're
- * short-lived/tokenized. A cached match that no longer resolves (source rotated its ids) is
- * dropped and the whole pipeline re-runs live once.
+ * title, and what are its episode ids") is cached per source and AniList id for [MATCH_TTL_MS]: it's
+ * the slow, Cloudflare-challenged part, it's stable across episodes, and skipping it turns an
+ * episode switch or a season download from 4+ round-trips into 2. Server/stream URLs are NOT cached
+ * — they're short-lived/tokenized. A cached match that no longer resolves (source rotated its ids)
+ * is dropped and the whole pipeline re-runs live once.
+ *
+ * Which search result IS the title is decided by [TitleMatcher], never by the site's ranking: a
+ * sequel's search lists its prequel first, and since every entry numbers its episodes from 1, taking
+ * that first hit played season 1's episodes under season 2. Likewise an episode the matched entry
+ * doesn't have fails rather than playing a different one.
  */
 @Singleton
 class SourceStreamRepository internal constructor(
@@ -69,14 +74,14 @@ class SourceStreamRepository internal constructor(
         return available?.firstOrNull() ?: error("no stream sources available")
     }
 
-    override suspend fun resolveStreams(animeTitle: String, episodeNumber: Int): List<VideoStream> =
+    override suspend fun resolveStreams(anime: AnimeDetail, episodeNumber: Int): List<VideoStream> =
         withContext(Dispatchers.IO) {
             val selected = settings.selectedSourceId.first()
             if (selected == Sources.AUTO) {
                 // Auto mode: race installed sources / reuse the pinned winner. The per-source probe is
                 // exactly the manual pipeline below, so caching and failure shape are identical.
-                selector.resolve(animeTitle, episodeNumber) { source ->
-                    resolveVia(source, animeTitle, episodeNumber)
+                selector.resolve(anime.id, anime.title, episodeNumber) { source ->
+                    resolveVia(source, anime, episodeNumber)
                 }.streams
             } else {
                 val source = sourceFor(selected)
@@ -84,7 +89,7 @@ class SourceStreamRepository internal constructor(
                 // later starts warm instead of cold.
                 val start = SystemClock.elapsedRealtime()
                 try {
-                    val r = resolveVia(source, animeTitle, episodeNumber)
+                    val r = resolveVia(source, anime, episodeNumber)
                     selector.record(source.info.id, SystemClock.elapsedRealtime() - start, success = true)
                     r.streams
                 } catch (ce: CancellationException) {
@@ -96,18 +101,22 @@ class SourceStreamRepository internal constructor(
             }
         }
 
+    /** A source's entry for one AniList title, as cached: its detail (episode ids) and whether the
+     *  title match was confident or only the site's unverified top hit. */
+    data class SourceMatch(val detail: AnimeDetail, val confident: Boolean)
+
     /** Resolve ONE source end-to-end (the cached-match fast path + a live fallback), reporting
-     *  whether the matched entry actually carried the requested episode. This is the unit the auto
-     *  selector races and the manual path runs directly — so there is exactly one pipeline. */
-    private suspend fun resolveVia(source: AnimeSource, animeTitle: String, episodeNumber: Int): SourceResolution {
-        val key = "src:${source.info.id}:${animeTitle.trim().lowercase()}"
+     *  whether the title match was confident. This is the unit the auto selector races and the
+     *  manual path runs directly — so there is exactly one pipeline. */
+    private suspend fun resolveVia(source: AnimeSource, anime: AnimeDetail, episodeNumber: Int): SourceResolution {
+        val key = matchKey(source, anime)
 
         // A fresh cached match is only trusted when it actually carries the requested episode —
         // an episode that aired after the entry was cached must force a live re-fetch.
-        val cached = cache.getFresh<AnimeDetail>(key, DETAIL, MATCH_TTL_MS)
-        if (cached != null && cached.episodes.any { it.number == episodeNumber }) {
+        val cached = cache.getFresh<SourceMatch>(key, MATCH, MATCH_TTL_MS)
+        if (cached != null && cached.detail.episodes.any { it.number == episodeNumber }) {
             try {
-                return SourceResolution(resolveFrom(source, cached, episodeNumber), exactEpisode = true)
+                return SourceResolution(resolveFrom(source, cached.detail, episodeNumber), cached.confident)
             } catch (ce: CancellationException) {
                 throw ce
             } catch (_: Exception) {
@@ -117,21 +126,23 @@ class SourceStreamRepository internal constructor(
             }
         }
 
-        val detail = liveMatch(source, animeTitle)
-        if (detail.episodes.isNotEmpty()) cache.put(key, DETAIL, detail)
-        val exact = detail.episodes.any { it.number == episodeNumber }
-        return SourceResolution(resolveFrom(source, detail, episodeNumber), exactEpisode = exact)
+        val match = liveMatch(source, anime)
+        if (match.detail.episodes.isNotEmpty()) cache.put(key, MATCH, match)
+        return SourceResolution(resolveFrom(source, match.detail, episodeNumber), match.confident)
     }
 
-    /** The un-cached search → detail leg (throws with a sourced message, as before). */
-    private suspend fun liveMatch(source: AnimeSource, animeTitle: String): AnimeDetail {
-        val match = source.search(animeTitle, page = 1).firstOrNull()
-            ?: error("source '${source.info.name}': no match for \"$animeTitle\"")
-        return source.detail(match.id)
+    /** The un-cached search → detail leg: find this exact title (not its prequel or sequel) among
+     *  the source's search results. Throws with a sourced message when it isn't there. */
+    private suspend fun liveMatch(source: AnimeSource, anime: AnimeDetail): SourceMatch {
+        val match = TitleMatcher.find(TitleMatcher.Target(anime)) { query -> source.search(query, page = 1) }
+            ?: error("source '${source.info.name}': no match for \"${anime.title}\"")
+        return SourceMatch(source.detail(match.candidate.id), match.confident)
     }
 
     /** Episode pick → servers → variants. Throws on any empty leg so callers (and the cached-match
-    *  fallback above) see one consistent failure shape. */
+    *  fallback above) see one consistent failure shape. The episode must exist on the matched
+    *  entry: substituting another one plays the wrong video without any error, which is worse than
+    *  failing over to the next source. */
     private suspend fun resolveFrom(source: AnimeSource, detail: AnimeDetail, episodeNumber: Int): List<VideoStream> {
         val episode = detail.episodes.firstOrNull { it.number == episodeNumber }
             ?: error("source '${source.info.name}': episode $episodeNumber is unavailable for \"${detail.title}\"")
@@ -150,27 +161,32 @@ class SourceStreamRepository internal constructor(
 
     // The union merge above already puts every known subtitle on every variant, so the best
     // variant is complete as-is.
-    override suspend fun resolveStream(animeTitle: String, episodeNumber: Int): VideoStream =
-        resolveStreams(animeTitle, episodeNumber).first()
+    override suspend fun resolveStream(anime: AnimeDetail, episodeNumber: Int): VideoStream =
+        resolveStreams(anime, episodeNumber).first()
 
     override suspend fun recoverStream(
-        animeTitle: String,
+        anime: AnimeDetail,
         episodeNumber: Int,
         failedStreamUrl: String?,
     ): VideoStream = withContext(Dispatchers.IO) {
         val selected = settings.selectedSourceId.first()
-        val winner = recovery.resolve(animeTitle, episodeNumber, failedStreamUrl, selected)
+        val winner = recovery.resolve(anime, episodeNumber, failedStreamUrl, selected)
         coroutineContext.ensureActive()
         // Only the accepted winner writes shared state: abandoned extension calls cannot overwrite
         // pins/cache after the player closes or a newer recovery starts.
-        cache.put("src:${winner.source.info.id}:${animeTitle.trim().lowercase()}", DETAIL, winner.detail)
+        cache.put(matchKey(winner.source, anime), MATCH, SourceMatch(winner.detail, winner.confident))
         coroutineContext.ensureActive()
-        if (selected == Sources.AUTO) selector.rememberRecoveryWinner(animeTitle, winner.source)
+        if (selected == Sources.AUTO) selector.rememberRecoveryWinner(anime.id, winner.source, winner.confident)
         winner.stream
     }
 
+    // Keyed by AniList id, not title: two entries can share a display title (a remake and its
+    // original), and the old title-keyed `src:` rows may hold a wrong-season match — the new
+    // namespace leaves those to the 30-day sweep instead of reusing them.
+    private fun matchKey(source: AnimeSource, anime: AnimeDetail) = "srcmatch:${source.info.id}:${anime.id}"
+
     private companion object {
-        val DETAIL: java.lang.reflect.Type = AnimeDetail::class.java
+        val MATCH: java.lang.reflect.Type = SourceMatch::class.java
         const val MATCH_TTL_MS = 4L * 60 * 60 * 1000   // episode lists grow weekly; 4h keeps them current
         const val REGISTRY_WAIT_MS = 3_000L            // tolerate the cold-start async extension scan
     }

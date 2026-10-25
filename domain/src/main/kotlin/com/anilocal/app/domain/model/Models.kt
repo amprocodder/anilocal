@@ -9,6 +9,8 @@ data class AnimeSummary(
     val format: String? = null,            // prettified, e.g. "TV", "Movie"
     val episodes: Int? = null,
     val averageScore: Int? = null,         // 0–100, as AniList reports it
+    /** Every other name AniList knows it by (romaji, English, synonyms) — see [AnimeDetail.altTitles]. */
+    val altTitles: List<String> = emptyList(),
 )
 
 /** A "Continue Watching" entry: an anime plus where the user left off. */
@@ -41,6 +43,13 @@ data class AnimeDetail(
     val duration: Int? = null,             // minutes per episode
     val studio: String? = null,            // first main studio name
     val related: List<RelatedAnime> = emptyList(),   // franchise neighbors, chronological
+    /**
+     * Every other name AniList knows this title by — romaji, English, native, synonyms (the display
+     * [title] excluded). Stream sources title their entries in any of these, so finding THIS entry
+     * (and not its prequel) on a source needs all of them. Empty only for a detail cached before
+     * the field existed.
+     */
+    val altTitles: List<String> = emptyList(),
 )
 
 /**

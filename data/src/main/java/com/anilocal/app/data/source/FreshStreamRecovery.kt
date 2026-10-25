@@ -23,7 +23,13 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.coroutineContext
 
-internal data class RecoveredStream(val source: AnimeSource, val detail: AnimeDetail, val stream: VideoStream)
+/** [confident] = the source entry is a strong [TitleMatcher] match, not just the site's top hit. */
+internal data class RecoveredStream(
+    val source: AnimeSource,
+    val detail: AnimeDetail,
+    val stream: VideoStream,
+    val confident: Boolean,
+)
 
 /**
  * A recovery deliberately has no cache/pin dependency. Resolve fresh episode URLs, then measure
@@ -39,7 +45,7 @@ internal class FreshStreamRecovery(
     private val mediaGate = Semaphore(MAX_MEDIA_PROBES)
 
     suspend fun resolve(
-        title: String,
+        anime: AnimeDetail,
         episodeNumber: Int,
         failedStreamUrl: String?,
         selectedSourceId: String,
@@ -48,6 +54,7 @@ internal class FreshStreamRecovery(
             ?: withTimeoutOrNull(REGISTRY_WAIT_MS) { registry.sources.first { it.isNotEmpty() } }
             ?: error("no stream sources available")
         val sources = available.sortedBy { if (it.info.id == selectedSourceId) 0 else 1 }
+        val target = TitleMatcher.Target(anime)
         val candidates = ArrayList<Candidate>()
         var accepting = true
         val completed = CompletableDeferred<Unit>()
@@ -63,9 +70,12 @@ internal class FreshStreamRecovery(
                             ignoringFailure {
                                 withTimeoutOrNull(SOURCE_TIMEOUT_MS) sourceTimeout@ {
                                     coroutineContext.ensureActive()
-                                    val match = source.search(title, 1).firstOrNull() ?: return@sourceTimeout
+                                    // The same matcher as a normal resolve: a recovery must not swap
+                                    // in the prequel the site happens to rank first.
+                                    val match = TitleMatcher.find(target) { query -> source.search(query, 1) }
+                                        ?: return@sourceTimeout
                                     coroutineContext.ensureActive()
-                                    val detail = source.detail(match.id)
+                                    val detail = source.detail(match.candidate.id)
                                     coroutineContext.ensureActive()
                                     // Recovery must never restart a different episode as a fallback.
                                     val episode = detail.episodes.firstOrNull { it.number == episodeNumber }
@@ -81,7 +91,7 @@ internal class FreshStreamRecovery(
                                                 synchronized(candidates) {
                                                     if (accepting) variants.forEachIndexed { variantIndex, stream ->
                                                         candidates.add(Candidate(
-                                                            RecoveredStream(source, detail, stream),
+                                                            RecoveredStream(source, detail, stream, match.confident),
                                                             sourceIndex, serverIndex, variantIndex,
                                                         ))
                                                     }
@@ -139,13 +149,15 @@ internal class FreshStreamRecovery(
         val healthy = measured.toList()
         val alternatives = healthy.filter { it.candidate.result.stream.url != failedStreamUrl }
         return alternatives.ifEmpty { healthy }.sortedWith(
-            compareByDescending<MeasuredStream> { it.bytesPerSecond }
+            // A confident title match beats a faster unverified one, as in Auto's race.
+            compareByDescending<MeasuredStream> { it.candidate.result.confident }
+                .thenByDescending { it.bytesPerSecond }
                 .thenByDescending { it.candidate.result.stream.height ?: 0 }
                 .thenBy { it.candidate.sourceIndex }
                 .thenBy { it.candidate.serverIndex }
                 .thenBy { it.candidate.variantIndex },
         ).firstOrNull()?.candidate?.result
-            ?: error("No reachable stream for \"$title\", episode $episodeNumber")
+            ?: error("No reachable stream for \"${anime.title}\", episode $episodeNumber")
     }
 
     private suspend fun ignoringFailure(block: suspend () -> Unit) {

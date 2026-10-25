@@ -90,12 +90,12 @@ class AniListCatalogRepository @Inject constructor(
     override suspend fun detail(animeId: String): AnimeDetail = withContext(Dispatchers.IO) {
         val q = """
             query(${'$'}id:Int){ Media(id:${'$'}id, type:ANIME){
-              id idMal title{romaji english} coverImage{large} bannerImage
+              id idMal title{romaji english native} synonyms coverImage{large} bannerImage
               description(asHtml:false) genres episodes
               format averageScore status seasonYear duration
               studios(isMain: true) { nodes { name } } nextAiringEpisode { episode }
               relations { edges { relationType(version: 2) node {
-                id idMal type format isAdult title{romaji english} coverImage{large}
+                id idMal type format isAdult title{romaji english native} synonyms coverImage{large}
                 episodes averageScore startDate{year month}
               } } }
             } }
@@ -126,6 +126,7 @@ class AniListCatalogRepository @Inject constructor(
             duration = m.duration,
             studio = m.studios?.nodes?.firstOrNull()?.name,
             related = m.relations?.edges.orEmpty().toRelated(),
+            altTitles = m.altTitles(),
         )
     }
 
@@ -218,10 +219,21 @@ class AniListCatalogRepository @Inject constructor(
         format = format?.prettyFormat(),
         episodes = episodes,
         averageScore = averageScore,
+        altTitles = altTitles(),
     )
 
     private fun MediaDto.displayTitle() =
         title?.english ?: title?.romaji ?: title?.native ?: "Untitled"
+
+    /** Every name other than [displayTitle], romaji first (the likeliest other spelling a source
+     *  uses) — the inputs stream-source matching scores candidates against. */
+    private fun MediaDto.altTitles(): List<String> {
+        val display = displayTitle()
+        return (listOfNotNull(title?.romaji, title?.english, title?.native) + synonyms.orEmpty())
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != display }
+            .distinct()
+    }
 
     private fun String.stripHtml() = replace(HTML_TAG, "").trim()
 

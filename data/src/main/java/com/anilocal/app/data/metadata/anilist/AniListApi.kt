@@ -37,6 +37,8 @@ data class MediaDto(
     val id: Int,
     val idMal: Int?,
     val title: TitleDto?,
+    // Only requested by the detail query (the title and its relation nodes); null elsewhere.
+    val synonyms: List<String>?,
     val coverImage: CoverDto?,
     val bannerImage: String?,
     val description: String?,

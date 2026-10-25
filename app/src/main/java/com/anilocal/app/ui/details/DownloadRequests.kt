@@ -71,7 +71,7 @@ internal class DownloadRequests(
 
     private suspend fun prepare(anime: AnimeDetail, episode: Episode): PendingDownload? = coroutineScope {
         val markerRequest = async { loadOrNull { skip.markers(anime.idMal, episode.number, 0) }.orEmpty() }
-        val options = loadOrNull { streams.resolveStreams(anime.title, episode.number) }.orEmpty()
+        val options = loadOrNull { streams.resolveStreams(anime, episode.number) }.orEmpty()
         if (options.isEmpty()) {
             markerRequest.cancel()
             return@coroutineScope null

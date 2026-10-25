@@ -40,17 +40,21 @@ interface CatalogRepository {
     suspend fun anilistIdForMal(malId: Int): String?
 }
 
-/** Resolves a playable stream for a title+episode via the active AnimeSource plugin. */
+/**
+ * Resolves a playable stream for a title+episode via the active AnimeSource plugin. Takes the whole
+ * [AnimeDetail], not just a title string: telling a season apart from its prequel on a source needs
+ * the AniList id, every alternative name, and the franchise neighbours.
+ */
 interface StreamRepository {
     /** Best single stream (highest quality) — used for online playback. */
-    suspend fun resolveStream(animeTitle: String, episodeNumber: Int): VideoStream
+    suspend fun resolveStream(anime: AnimeDetail, episodeNumber: Int): VideoStream
 
     /** All available quality variants (highest first) — used by the download quality picker. */
-    suspend fun resolveStreams(animeTitle: String, episodeNumber: Int): List<VideoStream>
+    suspend fun resolveStreams(anime: AnimeDetail, episodeNumber: Int): List<VideoStream>
 
     /** Re-resolve live sources and measure media speed, bypassing saved source pins and matches. */
     suspend fun recoverStream(
-        animeTitle: String,
+        anime: AnimeDetail,
         episodeNumber: Int,
         failedStreamUrl: String? = null,
     ): VideoStream

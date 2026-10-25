@@ -125,8 +125,12 @@ class CachedCatalogRepository @Inject constructor(
         }
     }
 
+    // A detail cached before altTitles existed parses with none, and stream matching needs them to
+    // tell a sequel from its prequel on a source — refresh such a row now rather than after the TTL.
     override suspend fun detail(animeId: String): AnimeDetail =
-        cache.cached("detail:$animeId", DETAIL, TTL_DETAIL) { upstream.detail(animeId) }
+        cache.cached("detail:$animeId", DETAIL, TTL_DETAIL, outdated = { it.altTitles.isEmpty() }) {
+            upstream.detail(animeId)
+        }
 
     override suspend fun anilistIdForMal(malId: Int): String? {
         val key = "malmap:$malId"

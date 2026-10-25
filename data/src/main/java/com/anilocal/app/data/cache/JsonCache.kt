@@ -22,7 +22,8 @@ data class Aged<T>(val value: T, val ageMs: Long)
  * without any server reachable: repositories route reads through [cached], which serves any cached
  * hit instantly (stale-while-revalidate — see its KDoc) and only blocks on the network when the
  * cache is cold. Key namespaces in use: `home:*`/`browse:*`/`search:*`/`popular:*`/`detail:*`
- * (AniList catalog), `skip:*` (AniSkip), `src:*` (source title match), `extrepo:*` (extension repo
+ * (AniList catalog), `skip:*` (AniSkip), `srcmatch:*` (source title match, per AniList id),
+ * `bestsrc:*`/`srcstats:*` (Auto source pins + scoreboard), `extrepo:*`/`extmeta:*` (extension repo
  * index), `malmap:*` (MAL→AniList ids — kept forever, everything else is swept after [MAX_AGE_MS]).
  *
  * Every DB touch is failure-isolated (a cache hiccup must never take down the network path), and
@@ -85,17 +86,22 @@ class JsonCache @Inject constructor(
      * HTTP 200 + null data under load, which must not erase a good cached page), and on a cold
      * cache it's returned WITHOUT caching so the next visit refetches instead of pinning a
      * transient empty for the whole TTL.
+     *
+     * [outdated] marks a hit as needing a refresh regardless of age — for a row written before the
+     * model gained a field that defaults to empty on parse. It is still served (stale-while-
+     * revalidate as usual), just refreshed now instead of after the TTL.
      */
     suspend fun <T : Any> cached(
         key: String,
         type: Type,
         ttlMs: Long,
         preferStaleOverEmpty: Boolean = false,
+        outdated: (T) -> Boolean = { false },
         fetch: suspend () -> T,
     ): T {
         val aged = getAged<T>(key, type)
         if (aged != null) {
-            if (aged.ageMs > ttlMs) refreshInBackground(key, type, preferStaleOverEmpty, fetch)
+            if (aged.ageMs > ttlMs || outdated(aged.value)) refreshInBackground(key, type, preferStaleOverEmpty, fetch)
             return aged.value
         }
         @Suppress("UNCHECKED_CAST")

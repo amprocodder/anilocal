@@ -133,9 +133,21 @@ the picker; `info.configurable` flags sources with settings) **and two more susp
 impls** for per-source settings, `preferences()` and `setPreference()` (no-ops unless overridden). So a
 minimal source implements six members and a configurable one eight, even though browsing goes through
 AniList's `CatalogRepository`. `SourceStreamRepository` is the join: per request it runs `search` → `detail` →
-`servers().firstOrNull()` → `resolve`, sorts variants by height descending, and throws when `search`
-finds no match (an extension that finds nothing throws and the player degrades to a short hint —
-there is no longer a built-in source that matched *any* query to keep playback always-resolving). It exposes
+`servers().firstOrNull()` → `resolve`, sorts variants by height descending, and throws when no search
+result is the title (an extension that finds nothing throws and the player degrades to a short hint —
+there is no longer a built-in source that matched *any* query to keep playback always-resolving).
+**Which search result is the title is decided by `TitleMatcher`, never by the site's ranking** — a
+sequel's search lists its prequel first, and since the adapter numbers every entry's episodes 1..N,
+taking `firstOrNull()` played season 1's episodes under season 2 with no error anywhere. So
+`StreamRepository` takes the whole `AnimeDetail` (not a title string): candidates are scored against
+every AniList name (`altTitles`: romaji/English/native/synonyms), season- and part-aware ("Rotten2",
+"2nd Season", "第2期", "II" all parse as season 2), and rejected when they look more like a franchise
+neighbour (`related`, with the neighbours' own `altTitles`) than like the title; up to three searches
+(display title, romaji, season-stripped base name) run until a confident match. A site's unverified top
+hit is trusted only for a standalone title, never for one with a prequel/parent. The requested episode
+must exist on the matched entry — there's no fallback to episode 1. `FreshStreamRecovery` (the
+player's mid-episode `recoverStream`) matches through the same `TitleMatcher` and ranks a confident
+match above a faster unverified one. It exposes
 `resolveStream` (single, highest quality — but carrying the de-duped **union of every variant's
 subtitles**, so captions on lower renditions aren't lost to the height sort → online playback) and
 `resolveStreams` (all variants → the download quality picker).
@@ -181,12 +193,15 @@ for the old MAL client id).
   or stale) is served instantly, a past-TTL hit also kicks a deduped background refresh, and only a
   cold cache blocks on the network. That makes Home/Explore/Details/Search, AniSkip markers, and the
   extension-repo index render offline once seen (namespaced keys: `home:*`, `browse:*`, `search:*`,
-  `popular:*`, `detail:*`, `skip:*`, `src:*`, `extrepo:*`, `malmap:*` — the last is permanent, the
-  rest sweep after 30 days). `CatalogRepository` binds to `CachedCatalogRepository` (decorator over
-  `AniListCatalogRepository`); when adding a catalog query, add it to **both**. Stream resolution still
-  needs the network — it caches only the search→detail leg (episode ids, 4h) to cut round-trips, never
-  server/stream URLs (tokenized/short-lived); a cached match that stops resolving falls back to one
-  live re-run which overwrites the entry on success. Posters survive offline via the app-wide Coil
+  `popular:*`, `detail:*`, `skip:*`, `srcmatch:*`, `extrepo:*`/`extmeta:*`, `bestsrc:*`/`srcstats:*`,
+  `malmap:*` — the last is permanent, the rest sweep after 30 days untouched). `CatalogRepository`
+  binds to `CachedCatalogRepository` (decorator over `AniListCatalogRepository`); when adding a catalog
+  query, add it to **both**. Stream resolution still
+  needs the network — it caches only the search→detail leg (`srcmatch:<sourceId>:<anilistId>`: episode
+  ids + match confidence, 4h) to cut round-trips, never server/stream URLs (tokenized/short-lived); a
+  cached match that stops resolving falls back to one live re-run which overwrites the entry on success.
+  Key by **AniList id, never title** (a remake shares its original's display title). A `detail:` row
+  cached before `altTitles` existed is refreshed on its next read (`JsonCache.cached`'s `outdated`). Posters survive offline via the app-wide Coil
   loader in `AniLocalApp` (`respectCacheHeaders(false)` + 256 MB disk cache).
 
 - **One shared Media3 `Cache`** (`data/.../download/DownloadModule.kt`) is written by the
@@ -259,15 +274,17 @@ for the old MAL client id).
 - **"Auto (best source)" races installed sources and pins the winner.** `selectedSourceId` can hold a
   sentinel `Sources.AUTO`; when set, `SourceStreamRepository.resolveStreams` routes through
   `AutoSourceSelector` (`data/.../source/`) instead of one fixed source. The per-source pipeline is
-  factored out as `resolveVia(source, title, ep)` (the cached-match fast path + a live fallback,
-  returning a `SourceResolution` that also reports whether the match carried the EXACT episode) — the
+  factored out as `resolveVia(source, anime, ep)` (the cached-match fast path + a live fallback,
+  returning a `SourceResolution` that also reports whether the title match was `confident`) — the
   **one** unit both the manual path and the selector's race run, so there's a single pipeline. The
-  selector: (1) reuses a per-title **pin** (`bestsrc:<title>` in the disposable JsonCache, 7-day TTL) —
-  a warm pinned resolve is the common case and matches manual latency; (2) on a pin miss/fail, **races**
+  selector: (1) reuses a per-title **pin** (`bestsrc:<anilistId>` in the disposable JsonCache, 7-day TTL) —
+  a warm pinned resolve is the common case and matches manual latency (a pin won weakly, i.e. nothing
+  matched confidently, is kept on a weak result rather than re-raced every episode); (2) on a pin miss/fail, **races**
   the top-K(≤4) sources ranked by a persisted scoreboard (`srcstats:<sourceId>`: latency EWMA that moves
   only on success ÷ Laplace-smoothed success rate), staggered 300 ms, gated by a shared `Semaphore(3)`,
-  12 s per candidate / 15 s overall; the FIRST *strong* success (non-empty **and** exact episode) wins
-  immediately, non-exact "weak" successes are a fallback only if nothing strong lands. Probes run in a
+  12 s per candidate / 15 s overall; the FIRST *strong* success (non-empty **and** a confident title
+  match) wins immediately, unconfident "weak" ones (a site's unverified top hit) are a fallback only if
+  nothing strong lands. Probes run in a
   scope **detached** from the caller (a child of `appScope`) so a slow blocking lib-14 loser can't hold
   up returning the winner; a `finally { raceScope.cancel() }` tears losers down on every exit.
   **Never persists a stream URL** (tokenized) — only the winning source id + stats, all re-derivable and

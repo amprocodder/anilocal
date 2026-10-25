@@ -29,11 +29,11 @@ import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
 
-/** One source's resolved streams plus whether its match actually carried the requested episode
- *  number (vs. falling back to the first episode). The exact-episode flag is the language-independent
- *  validity signal the auto-selector prefers — it can't compare romaji-vs-English titles, but a
- *  source that indexes episode N for this title is almost certainly the right entry. */
-data class SourceResolution(val streams: List<VideoStream>, val exactEpisode: Boolean)
+/** One source's resolved streams plus whether its title match was [confident] (a strong match
+ *  against AniList's names for the title) or only the site's unverified top hit. The auto-selector
+ *  prefers confident results; an unconfident one is a fallback only. (The requested episode itself
+ *  always exists on the matched entry — the pipeline fails rather than substitute another.) */
+data class SourceResolution(val streams: List<VideoStream>, val confident: Boolean)
 
 /**
  * "Auto (best source)" resolution. Instead of routing every request to one fixed source, this races
@@ -62,48 +62,51 @@ class AutoSourceSelector @Inject constructor(
      *  one challenge at a time, so the host must police fan-out itself. */
     private val probeGate = Semaphore(MAX_CONCURRENT_PROBES)
 
-    /** A per-title pin: which source last won, and when. */
-    data class Pin(val sourceId: String, val wonAt: Long)
+    /** A per-title (per AniList id) pin: which source last won, when, and whether it won with a
+     *  confident match (a weak win means no source matched confidently when it was raced). */
+    data class Pin(val sourceId: String, val wonAt: Long, val confident: Boolean = true)
 
     /** A per-source scoreboard row. Latency EWMA moves only on success, so a one-off 30 s cold
      *  Cloudflare solve or a timeout never poisons a source's ranking; failures only bump the count. */
     data class SrcStat(val latencyEwmaMs: Double, val successes: Int, val failures: Int)
 
     /**
-     * Resolve [title] episode [episodeNumber] through the automatic selector. [probe] resolves ONE
-     * source end-to-end (search → detail → servers → resolve) — supplied by the caller so the real
-     * pipeline (and its cache) is never duplicated here. Throws when every candidate fails, with the
-     * same shape a manual resolve throws, so the player hint and download failure handling are
-     * unchanged.
+     * Resolve [title] (AniList id [animeId]) episode [episodeNumber] through the automatic selector.
+     * [probe] resolves ONE source end-to-end (search → detail → servers → resolve) — supplied by the
+     * caller so the real pipeline (and its cache) is never duplicated here. Throws when every
+     * candidate fails, with the same shape a manual resolve throws, so the player hint and download
+     * failure handling are unchanged.
      */
     suspend fun resolve(
+        animeId: String,
         title: String,
         episodeNumber: Int,
         probe: suspend (AnimeSource) -> SourceResolution,
     ): SourceResolution {
         val available = awaitSources()
         if (available.isEmpty()) error("no stream sources available")
+        val key = memoKey(animeId)
 
         // One source → no race, but still bound the hang and record the outcome.
         if (available.size == 1) {
             val only = available.first()
             return tryProbe(only, probe, SINGLE_TIMEOUT_MS)
                 ?.takeIf { it.streams.isNotEmpty() }
-                ?.also { onWin(title, only) }
+                ?.also { onWin(key, only, it.confident) }
                 ?: error("source '${only.info.name}': could not resolve \"$title\" episode $episodeNumber")
         }
 
-        val key = memoKey(title)
-
         // PIN PATH — reuse the last winner; a warm pinned resolve is the common case and matches
-        // manual latency. A pin that no longer resolves the EXACT episode (source rotated ids, or a
-        // freshly-aired episode it hasn't indexed) is evicted and re-raced.
-        val pinnedId = cache.getFresh<Pin>(key, PIN_TYPE, PIN_TTL_MS)?.sourceId
-        val pinned = pinnedId?.let { registry.get(it) }
-        if (pinned != null) {
+        // manual latency. A pin that no longer resolves (source rotated ids, or a freshly-aired
+        // episode it hasn't indexed) is evicted and re-raced, as is a confident pin that has gone
+        // weak. A pin that was ALREADY a weak win is kept on a weak result: nothing matched
+        // confidently when it was raced, so re-racing every episode would only add latency.
+        val pin = cache.getFresh<Pin>(key, PIN_TYPE, PIN_TTL_MS)
+        val pinned = pin?.let { registry.get(it.sourceId) }
+        if (pin != null && pinned != null) {
             val r = tryProbe(pinned, probe, PIN_TIMEOUT_MS)
-            if (r != null && r.streams.isNotEmpty() && r.exactEpisode) {
-                onWin(title, pinned)
+            if (r != null && r.streams.isNotEmpty() && (r.confident || !pin.confident)) {
+                onWin(key, pinned, r.confident)
                 return r
             }
             cache.remove(key)   // pin no longer good → fall through to a fresh race
@@ -115,9 +118,9 @@ class AutoSourceSelector @Inject constructor(
     /**
      * Race the [candidates]: each probes on IO, staggered so the fastest source usually answers
      * before the slower ones even start, and gated so we never hammer the shared client/WebView. The
-     * FIRST strong success (non-empty AND exact episode) wins immediately and the rest are cancelled;
-     * non-exact ("weak") successes are buffered and only used if no strong success arrives before the
-     * candidates settle or the overall deadline fires. Only a total wipeout throws.
+     * FIRST strong success (non-empty AND a confident title match) wins immediately and the rest are
+     * cancelled; unconfident ("weak") successes are buffered and only used if no strong success
+     * arrives before the candidates settle or the overall deadline fires. Only a total wipeout throws.
      */
     private suspend fun race(
         title: String,
@@ -147,7 +150,7 @@ class AutoSourceSelector @Inject constructor(
                         if (strong.isCompleted) return@withPermit
                         val r = tryProbe(src, probe, CANDIDATE_TIMEOUT_MS) ?: return@withPermit
                         if (r.streams.isEmpty()) return@withPermit
-                        if (r.exactEpisode) strong.complete(src to r) else weak.add(src to r)
+                        if (r.confident) strong.complete(src to r) else weak.add(src to r)
                     }
                 }
             }
@@ -160,7 +163,7 @@ class AutoSourceSelector @Inject constructor(
             val winner = outcome ?: weak.firstOrNull()
                 ?: error("no source could resolve \"$title\" episode $episodeNumber (${candidates.size} tried)")
 
-            onWin(title, winner.first)
+            onWin(key, winner.first, winner.second.confident)
             return winner.second
         } finally {
             raceScope.cancel()
@@ -223,7 +226,8 @@ class AutoSourceSelector @Inject constructor(
     internal suspend fun withRecoveryPermit(block: suspend () -> Unit) = probeGate.withPermit { block() }
 
     /** A measured recovery winner replaces Auto's pin only after the caller accepts the result. */
-    internal suspend fun rememberRecoveryWinner(title: String, source: AnimeSource) = onWin(title, source)
+    internal suspend fun rememberRecoveryWinner(animeId: String, source: AnimeSource, confident: Boolean) =
+        onWin(memoKey(animeId), source, confident)
 
     /** Every source id currently pinned as some title's best. Auto-eviction spares these: a pinned
      *  source is the winner for at least one title, and removing it would break that title. */
@@ -260,8 +264,8 @@ class AutoSourceSelector @Inject constructor(
         return stat.latencyEwmaMs / rate
     }
 
-    private suspend fun onWin(title: String, source: AnimeSource) {
-        cache.put(memoKey(title), PIN_TYPE, Pin(source.info.id, System.currentTimeMillis()))
+    private suspend fun onWin(key: String, source: AnimeSource, confident: Boolean) {
+        cache.put(key, PIN_TYPE, Pin(source.info.id, System.currentTimeMillis(), confident))
         runCatching { settings.setLastAutoWinner(source.info.name) }
     }
 
@@ -274,7 +278,8 @@ class AutoSourceSelector @Inject constructor(
         } ?: emptyList()
     }
 
-    private fun memoKey(title: String) = "bestsrc:${title.trim().lowercase()}"
+    // Keyed by AniList id: titles collide (a remake and its original share a display title).
+    private fun memoKey(animeId: String) = "bestsrc:$animeId"
     private fun statKey(sourceId: String) = "srcstats:$sourceId"
 
     private companion object {

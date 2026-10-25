@@ -243,7 +243,7 @@ class DetailsViewModel @Inject constructor(
                         if (ep.number !in episodesQueuedNow()) {
                             coroutineScope {
                                 val markers = async { loadOrNull { skip.markers(d.idMal, ep.number, 0) }.orEmpty() }
-                                val stream = checkNotNull(pickForQuality(streams.resolveStreams(d.title, ep.number), quality))
+                                val stream = checkNotNull(pickForQuality(streams.resolveStreams(d, ep.number), quality))
                                 downloads.enqueue(d, ep, stream, markers.await())
                             }
                         }

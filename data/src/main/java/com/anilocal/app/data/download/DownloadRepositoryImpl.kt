@@ -22,6 +22,7 @@ import com.anilocal.app.domain.model.OfflineEpisode
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.Subtitle
 import com.anilocal.app.domain.model.VideoStream
+import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.repo.StreamRepository
@@ -68,8 +69,11 @@ class DownloadRepositoryImpl @Inject constructor(
     private val dao: DownloadDao,
     private val okHttp: OkHttpClient,
     // For retry(): a failed download's URL is usually an expired token, so retrying means
-    // re-resolving a fresh stream from the active source, not re-fetching the dead URL.
+    // re-resolving a fresh stream from the active source, not re-fetching the dead URL. Resolution
+    // needs the title's full AniList detail (every name + franchise neighbours, to pick the right
+    // season on the source), which the catalog serves from cache.
     private val streams: StreamRepository,
+    private val catalog: CatalogRepository,
     moshi: Moshi,
     settings: SettingsRepository,
     @Named("downloadDir") private val downloadDir: File,
@@ -332,7 +336,7 @@ class DownloadRepositoryImpl @Inject constructor(
                 // second tap) must not purge and restart a download that has meanwhile been fixed by
                 // a manual retry, re-enqueued by a season re-press, or even completed.
                 val e = dao.getById(id)?.takeIf { it.state == STATE_FAILED } ?: return@operation false
-                val variants = runCatching { streams.resolveStreams(e.title, e.episodeNumber) }
+                val variants = runCatching { streams.resolveStreams(catalog.detail(e.animeId), e.episodeNumber) }
                     .onFailure { if (it is CancellationException) throw it; Log.w(TAG, "Retry $id: re-resolve failed: ${it.message}") }
                     .getOrNull() ?: return@operation false
                 val stream = pickVariant(variants, e.quality) ?: run {

@@ -405,7 +405,7 @@ class PlayerViewModel @Inject constructor(
             checkSession(generation)
             val stream = if (recovering) {
                 // Fresh source/server discovery and byte measurements: no stale prefetch or winner pin.
-                streams.recoverStream(d.title, episode, failedUrl)
+                streams.recoverStream(d, episode, failedUrl)
             } else {
                 val pre = prefetched?.takeIf { it.first == episode }?.second
                 prefetched?.let { if (it.first != episode) it.second.cancel() }
@@ -415,7 +415,7 @@ class PlayerViewModel @Inject constructor(
                     catch (cancelled: CancellationException) { coroutineContext.ensureActive(); null }
                     catch (_: Exception) { null }
                 }
-                prefetchedStream ?: streams.resolveStream(d.title, episode)
+                prefetchedStream ?: streams.resolveStream(d, episode)
             }
             checkSession(generation)
             play(stream.url, stream.mimeType, stream.subtitles, stream.headers, generation)
@@ -587,7 +587,7 @@ class PlayerViewModel @Inject constructor(
         val next = episodeNumber + 1
         if (prefetched?.first == next) return
         prefetched?.second?.cancel()
-        val titleText = detail?.title ?: run { prefetched = null; return }
+        val anime = detail ?: run { prefetched = null; return }
         prefetched = next to viewModelScope.async(Dispatchers.IO) {
             // A failed speculative resolve is optional; cancellation must still stop its requests.
             optional {
@@ -596,7 +596,7 @@ class PlayerViewModel @Inject constructor(
                 if (downloads.getOffline(animeId, next) != null) return@optional null
                 // A normal advance may join this exact next-episode resolve after changing generation.
                 coroutineContext.ensureActive()
-                streams.resolveStream(titleText, next).also { coroutineContext.ensureActive() }
+                streams.resolveStream(anime, next).also { coroutineContext.ensureActive() }
             }
         }
     }
