@@ -272,7 +272,14 @@ class PlayerViewModel @Inject constructor(
         val agent = headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }?.value ?: "AniLocal"
         val http = DefaultHttpDataSource.Factory().setUserAgent(agent)
             .setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(headers)
+        // READ-ONLY over the downloads cache: Media3 builds a write sink by default, which made
+        // ordinary streaming write every byte into the DownloadManager's SimpleCache — never
+        // evicted (NoOpCacheEvictor, and an evictor can't tell downloads from streams), and keyed
+        // by tokenized URLs, so each re-watch wrote another full copy. An unreadable downloaded span
+        // falls through to upstream rather than failing the episode.
         return CacheDataSource.Factory().setCache(cache)
+            .setCacheWriteDataSinkFactory(null)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
             .setUpstreamDataSourceFactory(DefaultDataSource.Factory(context,
                 if (offline) PlaceholderDataSource.FACTORY else http))
     }

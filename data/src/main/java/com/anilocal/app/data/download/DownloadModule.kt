@@ -113,5 +113,7 @@ object DownloadModule {
     ): CacheDataSource.Factory =
         CacheDataSource.Factory()
             .setCache(cache)
+            .setCacheWriteDataSinkFactory(null)   // read-only: this cache IS the user's downloads
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
             .setUpstreamDataSourceFactory(DefaultDataSource.Factory(context, http))
 }

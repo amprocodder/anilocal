@@ -205,9 +205,14 @@ for the old MAL client id).
   loader in `AniLocalApp` (`respectCacheHeaders(false)` + 256 MB disk cache).
 
 - **One shared Media3 `Cache`** (`data/.../download/DownloadModule.kt`) is written by the
-  `DownloadManager` and read back by the playback `CacheDataSource.Factory`. The player is built on that
-  factory, so it transparently serves downloaded bytes offline and falls through to network when online.
-  There are **two** `DefaultHttpDataSource.Factory` singletons: the unqualified one is the player's
+  `DownloadManager` and read back by the player's `CacheDataSource.Factory` (built per stream in
+  `PlayerViewModel.playbackDataSource`), so it transparently serves downloaded bytes offline and falls
+  through to network when online. Every playback factory is **read-only** (`setCacheWriteDataSinkFactory(null)`
+  + `FLAG_IGNORE_CACHE_ON_ERROR`): the `SimpleCache` uses `NoOpCacheEvictor` and *is* the user's
+  downloads, so streaming must never write into it (Media3 writes through by default, and with tokenized
+  URLs every re-watch wrote another full copy that nothing ever deleted) — and **never add a
+  `CacheEvictor`**: it can't tell downloaded spans from streamed ones and would silently delete offline
+  episodes. The cost is that rewinding into already-watched video re-fetches it. There are **two** `DefaultHttpDataSource.Factory` singletons: the unqualified one is the player's
   (per-stream headers set by `PlayerViewModel`), `@Named("downloadHttp")` is the `DownloadManager`'s —
   they must stay separate or playback headers clobber a running download's Referer (403s). Download
   headers ride a `ResolvingDataSource` that consults `DownloadHeaderStore` **per request**: enqueue/
