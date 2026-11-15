@@ -43,7 +43,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Check
@@ -79,7 +79,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -107,10 +106,8 @@ import kotlinx.coroutines.delay
 private val TimerColor = Color(0xFFBEBEBE)
 private val ScrimColor = Color.Black.copy(alpha = 0.55f)
 private val OverlayMask = Color(0x99121318)
-private val TopScrimBrush =
-    Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.75f), Color.Transparent))
-private val BottomScrimBrush =
-    Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f)))
+private val DimColor = Color.Black.copy(alpha = 0.45f)
+private val DiscColor = Color.Black.copy(alpha = 0.35f)
 
 @OptIn(UnstableApi::class)
 private val ResizeModes = listOf(
@@ -645,174 +642,180 @@ private fun PlayerControls(
     onSelectText: (Int) -> Unit,
     onDisableText: () -> Unit,
 ) {
-    // Gradient scrim bands top and bottom (AniLab-style) — purely decorative, so touches on them
-    // fall through to the tap layer underneath. The watch page's 16:9 video gets a compact skin:
-    // shorter scrims, smaller center buttons, and no lock/episode-panel (the list is right below).
+    // YouTube-style layout: an even dim over the whole video (purely decorative, so touches fall
+    // through to the tap layer), back + title top-left with the tool icons top-right, the transport
+    // centred, and the time + fullscreen toggle above a full-width seek bar at the bottom. The
+    // watch page's 16:9 video gets the same layout at a smaller size, minus lock/episodes/title.
     Box(Modifier.fillMaxSize()) {
-        Box(
-            Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(if (fullscreen) 130.dp else 72.dp)
-                .background(TopScrimBrush)
-        )
-        Box(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(if (fullscreen) 190.dp else 110.dp)
-                .background(BottomScrimBrush)
-        )
+        Box(Modifier.fillMaxSize().background(DimColor))
 
         // Fullscreen controls stay inside the safe area so nothing sits under a cutout / gesture
         // pill. The watch-page video already sits below the status bar, and the nav-bar inset
         // belongs to the list under it, not to the video.
         Box(Modifier.fillMaxSize().then(if (fullscreen) Modifier.safeDrawingPadding() else Modifier)) {
-            // Top: title + episode line only (no buttons; the watch page shows these under the video).
-            if (fullscreen) {
-                Column(
-                    Modifier
-                        .align(Alignment.TopStart)
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                ) {
-                    Text(
-                        title,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        "Episode $episodeNumber",
-                        color = TimerColor,
-                        maxLines = 1,
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-            }
-
-            // Center: rewind 10s · play/pause · forward 10s. While rebuffering the screen-level
-            // spinner takes the play button's spot.
+            val toolIcon = if (fullscreen) 24.dp else 22.dp
+            // Top: back · title + episode line · lock · speed · CC · episodes · resize
             Row(
-                Modifier.align(Alignment.Center),
-                horizontalArrangement = Arrangement.spacedBy(if (fullscreen) 48.dp else 28.dp),
+                Modifier
+                    .align(Alignment.TopStart)
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = if (fullscreen) 8.dp else 0.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val sideIcon = if (fullscreen) 40.dp else 30.dp
-                IconButton(onClick = onRewind, modifier = Modifier.size(sideIcon + 16.dp)) {
-                    Icon(Icons.Filled.Replay10, "Rewind 10s", tint = Color.White, modifier = Modifier.size(sideIcon))
-                }
-                IconButton(
-                    onClick = onPlayPause,
-                    enabled = !isBuffering,
-                    modifier = Modifier.size(if (fullscreen) 72.dp else 52.dp),
-                ) {
-                    if (!isBuffering) {
-                        Icon(
-                            if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            if (isPlaying) "Pause" else "Play",
-                            tint = Color.White,
-                            modifier = Modifier.size(if (fullscreen) 60.dp else 42.dp),
+                ControlIcon(Icons.Filled.KeyboardArrowDown, "Back", onBack, iconSize = if (fullscreen) 32.dp else 28.dp)
+                Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
+                    // The watch page shows the title and episode right under the video.
+                    if (fullscreen) {
+                        Text(
+                            title,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Episode $episodeNumber",
+                            color = TimerColor,
+                            maxLines = 1,
+                            style = MaterialTheme.typography.labelMedium,
                         )
                     }
                 }
-                IconButton(onClick = onForward, modifier = Modifier.size(sideIcon + 16.dp)) {
-                    Icon(Icons.Filled.Forward10, "Forward 10s", tint = Color.White, modifier = Modifier.size(sideIcon))
+                if (fullscreen) ControlIcon(Icons.Filled.LockOpen, "Lock controls", onLock, iconSize = toolIcon)
+                Box {
+                    ControlIcon(Icons.Filled.Speed, "Playback speed", { onSpeedMenuOpenChange(true) }, iconSize = toolIcon)
+                    DropdownMenu(
+                        expanded = speedMenuOpen,
+                        onDismissRequest = { onSpeedMenuOpenChange(false) },
+                    ) {
+                        SpeedOptions.forEach { s ->
+                            DropdownMenuItem(
+                                text = { Text(speedLabel(s)) },
+                                onClick = { onSelectSpeed(s); onSpeedMenuOpenChange(false) },
+                                leadingIcon = { if (s == speed) Icon(Icons.Filled.Check, null) },
+                            )
+                        }
+                    }
                 }
+                if (textTracks.isNotEmpty()) {
+                    Box {
+                        ControlIcon(Icons.Filled.ClosedCaption, "Subtitles", { onCcMenuOpenChange(true) }, iconSize = toolIcon)
+                        DropdownMenu(expanded = ccMenuOpen, onDismissRequest = { onCcMenuOpenChange(false) }) {
+                            DropdownMenuItem(
+                                text = { Text("Off") },
+                                onClick = { onDisableText(); onCcMenuOpenChange(false) },
+                                leadingIcon = { if (textDisabled) Icon(Icons.Filled.Check, null) },
+                            )
+                            textTracks.forEachIndexed { i, t ->
+                                DropdownMenuItem(
+                                    text = { Text(t.label) },
+                                    onClick = { onSelectText(i); onCcMenuOpenChange(false) },
+                                    leadingIcon = { if (!textDisabled && t.selected) Icon(Icons.Filled.Check, null) },
+                                )
+                            }
+                        }
+                    }
+                }
+                if (hasEpisodeList && fullscreen) {
+                    ControlIcon(Icons.AutoMirrored.Filled.PlaylistPlay, "Episodes", onOpenEpisodes, iconSize = toolIcon)
+                }
+                ControlIcon(Icons.Filled.AspectRatio, "Resize mode", onCycleResize, iconSize = toolIcon)
             }
 
-            // Bottom: seek bar flanked by the timers, then every other button in one centered row.
+            // Center: previous · rewind 10s · play/pause · forward 10s · next, each on a soft dark
+            // disc. While rebuffering the screen-level spinner takes the play button's spot.
+            Row(
+                Modifier.align(Alignment.Center),
+                horizontalArrangement = Arrangement.spacedBy(if (fullscreen) 32.dp else 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val side = if (fullscreen) 52.dp else 40.dp
+                val sideIcon = if (fullscreen) 32.dp else 24.dp
+                CenterButton(Icons.Filled.SkipPrevious, "Previous episode", onPrev, side, sideIcon, enabled = hasPrev)
+                CenterButton(Icons.Filled.Replay10, "Rewind 10s", onRewind, side, sideIcon)
+                CenterButton(
+                    if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    if (isPlaying) "Pause" else "Play",
+                    onPlayPause,
+                    size = if (fullscreen) 72.dp else 52.dp,
+                    iconSize = if (fullscreen) 48.dp else 34.dp,
+                    showIcon = !isBuffering,
+                    enabled = !isBuffering,
+                )
+                CenterButton(Icons.Filled.Forward10, "Forward 10s", onForward, side, sideIcon)
+                CenterButton(Icons.Filled.SkipNext, "Next episode", onNext, side, sideIcon, enabled = hasNext)
+            }
+
+            // Bottom: "position / duration" left and the fullscreen toggle right, over a full-width
+            // seek bar.
             Column(
                 Modifier
                     .align(Alignment.BottomStart)
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = if (fullscreen) 6.dp else 0.dp),
+                    .padding(horizontal = if (fullscreen) 16.dp else 8.dp)
+                    .padding(bottom = if (fullscreen) 8.dp else 0.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         fmtTime(position),
-                        color = TimerColor,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    SeekBar(
-                        positionMs = position,
-                        bufferedMs = buffered,
-                        durationMs = duration,
-                        markers = markers,
-                        onScrub = onScrub,
-                        onScrubFinished = onScrubFinished,
-                        onScrubCancel = onScrubCancel,
-                        accent = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(start = 4.dp),
                     )
                     Text(
-                        fmtTime(duration),
+                        "  /  ${fmtTime(duration)}",
                         color = TimerColor,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.weight(1f),
                     )
-                }
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(
-                        if (fullscreen) 8.dp else 0.dp, Alignment.CenterHorizontally,
-                    ),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // In fullscreen, back == exit fullscreen (the button at the end of this row).
-                    if (!fullscreen) ControlIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack, iconSize = 24.dp)
-                    if (fullscreen) ControlIcon(Icons.Filled.LockOpen, "Lock controls", onLock, iconSize = 22.dp)
-                    ControlIcon(Icons.Filled.SkipPrevious, "Previous episode", onPrev, enabled = hasPrev, iconSize = 24.dp)
-                    ControlIcon(Icons.Filled.SkipNext, "Next episode", onNext, enabled = hasNext, iconSize = 24.dp)
-                    Box {
-                        ControlIcon(Icons.Filled.Speed, "Playback speed", { onSpeedMenuOpenChange(true) }, iconSize = 24.dp)
-                        DropdownMenu(
-                            expanded = speedMenuOpen,
-                            onDismissRequest = { onSpeedMenuOpenChange(false) },
-                        ) {
-                            SpeedOptions.forEach { s ->
-                                DropdownMenuItem(
-                                    text = { Text(speedLabel(s)) },
-                                    onClick = { onSelectSpeed(s); onSpeedMenuOpenChange(false) },
-                                    leadingIcon = { if (s == speed) Icon(Icons.Filled.Check, null) },
-                                )
-                            }
-                        }
-                    }
-                    if (textTracks.isNotEmpty()) {
-                        Box {
-                            ControlIcon(Icons.Filled.ClosedCaption, "Subtitles", { onCcMenuOpenChange(true) }, iconSize = 24.dp)
-                            DropdownMenu(expanded = ccMenuOpen, onDismissRequest = { onCcMenuOpenChange(false) }) {
-                                DropdownMenuItem(
-                                    text = { Text("Off") },
-                                    onClick = { onDisableText(); onCcMenuOpenChange(false) },
-                                    leadingIcon = { if (textDisabled) Icon(Icons.Filled.Check, null) },
-                                )
-                                textTracks.forEachIndexed { i, t ->
-                                    DropdownMenuItem(
-                                        text = { Text(t.label) },
-                                        onClick = { onSelectText(i); onCcMenuOpenChange(false) },
-                                        leadingIcon = { if (!textDisabled && t.selected) Icon(Icons.Filled.Check, null) },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    if (hasEpisodeList && fullscreen) {
-                        ControlIcon(Icons.AutoMirrored.Filled.PlaylistPlay, "Episodes", onOpenEpisodes, iconSize = 24.dp)
-                    }
-                    ControlIcon(Icons.Filled.AspectRatio, "Resize mode", onCycleResize, iconSize = 24.dp)
                     ControlIcon(
                         if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
                         if (fullscreen) "Exit fullscreen" else "Fullscreen",
                         onToggleFullscreen,
-                        iconSize = 24.dp,
+                        iconSize = if (fullscreen) 28.dp else 24.dp,
                     )
                 }
+                SeekBar(
+                    positionMs = position,
+                    bufferedMs = buffered,
+                    durationMs = duration,
+                    markers = markers,
+                    onScrub = onScrub,
+                    onScrubFinished = onScrubFinished,
+                    onScrubCancel = onScrubCancel,
+                    accent = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
+        }
+    }
+}
+
+/** A transport button on a translucent dark disc (the centred YouTube-style controls). */
+@Composable
+private fun CenterButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    desc: String,
+    onClick: () -> Unit,
+    size: androidx.compose.ui.unit.Dp,
+    iconSize: androidx.compose.ui.unit.Dp,
+    enabled: Boolean = true,
+    showIcon: Boolean = true,
+) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(size).background(DiscColor, CircleShape),
+    ) {
+        if (showIcon) {
+            Icon(
+                icon,
+                desc,
+                tint = if (enabled) Color.White else Color.White.copy(alpha = 0.3f),
+                modifier = Modifier.size(iconSize),
+            )
         }
     }
 }
