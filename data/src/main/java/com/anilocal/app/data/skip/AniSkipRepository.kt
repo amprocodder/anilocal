@@ -21,9 +21,9 @@ class AniSkipRepository @Inject constructor(
         episodeNumber: Int,
         episodeLengthSec: Long,
     ): List<SkipMarker> {
-        // No MAL id (e.g. the built-in Creative-Commons sample) → show demo markers so the
-        // skip control is still exercised. Real titles get real AniSkip data (or none).
-        if (idMal == null) return demo(episodeLengthSec)
+        // AniSkip is keyed by MAL id: without one there's nothing to look up, so no markers
+        // (never fabricated ones — a Skip button that jumps to made-up times is worse than none).
+        if (idMal == null) return emptyList()
 
         return withContext(Dispatchers.IO) {
             // Cache-first (24h): markers are crowd-sourced and near-static, and this also keeps the
@@ -127,20 +127,5 @@ class AniSkipRepository @Inject constructor(
         val CAND_LIST: java.lang.reflect.Type =
             Types.newParameterizedType(List::class.java, Cand::class.java)
         const val TTL_MS = 24L * 60 * 60 * 1000   // new submissions for airing shows land within a day
-    }
-
-    // Only emit the OUTRO when the episode length is known: with lengthSec == 0 (duration not yet
-    // reported at STATE_READY) the window would collapse to the empty range [0, 0) and never trigger.
-    private fun demo(lengthSec: Long) = buildList {
-        add(SkipMarker(SkipMarker.Type.INTRO, 3_000, 15_000))
-        if (lengthSec > 0) {
-            add(
-                SkipMarker(
-                    SkipMarker.Type.OUTRO,
-                    startMs = (lengthSec - 25).coerceAtLeast(0) * 1000,
-                    endMs = lengthSec * 1000,
-                ),
-            )
-        }
     }
 }
