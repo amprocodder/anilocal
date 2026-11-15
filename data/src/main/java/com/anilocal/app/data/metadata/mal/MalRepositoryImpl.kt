@@ -64,7 +64,8 @@ class MalRepositoryImpl internal constructor(
                         val status = malStatus(e.status) ?: return@forEach
                         rows += MalEntryEntity(
                             malId = e.animeId,
-                            title = e.title ?: "Untitled",
+                            // English is the primary display name app-wide; MAL's romaji only when there's no English one.
+                            title = e.titleEnglish?.trim()?.takeIf { it.isNotEmpty() } ?: e.title ?: "Untitled",
                             posterUrl = normalizeImage(e.imagePath),
                             status = status.api,
                             score = e.score ?: 0,

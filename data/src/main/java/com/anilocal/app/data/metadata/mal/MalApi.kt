@@ -31,6 +31,8 @@ interface MalApi {
 data class MalLoadEntry(
     @Json(name = "anime_id") val animeId: Int,
     @Json(name = "anime_title") val title: String?,
+    /** MAL's English title, blank when it has none — preferred for display (English is primary). */
+    @Json(name = "anime_title_eng") val titleEnglish: String? = null,
     @Json(name = "anime_image_path") val imagePath: String?,
     val status: Int,
     val score: Int?,

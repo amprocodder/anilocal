@@ -54,6 +54,9 @@ data class AnimeDetail(
      * the field existed.
      */
     val altTitles: List<String> = emptyList(),
+    /** The romaji name when it differs from the (English-first) [title]; shown small under it on
+     *  Details only. Null when identical, absent, or for a detail cached before the field existed. */
+    val romajiTitle: String? = null,
 )
 
 /**

@@ -107,6 +107,7 @@ class AniListCatalogRepository @Inject constructor(
         AnimeDetail(
             id = m.id.toString(),
             title = m.displayTitle(),
+            romajiTitle = m.title?.romaji?.trim()?.takeIf { it.isNotEmpty() && it != m.displayTitle() },
             posterUrl = m.coverImage?.large,
             bannerUrl = m.bannerImage,
             synopsis = m.description?.stripHtml().orEmpty(),
