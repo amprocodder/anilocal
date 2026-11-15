@@ -1,5 +1,16 @@
 package com.anilocal.app.ui.extensions
 
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.VerifiedUser
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import com.anilocal.app.ui.common.EmptyState
+import com.anilocal.app.ui.common.SectionHeader
 import com.anilocal.app.ui.common.SearchField
 import androidx.compose.runtime.remember
 import androidx.compose.material3.FilterChip
@@ -340,15 +351,29 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
         // Cap the column on tablets: 2900px-wide rows with the button at the far edge are hard to scan.
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
         Column(Modifier.fillMaxHeight().widthIn(max = 840.dp).fillMaxWidth()) {
-            Text(
-                "Add extension repos and install third-party sources — unaffiliated community APKs, " +
-                    "installed in-app (signing cert verified against the repo when it publishes one). " +
-                    "AniList still provides browsing; the selected source only resolves streams. " +
-                    "Pick one — or “Auto (best source)” — in Settings → Streaming source.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(16.dp),
-            )
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+                    Icon(
+                        Icons.Outlined.VerifiedUser, null,
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        "Add extension repos and install third-party sources — unaffiliated community APKs, " +
+                            "installed in-app (signing cert verified against the repo when it publishes one). " +
+                            "AniList still provides browsing; the selected source only resolves streams. " +
+                            "Pick one — or “Auto (best source)” — in Settings → Streaming source.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 12.dp),
+                    )
+                }
+            }
             status?.let {
                 Text(
                     it,
@@ -373,11 +398,7 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
                 }
                 if (orphans.isNotEmpty()) {
                     item(key = "orphans-header", contentType = "header") {
-                        Text(
-                            "Installed — not in your repos",
-                            style = MaterialTheme.typography.titleSmall,
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
+                        SectionHeader("Installed — not in your repos", Modifier.padding(top = 12.dp), horizontalPadding = 0.dp)
                     }
                     items(orphans, key = { "orphan-" + it.pkg }, contentType = { "extension" }) { entry ->
                         ExtensionRow(entry, busy = entry.pkg in busy, installed = true, removable = true,
@@ -386,13 +407,15 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
                 }
                 if (repos.isEmpty()) {
                     item(key = "no-repos", contentType = "hint") {
-                        Text(
-                            "No repos added yet. AniLocal ships with no sources — add an extension " +
-                                "repo URL above, or use “Install recommended sources” in Settings.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 16.dp),
-                        )
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            EmptyState(
+                                Icons.Outlined.Extension,
+                                "No repos added yet",
+                                "AniLocal ships with no sources. Add an extension repo URL above, " +
+                                    "or use “Install recommended sources” in Settings.",
+                                Modifier.padding(top = 24.dp),
+                            )
+                        }
                     }
                 } else if (loading && available.isEmpty()) {
                     item(key = "loading", contentType = "hint") {
@@ -401,7 +424,7 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
                 }
                 if (available.isNotEmpty()) {
                     item(key = "available-header", contentType = "header") {
-                        Text("Available", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+                        SectionHeader("Available", Modifier.padding(top = 12.dp), horizontalPadding = 0.dp)
                     }
                     item(key = "filter", contentType = "filter") {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -469,15 +492,35 @@ private fun ExtensionRow(
     onUninstall: () -> Unit,
 ) {
     Surface(
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f).padding(end = 8.dp)) {
-                Text(entry.name, style = MaterialTheme.typography.bodyLarge)
+            // Monogram badge: extensions ship no icon we can load, so lead with a tinted initial.
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer),
+                        ),
+                        RoundedCornerShape(12.dp),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    entry.name.removePrefix("Aniyomi: ").trim().take(1).uppercase(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                )
+            }
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(entry.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
                 val meta = listOfNotNull(
                     entry.lang.ifBlank { null },
                     entry.versionName.ifBlank { null }?.let { "v$it" },
@@ -519,25 +562,55 @@ private fun RepoSection(
     onAdd: () -> Unit,
     onRemove: (String) -> Unit,
 ) {
-    Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Repositories", style = MaterialTheme.typography.titleSmall)
-            repos.forEach { url ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(11.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.Inventory2, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(20.dp))
+                }
+                Column(Modifier.padding(start = 12.dp)) {
+                    Text("Repositories", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        url,
+                        if (repos.isEmpty()) "Paste an index.min.json URL to add one"
+                        else "${repos.size} repo${if (repos.size == 1) "" else "s"} added",
                         style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    IconButton(onClick = { onRemove(url) }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Remove repo")
+                }
+            }
+            repos.forEach { url ->
+                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.Link, null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            url,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f).padding(start = 10.dp),
+                        )
+                        IconButton(onClick = { onRemove(url) }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Remove repo")
+                        }
                     }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
+                    shape = RoundedCornerShape(12.dp),
                     value = input,
                     onValueChange = onInputChange,
                     label = { Text("Repo URL") },
