@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -276,11 +277,15 @@ private fun HeroCarousel(
         }
     }
 
-    Box(Modifier.fillMaxWidth().height(410.dp)) {
+    BoxWithConstraints(Modifier.fillMaxWidth().height(410.dp)) {
+        // A portrait cover cropped into a wide slot gets upscaled several times over (blurry on
+        // tablets/landscape); use the wide banner there, and the HD cover on squarer phone slots.
+        val wide = maxWidth / maxHeight > 1.6f
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val item = items[page]
             AsyncImage(
-                model = item.posterUrl,
+                model = if (wide) item.bannerUrl ?: item.posterHdUrl ?: item.posterUrl
+                else item.posterHdUrl ?: item.posterUrl,
                 contentDescription = item.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize().clickable { onOpen(item.id) },

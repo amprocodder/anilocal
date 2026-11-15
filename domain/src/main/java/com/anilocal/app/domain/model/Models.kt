@@ -11,6 +11,10 @@ data class AnimeSummary(
     val averageScore: Int? = null,         // 0–100, as AniList reports it
     /** Every other name AniList knows it by (romaji, English, synonyms) — see [AnimeDetail.altTitles]. */
     val altTitles: List<String> = emptyList(),
+    /** Wide (~1900×400) banner art, when the query asked for it and AniList has one — for wide hero slots. */
+    val bannerUrl: String? = null,
+    /** Higher-resolution cover than [posterUrl], when the query asked for it — for large hero slots. */
+    val posterHdUrl: String? = null,
 )
 
 /** A "Continue Watching" entry: an anime plus where the user left off. */

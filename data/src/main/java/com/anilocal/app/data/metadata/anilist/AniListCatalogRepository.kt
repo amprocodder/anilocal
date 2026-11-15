@@ -49,8 +49,8 @@ class AniListCatalogRepository @Inject constructor(
               }
             }
             fragment Summary on Media {
-              id idMal title { romaji english } coverImage { large } format episodes averageScore
-              status nextAiringEpisode { episode }
+              id idMal title { romaji english } coverImage { large extraLarge } bannerImage
+              format episodes averageScore status nextAiringEpisode { episode }
             }
         """.trimIndent()
         val response = api.query(body(q, JSONObject().put("season", season).put("year", year)))
@@ -228,6 +228,8 @@ class AniListCatalogRepository @Inject constructor(
         episodes = releasedEpisodes()?.takeIf { it > 0 },
         averageScore = averageScore,
         altTitles = altTitles(),
+        bannerUrl = bannerImage,
+        posterHdUrl = coverImage?.extraLarge,
     )
 
     private fun MediaDto.displayTitle() =
