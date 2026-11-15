@@ -9,6 +9,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -59,6 +63,7 @@ class ExploreViewModel @Inject constructor(
     fun onGenre(g: String?) = loader.onGenre(g)
     fun onSort(s: BrowseSort) = loader.onSort(s)
     fun retry() = loader.retry()
+    fun loadMore() = loader.loadMore()
 
 }
 
@@ -95,6 +100,9 @@ fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = hiltViewModel
         )
         val chipShape = RoundedCornerShape(100.dp)
 
+        // Filters only apply to browsing; text search ignores them, so hide them while searching
+        // rather than show selections that silently do nothing.
+        if (query.isBlank()) {
         // Sort chips
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 16.dp)) {
             items(BrowseSort.entries, key = { it.name }) { s ->
@@ -130,9 +138,30 @@ fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = hiltViewModel
             }
         }
 
+        }
+
         CatalogFeedback(loadState, vm::retry)
 
+        val gridState = rememberLazyGridState()
+        // A new query/filter is a new list: start it from the top, not the old (paged) offset.
+        LaunchedEffect(query.trim(), genre, sort) { gridState.scrollToItem(0) }
+        // Infinite scroll: ask for the next page once the last ~2 rows come into view.
+        LaunchedEffect(gridState) {
+            snapshotFlow {
+                val info = gridState.layoutInfo
+                val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+                info.totalItemsCount > 0 && last >= info.totalItemsCount - 24
+            }.distinctUntilChanged().collect { nearEnd -> if (nearEnd) vm.loadMore() }
+        }
+        // A page that fills less than the screen never scrolls, so re-check after each append.
+        LaunchedEffect(results.size) {
+            val info = gridState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            if (info.totalItemsCount > 0 && last >= info.totalItemsCount - 24) vm.loadMore()
+        }
+
         LazyVerticalGrid(
+            state = gridState,
             columns = GridCells.Adaptive(120.dp),
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(16.dp),
