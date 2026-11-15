@@ -1,5 +1,22 @@
 package com.anilocal.app.ui.details
 
+import android.widget.Toast
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.platform.LocalContext
+import com.anilocal.app.domain.repo.MalRepository
+import com.anilocal.app.ui.common.StatusBarScrim
+import com.anilocal.app.ui.common.scrolledPast
+import kotlinx.coroutines.flow.combine
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -136,6 +153,7 @@ class DetailsViewModel @Inject constructor(
     private val skip: SkipRepository,
     private val downloads: DownloadRepository,
     private val settings: SettingsRepository,
+    mal: MalRepository,
     // Season downloads keep queuing after the user leaves the screen (viewModelScope would cancel).
     @Named("appScope") private val appScope: CoroutineScope,
 ) : ViewModel() {
@@ -151,6 +169,12 @@ class DetailsViewModel @Inject constructor(
 
     val saved: StateFlow<Boolean> =
         library.isSaved(animeId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** True when the title is on the user's mirrored MAL list (so it already shows in My List). */
+    val onMalList: StateFlow<Boolean> =
+        combine(detail, mal.all()) { d, entries -> d?.idMal != null && entries.any { it.malId == d.idMal } }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     val downloadedEpisodes: StateFlow<Set<Int>> =
         downloads.downloadedEpisodes(animeId)
@@ -239,7 +263,7 @@ class DetailsViewModel @Inject constructor(
                 var failed = 0
                 suspend fun tryQueue(ep: Episode): Boolean {
                     val ok = runCatching {
-                        // Re-check against live state: a long-press may have queued it mid-pass.
+                        // Re-check against live state: a single-episode download may have queued it mid-pass.
                         if (ep.number !in episodesQueuedNow()) {
                             coroutineScope {
                                 val markers = async { loadOrNull { skip.markers(d.idMal, ep.number, 0) }.orEmpty() }
@@ -313,6 +337,9 @@ private fun pickForQuality(options: List<VideoStream>, quality: DownloadQuality)
 
 private const val EPISODE_RANGE_SIZE = 100
 private const val EPISODES_PER_ROW = 5
+private const val EPISODES_PER_ROW_WIDE = 8
+private val TWO_PANE_MIN_WIDTH = 840.dp
+private val ACTIONS_MAX_WIDTH = 640.dp
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -325,36 +352,49 @@ fun DetailsScreen(
     val detail by vm.detail.collectAsStateWithLifecycle()
     val loadState by vm.loadState.collectAsStateWithLifecycle()
     val saved by vm.saved.collectAsStateWithLifecycle()
+    val onMalList by vm.onMalList.collectAsStateWithLifecycle()
     val downloaded by vm.downloadedEpisodes.collectAsStateWithLifecycle()
     val inDownloads by vm.episodesInDownloads.collectAsStateWithLifecycle()
+    val busyEpisodes by vm.busyEpisodes.collectAsStateWithLifecycle()
     val pending by vm.pending.collectAsStateWithLifecycle()
     val seasonDownload by vm.seasonDownload.collectAsStateWithLifecycle()
     val defaultQuality by vm.defaultQuality.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val d = detail
 
-    Box(Modifier.fillMaxSize()) {
+    val mainState = rememberLazyListState()
+    val episodesState = rememberLazyListState()
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // Wide landscape (tablets): overview on the left, episodes + related on the right, each
+        // scrolling on its own — a single column leaves most of the width empty.
+        val twoPane = maxWidth >= TWO_PANE_MIN_WIDTH && maxWidth > maxHeight
         if (d != null) {
+            val perRow = if (twoPane) EPISODES_PER_ROW_WIDE else EPISODES_PER_ROW
             val showRanges = d.episodes.size > EPISODE_RANGE_SIZE
             var rangeIndex by remember(d.id, d.episodes.size) { mutableStateOf(0) }
             val rangeStart = if (showRanges) rangeIndex * EPISODE_RANGE_SIZE else 0
-            val episodeRows = remember(d, rangeStart) {
+            val episodeRows = remember(d, rangeStart, perRow) {
                 val visible =
                     if (showRanges) {
                         d.episodes.subList(rangeStart, minOf(rangeStart + EPISODE_RANGE_SIZE, d.episodes.size))
                     } else {
                         d.episodes
                     }
-                visible.chunked(EPISODES_PER_ROW)
+                visible.chunked(perRow)
             }
-            val infoLine = listOfNotNull(d.studio, d.duration?.let { "$it min/ep" }).joinToString("  •  ")
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+            // A movie is one long "episode": "129 min", not "129 min/ep".
+            val isMovie = d.format.equals("Movie", ignoreCase = true)
+            val infoLine = listOfNotNull(
+                d.studio,
+                d.duration?.let { if (isMovie) "$it min" else "$it min/ep" },
+            ).joinToString("  •  ")
+
+            val overview: LazyListScope.() -> Unit = {
                 item(key = "hero", contentType = "hero") { DetailHero(d) }
                 item(key = "catalog-status", contentType = "status") { CatalogFeedback(loadState, vm::retry) }
                 if (d.genres.isNotEmpty()) {
-                    item {
+                    item(key = "genres") {
                         FlowRow(
                             Modifier.padding(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -377,9 +417,10 @@ fun DetailsScreen(
                         }
                     }
                 }
-                item {
+                item(key = "actions") {
                     Row(
-                        Modifier.padding(horizontal = 16.dp),
+                        // Keep the action row a sensible width on tablets instead of a 2000px pill.
+                        Modifier.padding(horizontal = 16.dp).widthIn(max = ACTIONS_MAX_WIDTH),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -411,27 +452,41 @@ fun DetailsScreen(
                                 onCancel = vm::cancelSeasonDownload,
                             )
                         }
+                        // In My List either locally or through the MAL mirror. A MAL-only title is
+                        // managed on MyAnimeList, so the tap explains that instead of adding a
+                        // duplicate local entry the user then can't visibly remove.
+                        val inList = saved || onMalList
                         FilledTonalIconButton(
-                            onClick = vm::toggleSaved,
+                            onClick = {
+                                if (!saved && onMalList) {
+                                    Toast.makeText(context, "Already in My List from your MAL list", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    vm.toggleSaved()
+                                }
+                            },
                             colors = IconButtonDefaults.filledTonalIconButtonColors(
                                 containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                             ),
                             modifier = Modifier.size(46.dp),
                         ) {
                             Icon(
-                                if (saved) Icons.Filled.BookmarkAdded else Icons.Outlined.BookmarkAdd,
-                                if (saved) "Remove from My List" else "Add to My List",
-                                tint = if (saved) MaterialTheme.colorScheme.tertiary
+                                if (inList) Icons.Filled.BookmarkAdded else Icons.Outlined.BookmarkAdd,
+                                when {
+                                    saved -> "Remove from My List"
+                                    onMalList -> "In My List (from MAL)"
+                                    else -> "Add to My List"
+                                },
+                                tint = if (inList) MaterialTheme.colorScheme.tertiary
                                 else MaterialTheme.colorScheme.onSurface,
                             )
                         }
                     }
                 }
                 if (d.synopsis.isNotBlank()) {
-                    item { ExpandableSynopsis(d.synopsis) }
+                    item(key = "synopsis") { ExpandableSynopsis(d.synopsis) }
                 }
                 if (infoLine.isNotEmpty()) {
-                    item {
+                    item(key = "info") {
                         Text(
                             infoLine,
                             style = MaterialTheme.typography.bodySmall,
@@ -440,7 +495,10 @@ fun DetailsScreen(
                         )
                     }
                 }
-                if (d.episodes.isNotEmpty()) item {
+            }
+
+            val episodesAndRelated: LazyListScope.() -> Unit = {
+                if (d.episodes.isNotEmpty()) item(key = "episodes-header") {
                     Column(
                         Modifier.padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -451,13 +509,11 @@ fun DetailsScreen(
                                 style = MaterialTheme.typography.titleMedium,
                                 modifier = Modifier.weight(1f),
                             )
-                            if (d.episodes.isNotEmpty()) {
-                                Text(
-                                    "${d.episodes.size}",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                            Text(
+                                "${d.episodes.size}",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                         val sd = seasonDownload
                         Text(
@@ -468,7 +524,7 @@ fun DetailsScreen(
                                     "Queuing season… ${sd.queued + sd.failed}/${sd.total} — press again to cancel"
                                 sd != null && sd.failed > 0 ->
                                     "Season queued — ${sd.failed} episode${if (sd.failed == 1) "" else "s"} failed, press to retry"
-                                else -> "Tap to play — hold to download"
+                                else -> "Tap an episode to play, or its download icon to save it"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -503,12 +559,14 @@ fun DetailsScreen(
                             EpisodeCell(
                                 episode = ep,
                                 downloaded = ep.number in downloaded,
-                                onClick = { onPlay(d.id, ep.number) },
-                                onLongClick = { vm.download(ep) },
+                                queued = ep.number in inDownloads,
+                                busy = ep.number in busyEpisodes,
+                                onPlay = { onPlay(d.id, ep.number) },
+                                onDownload = { vm.download(ep) },
                                 modifier = Modifier.weight(1f),
                             )
                         }
-                        repeat(EPISODES_PER_ROW - episodeRows[rowIndex].size) {
+                        repeat(perRow - episodeRows[rowIndex].size) {
                             Spacer(Modifier.weight(1f))
                         }
                     }
@@ -534,13 +592,56 @@ fun DetailsScreen(
                         }
                     }
                 }
-                item { Box(Modifier.navigationBarsPadding().height(8.dp)) }
+            }
+
+            if (twoPane) {
+                Row(Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        Modifier.weight(0.42f).fillMaxHeight(),
+                        state = mainState,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        overview()
+                        item { Box(Modifier.navigationBarsPadding().height(8.dp)) }
+                    }
+                    LazyColumn(
+                        Modifier.weight(0.58f).fillMaxHeight(),
+                        state = episodesState,
+                        contentPadding = WindowInsets.statusBars.asPaddingValues().let {
+                            PaddingValues(top = it.calculateTopPadding() + 16.dp)
+                        },
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        episodesAndRelated()
+                        item { Box(Modifier.navigationBarsPadding().height(8.dp)) }
+                    }
+                }
+            } else {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    state = mainState,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    overview()
+                    episodesAndRelated()
+                    item { Box(Modifier.navigationBarsPadding().height(8.dp)) }
+                }
             }
         }
 
         if (d == null) {
             CatalogFeedback(loadState, vm::retry, Modifier.align(Alignment.Center))
         }
+
+        // Once the banner scrolls away (or the episode pane scrolls at all), text would run under
+        // the clock — fade in a band behind the status bar.
+        val scrolled by remember {
+            derivedStateOf {
+                mainState.scrolledPast(thresholdPx = 300) ||
+                    episodesState.firstVisibleItemIndex > 0 || episodesState.firstVisibleItemScrollOffset > 0
+            }
+        }
+        StatusBarScrim(visible = scrolled, modifier = Modifier.align(Alignment.TopCenter))
 
         // Floating back button (over the header art; also the only chrome while loading).
         Box(
@@ -673,13 +774,25 @@ private fun DetailHero(d: AnimeDetail) {
                 Modifier.align(Alignment.Bottom).padding(start = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(
-                    d.title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Column {
+                    Text(
+                        d.title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    // English is the primary name app-wide; the romaji is shown only here, small.
+                    d.romajiTitle?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -728,42 +841,64 @@ private fun ExpandableSynopsis(synopsis: String) {
     )
 }
 
-/** 9anime-style numbered episode cell: tap plays, long-press downloads. */
-@OptIn(ExperimentalFoundationApi::class)
+/**
+ * 9anime-style numbered episode cell: tapping the number plays it, tapping its download icon saves
+ * it (no long-press — a hidden, slow gesture). The icon reflects queued/downloaded/resolving state.
+ */
 @Composable
 private fun EpisodeCell(
     episode: Episode,
     downloaded: Boolean,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    queued: Boolean,
+    busy: Boolean,
+    onPlay: () -> Unit,
+    onDownload: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val bg = if (downloaded) MaterialTheme.colorScheme.primaryContainer
     else MaterialTheme.colorScheme.surfaceContainerHighest
     val fg = if (downloaded) MaterialTheme.colorScheme.onPrimaryContainer
     else MaterialTheme.colorScheme.onSurfaceVariant
-    // Downloaded state must be audible, not just a tint; the long-press action gets a label so
-    // accessibility services surface the download affordance.
-    val description =
-        if (downloaded) "Episode ${episode.number}, downloaded" else "Episode ${episode.number}"
-    Box(
+    Row(
         modifier
             .height(40.dp)
             .clip(RoundedCornerShape(4.dp))
             .background(bg)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick,
-                onLongClickLabel = "Download",
-            )
-            .testTag("ep-${episode.number}")
-            .semantics { contentDescription = description },
-        contentAlignment = Alignment.Center,
+            .testTag("ep-${episode.number}"),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            "${episode.number}",
-            style = MaterialTheme.typography.labelLarge,
-            color = fg,
-        )
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clickable(onClickLabel = "Play", onClick = onPlay)
+                .semantics {
+                    contentDescription =
+                        if (downloaded) "Episode ${episode.number}, downloaded" else "Episode ${episode.number}"
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("${episode.number}", style = MaterialTheme.typography.labelLarge, color = fg)
+        }
+        Box(
+            Modifier
+                .width(32.dp)
+                .fillMaxHeight()
+                .clickable(enabled = !busy && !queued, onClickLabel = "Download", onClick = onDownload)
+                .semantics {
+                    contentDescription = when {
+                        downloaded -> "Episode ${episode.number} downloaded"
+                        queued -> "Episode ${episode.number} in downloads"
+                        else -> "Download episode ${episode.number}"
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                busy -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp, color = fg)
+                queued -> Icon(Icons.Filled.DownloadDone, null, Modifier.size(16.dp), tint = fg)
+                else -> Icon(Icons.Filled.Download, null, Modifier.size(16.dp), tint = fg.copy(alpha = 0.7f))
+            }
+        }
     }
 }
