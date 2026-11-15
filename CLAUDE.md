@@ -421,7 +421,8 @@ for the old MAL client id).
   (app-open MAL sync + the resume bar), `MoreViewModel`, and `PlayerViewModel` get their own file. Look
   inside the screen file before assuming a missing `*ViewModel.kt`.
 - Error/empty states degrade **silently**: repo calls are wrapped in `runCatching { … }.getOrDefault/
-  getOrNull`, and screens render blank or a short hint (Home drops rows whose loader fails or returns empty;
+  getOrNull`, and screens render blank or a short hint — an empty list uses the shared `EmptyState` (icon +
+  title + hint, `ui/common/ScreenChrome.kt`) under the shared `ScreenHeader` (Home drops rows whose loader fails or returns empty;
   Details renders nothing but its floating back button until `detail` is non-null) — there are **no
   spinners or error dialogs** for load/error states. The one deliberate exception is the player's
   transient center rebuffer spinner (playback stall feedback, not a load state). Match that pattern
