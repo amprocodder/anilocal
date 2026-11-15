@@ -89,16 +89,20 @@ Optional body: what changed and why (not how), wrapped at ~72 columns.
 - One logical change per commit. Don't bundle an unrelated fix into a feature commit; split it.
 
 **Before pushing**
-- The build must pass locally (`gradle :app:assembleDebug`) for any code change; docs/CI-only changes
-  are exempt. Check CI after pushing (`gh run list --limit 1`) and fix a red build immediately with a
-  `fix`/`build` commit — no reverting history.
+- Build locally — it's much faster than CI. The dev machine has Android Studio's SDK at
+  `~/Android/Sdk` (`local.properties` → `sdk.dir`, gitignored) and Gradle 8.9 on PATH. Any code change
+  must pass `gradle :domain:check :app:assembleDebug` locally before pushing; docs/CI-only changes are
+  exempt. CI is the backstop, not the gate: don't block on it, but if a run goes red
+  (`gh run list --limit 3`), fix it next with a `fix`/`build` commit — no reverting history.
 - Never commit secrets, `local.properties`, a release keystore, or local dev tooling (see above);
   `app/debug.keystore` is the one intentional exception.
 
 **Releases**
 - Bump `versionCode` (+1) and `versionName` (semver) in `app/build.gradle.kts` in a dedicated
-  `chore(release): vX.Y.Z` commit, tag it `vX.Y.Z`, and publish a GitHub release with the CI-built
-  APKs (`gh release create vX.Y.Z <apks> --generate-notes`).
+  `chore(release): vX.Y.Z` commit, tag it `vX.Y.Z`, build `gradle :app:assembleDebug
+  :app:assembleBenchmark` locally from that commit, and publish both APKs as a GitHub release
+  (`gh release create vX.Y.Z <apks> --generate-notes`). Both build types sign with the committed
+  debug key, so local and CI APKs install over each other.
 
 ## Module architecture — the boundary is compile-enforced
 
