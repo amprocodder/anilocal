@@ -36,16 +36,17 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
 - **Related titles** on every detail page: the franchise's prequels, sequels, seasons, movies
   and side stories in watch-order (AniList relations), each tagged and one tap away.
 - **Player** (Media3/ExoPlayer) with the **Skip-Intro/Outro button** (`FreakIntroButton`
-  equivalent), fed by **AniSkip** (real op/ed times by MAL id) — demo markers for titles with
-  no MAL id so the control always demonstrates.
+  equivalent), fed by **AniSkip** (real op/ed times by MAL id); titles without a MAL id simply have
+  no markers.
 - **Room persistence**: "My List" (Library tab) + "Continue Watching" (Home), with watch
   progress saved during playback.
 - **In-list search**: the Explore-style search box on the Library tab (filters My List or the
   selected MAL category by title) and on the Downloads tab (filters the season folders).
 - **User-selectable stream sources**: a runtime **source registry** + picker (More tab). No
   built-in sources ship; **installed Aniyomi extensions** appear automatically and resolve
-  streams for AniList-browsed titles. **Browse extensions** (More → Browse extensions) lists a
-  pre-seeded repo's `index.min.json` and installs sources via the system installer.
+  streams for AniList-browsed titles. **Browse extensions** (More → Browse extensions) is where you add
+  extension repos (`index.min.json`) and install sources in-app; **Install recommended sources**
+  in More is an explicit one-tap opt-in for a small community-recommended set.
 - Hilt DI, Compose + Material3, Coil images, OkHttp 5/Retrofit/Moshi.
 
 ## Configure optional features (the app builds & runs without these)
@@ -56,7 +57,8 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
 - **No backend, no ads, no signature spoofing.** AniList stays the only browse layer; extensions
   only resolve streams.
 - The app **bundles no extensions** and ships **no default piracy content** — you add a repo and
-  install sources yourself (the community `yuzono/anime-repo` is pre-seeded as a starting point).
+  install sources yourself. Nothing is pre-configured: a fresh install has no repos and no sources
+  until you add a repo or tap **Install recommended sources**.
   What you install, and where it streams from, is your responsibility.
 - **Sideload-only.** Loading third-party extension APKs needs `QUERY_ALL_PACKAGES` +
   `REQUEST_INSTALL_PACKAGES`, so this build is **not Google Play eligible** (it already ships via the

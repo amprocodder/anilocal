@@ -295,8 +295,8 @@ for the old MAL client id).
   record latches `markersFetched` only if it actually carried markers (downloads snapshot markers once
   at enqueue, best-effort, so an empty snapshot means "unknown" and gets one online lookup), and only a
   non-empty result is ever assigned, so a lookup never overrides markers already shown. When a title has **no MAL id** (anything AniSkip can't key),
-  `AniSkipRepository` returns **hard-coded demo markers** instead of an empty list so
-  the Skip control always demonstrates — that `idMal == null` branch is intentional, not a bug. Auto-skip
+  `AniSkipRepository` returns **no markers** — never fabricated ones (the old demo markers existed for a
+  bundled sample clip that is gone; a Skip button jumping to made-up times is worse than none). Auto-skip
   fires at most once per marker. AniSkip is queried with the player's real `episodeLengthSec` first and
   **retried with `episodeLength=0`** if that finds nothing (a length mismatch >~±25s makes AniSkip answer
   `found:false`; `0` disables its length filter and still returns absolute op/ed times — keep the retry).
@@ -376,11 +376,16 @@ for the old MAL client id).
   manual install from a fingerprint-less repo is allowed (user-initiated). `SourceRegistry.refresh()` is
   now on the **domain interface** so an install/uninstall rescans live (no app restart — the old gap).
   The Extensions screen installs silently, shows installed/uninstall state, and removes private
-  extensions by deleting the file. **Auto-provisioning:** `RecommendedSources` (`:data`) is a small
-  ranked community allow-list (verified against the yuzono repo; HiAnime/AnimeKai are dead & removed —
-  don't re-add) used ONLY to bootstrap Auto so the race has proven candidates on day one;
-  `installRecommended(target)` tops up to `target` verified seeds (idempotent), triggered when the user
-  picks Auto and via a "Install recommended" button in More. The empirical scoreboard takes over ranking
+  extensions by deleting the file. **The app ships BLANK — no sources, no repos, nothing installs implicitly.**
+  `extensionRepoBaseUrls` defaults to empty (an unset key falls back to the old yuzono default only for
+  installs that already have private extensions, so upgrades aren't orphaned); users add/remove repos on
+  the Extensions screen (which also lists installed extensions no configured repo carries, so they stay
+  uninstallable). **Recommended sources (explicit opt-in only):** `RecommendedSources` (`:data`) is a small
+  ranked community allow-list (verified against `RecommendedSources.REPO_URL`, the yuzono repo;
+  HiAnime/AnimeKai are dead & removed — don't re-add); `installRecommended(target)` adds that repo to the
+  user's list and tops up to `target` verified seeds (idempotent) — run ONLY from the "Install recommended
+  sources" button in More. Selecting Auto must never trigger it. With zero sources, resolution throws the
+  domain `NoSourceInstalledException`, which the player shows as-is (paused, no reconnect loop). The empirical scoreboard takes over ranking
   from there — no ongoing curation. **Auto-eviction** closes the loop: `ExtensionRepository.pruneLosers`
   (run alongside provisioning) uninstalls app-installed packages whose sources have a poor aggregate
   success rate after ≥`MIN_ATTEMPTS` recorded resolves — but ONLY ones that are **not** the pinned best
