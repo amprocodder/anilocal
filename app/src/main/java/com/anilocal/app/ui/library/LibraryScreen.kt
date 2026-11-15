@@ -1,5 +1,12 @@
 package com.anilocal.app.ui.library
 
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.SearchOff
+import androidx.compose.material.icons.Icons
+import com.anilocal.app.ui.common.EmptyState
+import com.anilocal.app.ui.common.ScreenHeader
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -141,12 +148,7 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
         Modifier.fillMaxSize().statusBarsPadding().padding(top = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            "My List",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
+        ScreenHeader("My List")
         SearchField(
             value = query,
             onValueChange = vm::setQuery,
@@ -184,13 +186,17 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
                 // Only when the query filtered out a non-empty list — a genuinely empty
                 // list/category falls through to its actionable onboarding hint instead.
                 gridItems.isEmpty() && query.isNotBlank() && hasEntries ->
-                    Hint("No titles match “${query.trim()}”.")
+                    Empty(Icons.Outlined.SearchOff, "No matches", "Nothing in your list matches “${query.trim()}”.")
 
                 gridItems.isEmpty() && filter == null ->
-                    Hint("Your list is empty — add titles from a detail page, or sync your MAL list in Settings.")
+                    Empty(
+                        Icons.Outlined.BookmarkBorder,
+                        "Your list is empty",
+                        "Save titles from their detail page, or sync your MyAnimeList list in Settings.",
+                    )
 
                 gridItems.isEmpty() ->
-                    Hint("Nothing here yet — sync from Settings → MyAnimeList Sync.")
+                    Empty(Icons.Outlined.Inbox, "Nothing here yet", "Sync your list from Settings → MyAnimeList Sync.")
 
                 else -> Grid {
                     items(gridItems, key = { it.id }, contentType = { "poster" }) { summary ->
@@ -220,12 +226,8 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
 }
 
 @Composable
-private fun BoxScope.Hint(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodyMedium,
-        modifier = Modifier.align(Alignment.Center).padding(24.dp),
-    )
+private fun BoxScope.Empty(icon: ImageVector, title: String, message: String) {
+    EmptyState(icon, title, message, Modifier.align(Alignment.Center).padding(bottom = 48.dp))
 }
 
 @Composable

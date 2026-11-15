@@ -1,5 +1,9 @@
 package com.anilocal.app.ui.downloads
 
+import androidx.compose.material.icons.outlined.DownloadForOffline
+import androidx.compose.material.icons.outlined.SearchOff
+import com.anilocal.app.ui.common.EmptyState
+import com.anilocal.app.ui.common.ScreenHeader
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -253,9 +257,16 @@ fun DownloadsScreen(
     if (!hasDownloads) {
         // Reset any leftover filter so downloads added later aren't silently hidden by it.
         LaunchedEffect(Unit) { vm.setQuery("") }
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No downloads yet — tap the download icon on an episode.",
-                style = MaterialTheme.typography.bodyMedium)
+        Column(Modifier.fillMaxSize().statusBarsPadding().padding(top = 16.dp)) {
+            ScreenHeader("Downloads")
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                EmptyState(
+                    Icons.Outlined.DownloadForOffline,
+                    "No downloads yet",
+                    "Tap the download icon on any episode to watch it offline, anywhere.",
+                    Modifier.padding(bottom = 48.dp),
+                )
+            }
         }
         return
     }
@@ -264,7 +275,7 @@ fun DownloadsScreen(
         Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp).padding(top = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Downloads", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        ScreenHeader("Downloads", horizontalPadding = 0.dp)
         operationStatus?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
@@ -272,8 +283,7 @@ fun DownloadsScreen(
         if (folders.isEmpty()) {
             // Query matched nothing (there ARE downloads — the !hasDownloads case returned above).
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("No downloads match “${query.trim()}”.",
-                    style = MaterialTheme.typography.bodyMedium)
+                EmptyState(Icons.Outlined.SearchOff, "No matches", "No downloads match “${query.trim()}”.")
             }
         } else {
             LazyColumn(

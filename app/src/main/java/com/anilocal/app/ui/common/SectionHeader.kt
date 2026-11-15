@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** 9anime-style section header: tertiary accent bar, bold title, optional "View all ›" link. */
@@ -24,12 +25,13 @@ fun SectionHeader(
     title: String,
     modifier: Modifier = Modifier,
     onSeeAll: (() -> Unit)? = null,
+    horizontalPadding: Dp = 16.dp,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = horizontalPadding),
     ) {
         Box(
             Modifier

@@ -1,5 +1,6 @@
 package com.anilocal.app.ui.explore
 
+import com.anilocal.app.ui.common.ScreenHeader
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -80,12 +81,7 @@ fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = hiltViewModel
         Modifier.fillMaxSize().statusBarsPadding().padding(top = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(
-            "Explore",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
+        ScreenHeader("Explore")
 
         SearchField(
             value = query,
