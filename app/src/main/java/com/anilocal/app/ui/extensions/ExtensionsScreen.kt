@@ -1,5 +1,12 @@
 package com.anilocal.app.ui.extensions
 
+import com.anilocal.app.ui.common.SearchField
+import androidx.compose.runtime.remember
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -302,6 +309,17 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
     val repos by vm.repos.collectAsStateWithLifecycle()
     val orphans by vm.orphans.collectAsStateWithLifecycle()
     var repoInput by rememberSaveable { mutableStateOf("") }
+    var search by rememberSaveable { mutableStateOf("") }
+    var language by rememberSaveable { mutableStateOf<String?>(null) }
+    val languages = remember(available) { available.map { it.lang }.distinct().sortedWith(languageOrder) }
+    val shown = remember(available, search, language) {
+        val q = search.trim()
+        available.filter { e ->
+            (language == null || e.lang == language) &&
+                (q.isEmpty() || e.name.contains(q, ignoreCase = true) ||
+                    e.sourceNames.any { it.contains(q, ignoreCase = true) })
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -319,7 +337,9 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        // Cap the column on tablets: 2900px-wide rows with the button at the far edge are hard to scan.
+        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+        Column(Modifier.fillMaxHeight().widthIn(max = 840.dp).fillMaxWidth()) {
             Text(
                 "Add extension repos and install third-party sources — unaffiliated community APKs, " +
                     "installed in-app (signing cert verified against the repo when it publishes one). " +
@@ -379,12 +399,41 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
                         Text("Loading…", modifier = Modifier.padding(vertical = 16.dp))
                     }
                 }
-                if (available.isNotEmpty() && orphans.isNotEmpty()) {
+                if (available.isNotEmpty()) {
                     item(key = "available-header", contentType = "header") {
                         Text("Available", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
                     }
+                    item(key = "filter", contentType = "filter") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SearchField(value = search, onValueChange = { search = it }, placeholder = "Search extensions…")
+                            if (languages.size > 1) {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    item {
+                                        FilterChip(selected = language == null, onClick = { language = null }, label = { Text("All") })
+                                    }
+                                    items(languages, key = { it }) { lang ->
+                                        FilterChip(
+                                            selected = language == lang,
+                                            onClick = { language = if (language == lang) null else lang },
+                                            label = { Text(languageLabel(lang)) },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (shown.isEmpty()) {
+                        item(key = "no-match", contentType = "hint") {
+                            Text(
+                                "No extensions match.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 8.dp),
+                            )
+                        }
+                    }
                 }
-                items(available, key = { it.pkg }, contentType = { "extension" }) { entry ->
+                items(shown, key = { it.pkg }, contentType = { "extension" }) { entry ->
                     ExtensionRow(
                         entry,
                         busy = entry.pkg in busy,
@@ -396,7 +445,18 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
                 }
             }
         }
+        }
     }
+}
+
+/** "all" (multi-language) first, then by display name. */
+private val languageOrder = compareBy<String>({ it != "all" }, { languageLabel(it) })
+
+/** Human name for a repo language code ("en", "pt-BR", "all"), falling back to the code itself. */
+private fun languageLabel(code: String): String {
+    if (code == "all") return "Multi"
+    val name = java.util.Locale.forLanguageTag(code).getDisplayName(java.util.Locale.ENGLISH)
+    return name.takeIf { it.isNotBlank() && !it.equals(code, ignoreCase = true) } ?: code
 }
 
 @Composable
