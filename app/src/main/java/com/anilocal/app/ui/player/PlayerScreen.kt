@@ -4,9 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
-import android.media.AudioManager
 import android.os.Build
-import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
@@ -16,13 +14,21 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,7 +46,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.AspectRatio
-import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Forward10
@@ -54,14 +59,11 @@ import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -69,17 +71,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -98,7 +101,6 @@ import androidx.media3.ui.SubtitleView
 import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.SkipMarker
 import kotlinx.coroutines.delay
-import kotlin.math.roundToInt
 
 // AniLab player HUD constants (from the reference app's control skin). Hoisted so the 300ms
 // position tick doesn't rebuild them every recomposition.
@@ -109,15 +111,6 @@ private val TopScrimBrush =
     Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.75f), Color.Transparent))
 private val BottomScrimBrush =
     Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f)))
-
-/**
- * One-shot double-tap seek feedback. Deliberately NOT a data class: each instance has distinct
- * identity, so `LaunchedEffect(seekFlash)` re-triggers its fade on every rapid double-tap.
- */
-private class SeekFlash(val forward: Boolean)
-
-/** Transient brightness/volume HUD state while a vertical drag is in progress. */
-private data class GestureHud(val isVolume: Boolean, val fraction: Float)
 
 @OptIn(UnstableApi::class)
 private val ResizeModes = listOf(
@@ -149,13 +142,15 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
     val subtitleScale by vm.subtitleScale.collectAsStateWithLifecycle()
     val subtitleBackground by vm.subtitleBackground.collectAsStateWithLifecycle()
     val speed by vm.speed.collectAsStateWithLifecycle()
+    val info by vm.info.collectAsStateWithLifecycle()
 
     val view = LocalView.current
     val activity = remember(view) { view.context.findActivity() }
-    val audio = remember(view) {
-        view.context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    }
-    var landscape by remember { mutableStateOf(false) }
+    // Playback opens fullscreen (landscape, immersive). Leaving fullscreen drops to the portrait
+    // watch page — video on top, title details + episode list below — rather than leaving the player.
+    var fullscreen by rememberSaveable { mutableStateOf(true) }
+    // Tablets keep the watch page in landscape (side-by-side); phones drop to portrait.
+    val isTablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
     var locked by remember { mutableStateOf(false) }
     var resizeIndex by remember { mutableIntStateOf(0) }
 
@@ -167,37 +162,49 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
     var episodesOpen by remember { mutableStateOf(false) }
     val anyMenuOpen = ccMenuOpen || speedMenuOpen || episodesOpen
 
-    // Gesture feedback overlays.
-    var seekFlash by remember { mutableStateOf<SeekFlash?>(null) }
-    var hud by remember { mutableStateOf<GestureHud?>(null) }
-    var hudDragging by remember { mutableStateOf(false) }
     var resizeLabel by remember { mutableStateOf<String?>(null) }
-    var boosting by remember { mutableStateOf(false) }
-    var preBoostSpeed by remember { mutableFloatStateOf(1f) }
     var unlockVisible by remember { mutableStateOf(true) }
-    // Read inside pointerInput(Unit) blocks so a lock/unlock mid-gesture can't restart the gesture
-    // coroutine (which would strand a long-press 2× boost with no release handler).
+    // Read inside the pointerInput(Unit) block so a lock/unlock doesn't restart the tap detector.
     val isLocked by rememberUpdatedState(locked)
 
-    // Lock mode swallows back (shows the unlock chip instead); the episode panel closes on back.
+    // Lock mode swallows back (shows the unlock chip instead); the episode panel closes on back;
+    // fullscreen backs out to the watch page, and only the watch page leaves the player.
+    val exitFullscreen = { fullscreen = false; interactionTick++ }
     BackHandler {
         when {
             episodesOpen -> episodesOpen = false
             locked -> unlockVisible = true
+            fullscreen -> exitFullscreen()
             else -> onBack()
         }
     }
 
-    // Immersive fullscreen + keep-screen-on + orientation, scoped to this screen's composition.
-    // All restore logic lives in the single onDispose so no path leaves the bars hidden / orientation
-    // locked / brightness overridden. The Activity isn't recreated on rotation (configChanges), so
-    // this effect stays applied.
+    // Fullscreen = landscape + hidden system bars; the watch page = portrait with the bars back.
+    // Fullscreen-only chrome (lock, the in-player episode panel) is dropped on the way out.
+    LaunchedEffect(fullscreen, isTablet) {
+        val controller = WindowCompat.getInsetsController(activity.window, view)
+        if (fullscreen) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            episodesOpen = false
+            locked = false
+            controller.show(WindowInsetsCompat.Type.systemBars())
+            activity.requestedOrientation =
+                if (isTablet) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+    }
+
+    // Keep-screen-on + cutout mode, scoped to this screen's composition. All restore logic (bars,
+    // orientation) lives in the single onDispose so no path leaves the bars hidden /
+    // orientation locked. The Activity isn't recreated on rotation
+    // (configChanges), so these stay applied.
     DisposableEffect(Unit) {
         val window = activity.window
         val controller = WindowCompat.getInsetsController(window, view)
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        controller.hide(WindowInsetsCompat.Type.systemBars())
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.attributes = window.attributes.apply {
@@ -210,7 +217,6 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             window.attributes = window.attributes.apply {
-                screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     layoutInDisplayCutoutMode =
                         WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
@@ -219,9 +225,6 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
         }
     }
 
-    LaunchedEffect(seekFlash) { if (seekFlash != null) { delay(650); seekFlash = null } }
-    // Hide the HUD shortly after a drag ends; a new drag re-keys the effect, cancelling the timer.
-    LaunchedEffect(hudDragging) { if (!hudDragging && hud != null) { delay(600); hud = null } }
     LaunchedEffect(resizeLabel) { if (resizeLabel != null) { delay(900); resizeLabel = null } }
     LaunchedEffect(locked, unlockVisible) {
         if (locked && unlockVisible) { delay(2_500); unlockVisible = false }
@@ -236,7 +239,34 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
         }
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    // One tree for every mode: the video Box is always the first child and only its size/offset
+    // changes, so the PlayerView/SurfaceView is never torn down when toggling fullscreen. Out of
+    // fullscreen a phone stacks the video over the details+episodes list (portrait); a tablet stays
+    // landscape with video+details on the left and the episode list on the right.
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(if (fullscreen) Color.Black else MaterialTheme.colorScheme.background)
+            .then(
+                if (fullscreen) Modifier
+                else Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            ),
+    ) {
+    val tabletWatch = isTablet && !fullscreen
+    // Tablet watch page: the video and the episode card float inside a margin with a gutter between.
+    val videoWidth =
+        if (isTablet) (maxWidth - TABLET_MARGIN * 2 - TABLET_GUTTER) * TABLET_VIDEO_FRACTION else maxWidth
+    val videoHeight = videoWidth * 9f / 16f
+    val videoTop = statusTop + if (isTablet) TABLET_TOP_GAP else 0.dp
+    val videoStart = if (isTablet) TABLET_MARGIN else 0.dp
+    // Its own group, so toggling it never shifts the video Box's identity below.
+    if (tabletWatch) AmbientBackdrop(info?.let { it.bannerUrl ?: it.posterHdUrl ?: it.posterUrl }, Modifier.fillMaxSize())
+    Box(
+        (if (fullscreen) Modifier.fillMaxSize()
+        else Modifier.padding(start = videoStart, top = videoTop).size(videoWidth, videoHeight))
+            .background(Color.Black)
+    ) {
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
@@ -277,10 +307,9 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
             modifier = Modifier.fillMaxSize(),
         )
 
-        // Gesture layer — sits UNDER the control overlay; the overlay's buttons/seek bar consume
-        // their own touches, so anything else (including taps on the scrims) lands here. Single tap
-        // toggles the controls; double-tap seeks (left/right third) or play/pauses (center);
-        // long-press holds 2× speed; vertical drags adjust brightness (left half) / volume (right).
+        // Tap layer — sits UNDER the control overlay; the overlay's buttons/seek bar consume their
+        // own touches, so a tap anywhere else (including the scrims) just toggles the controls.
+        // Deliberately no other gestures: every action is a button.
         Box(
             Modifier
                 .fillMaxSize()
@@ -294,82 +323,6 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                                 if (controlsVisible) interactionTick++
                             }
                         },
-                        onDoubleTap = onDoubleTap@{ o ->
-                            if (isLocked) return@onDoubleTap
-                            val third = size.width / 3f
-                            when {
-                                o.x < third -> {
-                                    vm.seekBack()
-                                    seekFlash = SeekFlash(forward = false)
-                                }
-                                o.x > 2 * third -> {
-                                    vm.seekForward()
-                                    seekFlash = SeekFlash(forward = true)
-                                }
-                                else -> vm.togglePlay()
-                            }
-                            interactionTick++
-                        },
-                        onLongPress = {
-                            if (!isLocked && !boosting) {
-                                preBoostSpeed = vm.speed.value
-                                boosting = true
-                                vm.setSpeed(2f)
-                            }
-                        },
-                        onPress = {
-                            tryAwaitRelease()
-                            if (boosting) {
-                                boosting = false
-                                vm.setSpeed(preBoostSpeed)
-                            }
-                        },
-                    )
-                }
-                .pointerInput(Unit) {
-                    var active = false
-                    var isVolume = false
-                    var fraction = 0f
-                    var maxVolume = 1
-                    detectVerticalDragGestures(
-                        onDragStart = { o ->
-                            active = !isLocked
-                            if (!active) return@detectVerticalDragGestures
-                            isVolume = o.x > size.width / 2f
-                            maxVolume = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                            fraction = if (isVolume) {
-                                audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / maxVolume
-                            } else {
-                                currentBrightness(activity)
-                            }
-                            hud = GestureHud(isVolume, fraction)
-                            hudDragging = true
-                        },
-                        onVerticalDrag = { change, dragAmount ->
-                            if (!active) return@detectVerticalDragGestures
-                            change.consume()
-                            // Full swipe over ~80% of the screen height = full range.
-                            fraction = (fraction - dragAmount / (size.height * 0.8f)).coerceIn(0f, 1f)
-                            if (isVolume) {
-                                // Silent-degrade: DND "total silence" makes setStreamVolume throw
-                                // SecurityException on many OEM builds — a crash mid-playback for a
-                                // volume swipe is never the right trade.
-                                runCatching {
-                                    audio.setStreamVolume(
-                                        AudioManager.STREAM_MUSIC,
-                                        (fraction * maxVolume).roundToInt(),
-                                        0,
-                                    )
-                                }
-                            } else {
-                                activity.window.attributes = activity.window.attributes.apply {
-                                    screenBrightness = fraction.coerceAtLeast(0.01f)
-                                }
-                            }
-                            hud = GestureHud(isVolume, fraction)
-                        },
-                        onDragEnd = { hudDragging = false },
-                        onDragCancel = { hudDragging = false },
                     )
                 }
         )
@@ -384,6 +337,7 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                 title = title,
                 episodeNumber = currentEpisode,
                 isPlaying = playWhenReady,
+                isBuffering = isBuffering && error == null,
                 position = position,
                 buffered = buffered,
                 duration = duration,
@@ -393,7 +347,7 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                 hasEpisodeList = episodes.isNotEmpty(),
                 textTracks = textTracks,
                 textDisabled = textDisabled,
-                landscape = landscape,
+                fullscreen = fullscreen,
                 speed = speed,
                 ccMenuOpen = ccMenuOpen,
                 speedMenuOpen = speedMenuOpen,
@@ -407,14 +361,8 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                     interactionTick++
                 },
                 onLock = { locked = true; unlockVisible = true; interactionTick++ },
-                onBack = onBack,
-                onToggleFullscreen = {
-                    landscape = !landscape
-                    activity.requestedOrientation =
-                        if (landscape) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                        else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                    interactionTick++
-                },
+                onBack = { if (fullscreen) exitFullscreen() else onBack() },
+                onToggleFullscreen = { fullscreen = !fullscreen; interactionTick++ },
                 onPlayPause = { vm.togglePlay(); interactionTick++ },
                 onRewind = { vm.seekBack(); interactionTick++ },
                 onForward = { vm.seekForward(); interactionTick++ },
@@ -436,62 +384,10 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
             )
         }
 
-        // Double-tap seek flash (ripple circle + label at the tapped side's center).
-        seekFlash?.let { flash ->
-            Surface(
-                shape = CircleShape,
-                color = ScrimColor,
-                modifier = Modifier
-                    .align(if (flash.forward) Alignment.CenterEnd else Alignment.CenterStart)
-                    .padding(horizontal = 42.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                ) {
-                    Icon(
-                        if (flash.forward) Icons.Filled.Forward10 else Icons.Filled.Replay10,
-                        null, tint = Color.White, modifier = Modifier.size(26.dp),
-                    )
-                    Text("10s", color = Color.White, style = MaterialTheme.typography.labelLarge)
-                }
-            }
+        // Resize-mode name flash.
+        resizeLabel?.let { label ->
+            CenterChip(label, Modifier.align(Alignment.TopCenter).padding(top = if (fullscreen) 64.dp else 12.dp))
         }
-
-        // Brightness / volume HUD while dragging.
-        hud?.let { h ->
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = ScrimColor,
-                modifier = Modifier.align(Alignment.Center),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                ) {
-                    Icon(
-                        when {
-                            !h.isVolume -> Icons.Filled.BrightnessMedium
-                            h.fraction <= 0.001f -> Icons.Filled.VolumeOff
-                            else -> Icons.Filled.VolumeUp
-                        },
-                        null, tint = Color.White, modifier = Modifier.size(22.dp),
-                    )
-                    LinearProgressIndicator(
-                        progress = { h.fraction },
-                        color = Color.White,
-                        trackColor = Color.White.copy(alpha = 0.25f),
-                        modifier = Modifier.width(120.dp),
-                    )
-                }
-            }
-        }
-
-        // Resize-mode name flash / long-press 2× chip.
-        resizeLabel?.let { label -> CenterChip(label, Modifier.align(Alignment.Center)) }
-        if (boosting) CenterChip("2× speed", Modifier.align(Alignment.TopCenter).padding(top = 48.dp))
 
         // Lock mode: everything is hidden; a tap shows this lone unlock button (AniLab-style).
         if (locked) {
@@ -526,7 +422,9 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                 positionMs = position,
                 markers = markers,
                 onSkip = vm::seekPast,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 112.dp, end = 24.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = if (fullscreen) 112.dp else 60.dp, end = if (fullscreen) 24.dp else 12.dp),
             )
         }
 
@@ -583,7 +481,39 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
             )
         }
     }
+    if (!fullscreen) {
+        val content = WatchContent(title, info, episodes, currentEpisode, vm::jumpTo)
+        if (isTablet) {
+            // Info column aligned to the video's edges (its items carry their own 16dp inset).
+            WatchInfoPane(
+                content,
+                Modifier
+                    .padding(start = videoStart - 16.dp, top = videoTop + videoHeight + 4.dp)
+                    .width(videoWidth + 32.dp)
+                    .fillMaxHeight(),
+            )
+            WatchEpisodesPane(
+                content,
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = videoTop, end = TABLET_MARGIN)
+                    .navigationBarsPadding()
+                    .padding(bottom = TABLET_TOP_GAP)
+                    .width(maxWidth - TABLET_MARGIN * 2 - TABLET_GUTTER - videoWidth)
+                    .fillMaxHeight(),
+            )
+        } else {
+            WatchPanel(content, Modifier.padding(top = statusTop + videoHeight).fillMaxSize())
+        }
+    }
+    }
 }
+
+/** Tablet watch page: the video's share of the content width (the episode card takes the rest). */
+private const val TABLET_VIDEO_FRACTION = 0.66f
+private val TABLET_MARGIN = 24.dp
+private val TABLET_GUTTER = 20.dp
+private val TABLET_TOP_GAP = 16.dp
 
 /** Right-side episode list panel shown inside the player window (keeps immersive mode intact). */
 @Composable
@@ -677,23 +607,12 @@ private val SpeedOptions = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
 
 private fun speedLabel(s: Float) = if (s == 1f) "Normal" else "${"%.2f".format(s).trimEnd('0').trimEnd('.')}x"
 
-/**
- * The window override wins when set; otherwise fall back to the system brightness so the first
- * drag adjusts from where the screen actually is instead of snapping to an arbitrary midpoint.
- */
-private fun currentBrightness(activity: Activity): Float {
-    val override = activity.window.attributes.screenBrightness
-    if (override >= 0f) return override
-    return runCatching {
-        Settings.System.getInt(activity.contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f
-    }.getOrDefault(0.5f).coerceIn(0f, 1f)
-}
-
 @Composable
 private fun PlayerControls(
     title: String,
     episodeNumber: Int,
     isPlaying: Boolean,
+    isBuffering: Boolean,
     position: Long,
     buffered: Long,
     duration: Long,
@@ -703,7 +622,7 @@ private fun PlayerControls(
     hasEpisodeList: Boolean,
     textTracks: List<PlayerTextTrack>,
     textDisabled: Boolean,
-    landscape: Boolean,
+    fullscreen: Boolean,
     speed: Float,
     ccMenuOpen: Boolean,
     speedMenuOpen: Boolean,
@@ -727,37 +646,36 @@ private fun PlayerControls(
     onDisableText: () -> Unit,
 ) {
     // Gradient scrim bands top and bottom (AniLab-style) — purely decorative, so touches on them
-    // fall through to the gesture layer underneath.
+    // fall through to the tap layer underneath. The watch page's 16:9 video gets a compact skin:
+    // shorter scrims, smaller center buttons, and no lock/episode-panel (the list is right below).
     Box(Modifier.fillMaxSize()) {
         Box(
             Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .height(130.dp)
+                .height(if (fullscreen) 130.dp else 72.dp)
                 .background(TopScrimBrush)
         )
         Box(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(190.dp)
+                .height(if (fullscreen) 190.dp else 110.dp)
                 .background(BottomScrimBrush)
         )
 
-        // Controls stay inside the safe area so nothing sits under a cutout / gesture pill.
-        Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-            // Top bar: back · series title + episode line · speed · CC · episodes · resize
-            Row(
-                Modifier
-                    .align(Alignment.TopStart)
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
-                }
-                Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+        // Fullscreen controls stay inside the safe area so nothing sits under a cutout / gesture
+        // pill. The watch-page video already sits below the status bar, and the nav-bar inset
+        // belongs to the list under it, not to the video.
+        Box(Modifier.fillMaxSize().then(if (fullscreen) Modifier.safeDrawingPadding() else Modifier)) {
+            // Top: title + episode line only (no buttons; the watch page shows these under the video).
+            if (fullscreen) {
+                Column(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                ) {
                     Text(
                         title,
                         color = Color.White,
@@ -773,60 +691,44 @@ private fun PlayerControls(
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }
-                Box {
-                    IconButton(onClick = { onSpeedMenuOpenChange(true) }) {
-                        Icon(Icons.Filled.Speed, "Playback speed", tint = Color.White)
-                    }
-                    DropdownMenu(
-                        expanded = speedMenuOpen,
-                        onDismissRequest = { onSpeedMenuOpenChange(false) },
-                    ) {
-                        SpeedOptions.forEach { s ->
-                            DropdownMenuItem(
-                                text = { Text(speedLabel(s)) },
-                                onClick = { onSelectSpeed(s); onSpeedMenuOpenChange(false) },
-                                leadingIcon = { if (s == speed) Icon(Icons.Filled.Check, null) },
-                            )
-                        }
+            }
+
+            // Center: rewind 10s · play/pause · forward 10s. While rebuffering the screen-level
+            // spinner takes the play button's spot.
+            Row(
+                Modifier.align(Alignment.Center),
+                horizontalArrangement = Arrangement.spacedBy(if (fullscreen) 48.dp else 28.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val sideIcon = if (fullscreen) 40.dp else 30.dp
+                IconButton(onClick = onRewind, modifier = Modifier.size(sideIcon + 16.dp)) {
+                    Icon(Icons.Filled.Replay10, "Rewind 10s", tint = Color.White, modifier = Modifier.size(sideIcon))
+                }
+                IconButton(
+                    onClick = onPlayPause,
+                    enabled = !isBuffering,
+                    modifier = Modifier.size(if (fullscreen) 72.dp else 52.dp),
+                ) {
+                    if (!isBuffering) {
+                        Icon(
+                            if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            if (isPlaying) "Pause" else "Play",
+                            tint = Color.White,
+                            modifier = Modifier.size(if (fullscreen) 60.dp else 42.dp),
+                        )
                     }
                 }
-                if (textTracks.isNotEmpty()) {
-                    Box {
-                        IconButton(onClick = { onCcMenuOpenChange(true) }) {
-                            Icon(Icons.Filled.ClosedCaption, "Subtitles", tint = Color.White)
-                        }
-                        DropdownMenu(expanded = ccMenuOpen, onDismissRequest = { onCcMenuOpenChange(false) }) {
-                            DropdownMenuItem(
-                                text = { Text("Off") },
-                                onClick = { onDisableText(); onCcMenuOpenChange(false) },
-                                leadingIcon = { if (textDisabled) Icon(Icons.Filled.Check, null) },
-                            )
-                            textTracks.forEachIndexed { i, t ->
-                                DropdownMenuItem(
-                                    text = { Text(t.label) },
-                                    onClick = { onSelectText(i); onCcMenuOpenChange(false) },
-                                    leadingIcon = { if (!textDisabled && t.selected) Icon(Icons.Filled.Check, null) },
-                                )
-                            }
-                        }
-                    }
-                }
-                if (hasEpisodeList) {
-                    IconButton(onClick = onOpenEpisodes) {
-                        Icon(Icons.AutoMirrored.Filled.PlaylistPlay, "Episodes", tint = Color.White)
-                    }
-                }
-                IconButton(onClick = onCycleResize) {
-                    Icon(Icons.Filled.AspectRatio, "Resize mode", tint = Color.White)
+                IconButton(onClick = onForward, modifier = Modifier.size(sideIcon + 16.dp)) {
+                    Icon(Icons.Filled.Forward10, "Forward 10s", tint = Color.White, modifier = Modifier.size(sideIcon))
                 }
             }
 
-            // Bottom: seek bar flanked by the timers, then the AniLab control row.
+            // Bottom: seek bar flanked by the timers, then every other button in one centered row.
             Column(
                 Modifier
                     .align(Alignment.BottomStart)
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .padding(horizontal = 12.dp, vertical = if (fullscreen) 6.dp else 0.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -855,26 +757,59 @@ private fun PlayerControls(
                 }
                 Row(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    horizontalArrangement = Arrangement.spacedBy(
+                        if (fullscreen) 8.dp else 0.dp, Alignment.CenterHorizontally,
+                    ),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    ControlIcon(Icons.Filled.LockOpen, "Lock controls", onLock, iconSize = 22.dp)
-                    ControlIcon(Icons.Filled.Replay10, "Rewind 10s", onRewind)
-                    ControlIcon(Icons.Filled.SkipPrevious, "Previous episode", onPrev, enabled = hasPrev)
-                    IconButton(onClick = onPlayPause, modifier = Modifier.size(64.dp)) {
-                        Icon(
-                            if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            if (isPlaying) "Pause" else "Play",
-                            tint = Color.White,
-                            modifier = Modifier.size(52.dp),
-                        )
+                    // In fullscreen, back == exit fullscreen (the button at the end of this row).
+                    if (!fullscreen) ControlIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack, iconSize = 24.dp)
+                    if (fullscreen) ControlIcon(Icons.Filled.LockOpen, "Lock controls", onLock, iconSize = 22.dp)
+                    ControlIcon(Icons.Filled.SkipPrevious, "Previous episode", onPrev, enabled = hasPrev, iconSize = 24.dp)
+                    ControlIcon(Icons.Filled.SkipNext, "Next episode", onNext, enabled = hasNext, iconSize = 24.dp)
+                    Box {
+                        ControlIcon(Icons.Filled.Speed, "Playback speed", { onSpeedMenuOpenChange(true) }, iconSize = 24.dp)
+                        DropdownMenu(
+                            expanded = speedMenuOpen,
+                            onDismissRequest = { onSpeedMenuOpenChange(false) },
+                        ) {
+                            SpeedOptions.forEach { s ->
+                                DropdownMenuItem(
+                                    text = { Text(speedLabel(s)) },
+                                    onClick = { onSelectSpeed(s); onSpeedMenuOpenChange(false) },
+                                    leadingIcon = { if (s == speed) Icon(Icons.Filled.Check, null) },
+                                )
+                            }
+                        }
                     }
-                    ControlIcon(Icons.Filled.SkipNext, "Next episode", onNext, enabled = hasNext)
-                    ControlIcon(Icons.Filled.Forward10, "Forward 10s", onForward)
+                    if (textTracks.isNotEmpty()) {
+                        Box {
+                            ControlIcon(Icons.Filled.ClosedCaption, "Subtitles", { onCcMenuOpenChange(true) }, iconSize = 24.dp)
+                            DropdownMenu(expanded = ccMenuOpen, onDismissRequest = { onCcMenuOpenChange(false) }) {
+                                DropdownMenuItem(
+                                    text = { Text("Off") },
+                                    onClick = { onDisableText(); onCcMenuOpenChange(false) },
+                                    leadingIcon = { if (textDisabled) Icon(Icons.Filled.Check, null) },
+                                )
+                                textTracks.forEachIndexed { i, t ->
+                                    DropdownMenuItem(
+                                        text = { Text(t.label) },
+                                        onClick = { onSelectText(i); onCcMenuOpenChange(false) },
+                                        leadingIcon = { if (!textDisabled && t.selected) Icon(Icons.Filled.Check, null) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (hasEpisodeList && fullscreen) {
+                        ControlIcon(Icons.AutoMirrored.Filled.PlaylistPlay, "Episodes", onOpenEpisodes, iconSize = 24.dp)
+                    }
+                    ControlIcon(Icons.Filled.AspectRatio, "Resize mode", onCycleResize, iconSize = 24.dp)
                     ControlIcon(
-                        if (landscape) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                        "Fullscreen",
+                        if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                        if (fullscreen) "Exit fullscreen" else "Fullscreen",
                         onToggleFullscreen,
+                        iconSize = 24.dp,
                     )
                 }
             }

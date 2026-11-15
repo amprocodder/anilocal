@@ -818,7 +818,7 @@ private fun DetailHero(d: AnimeDetail) {
 }
 
 @Composable
-private fun MetaPill(text: String, tinted: Boolean = false) {
+internal fun MetaPill(text: String, tinted: Boolean = false) {
     Surface(
         shape = RoundedCornerShape(4.dp),
         color = if (tinted) MaterialTheme.colorScheme.primaryContainer
@@ -835,7 +835,7 @@ private fun MetaPill(text: String, tinted: Boolean = false) {
 }
 
 @Composable
-private fun ExpandableSynopsis(synopsis: String) {
+internal fun ExpandableSynopsis(synopsis: String) {
     var expanded by remember { mutableStateOf(false) }
     Text(
         synopsis,

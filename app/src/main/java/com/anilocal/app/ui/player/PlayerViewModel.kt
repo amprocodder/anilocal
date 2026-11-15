@@ -158,6 +158,11 @@ class PlayerViewModel @Inject constructor(
     private val _episodes = MutableStateFlow<List<Episode>>(emptyList())
     val episodes: StateFlow<List<Episode>> = _episodes
 
+    // The title's metadata for the non-fullscreen watch page (synopsis, pills, art). The AniList
+    // detail online, or a title/poster-only stub built from the download offline; null until known.
+    private val _info = MutableStateFlow<AnimeDetail?>(null)
+    val info: StateFlow<AnimeDetail?> = _info
+
     // Current playback speed (sticky across episode switches — the player keeps its parameters).
     private val _speed = MutableStateFlow(1f)
     val speed: StateFlow<Float> = _speed
@@ -480,6 +485,7 @@ class PlayerViewModel @Inject constructor(
                 summary = AnimeSummary(animeId, fallback.title, fallback.posterUrl, fallback.idMal)
                 _title.value = fallback.title
                 _episodes.value = episodes
+                _info.value = fallback
                 updateNavState()
             }
         }
@@ -491,6 +497,7 @@ class PlayerViewModel @Inject constructor(
         summary = AnimeSummary(d.id, d.title, d.posterUrl, d.idMal)
         _title.value = d.title
         _episodes.value = d.episodes
+        _info.value = d
         updateNavState()
         return d
     }

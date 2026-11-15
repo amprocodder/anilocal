@@ -305,6 +305,12 @@ for the old MAL client id).
   `autoPlayNext` setting and `hasEpisode()`; an `advancing` guard fires it exactly once, and with no next
   episode it `progress.remove()`s the title from Continue Watching. The player's built-in next/prev
   buttons are disabled.
+  **Two layouts, one tree** (`PlayerScreen`): playback opens **fullscreen** (sensor-landscape, bars
+  hidden); exiting fullscreen (button or Back) shows the **watch page** (`WatchPanel.kt`: details +
+  episode list) — portrait with the video on top on phones, landscape side-by-side on tablets
+  (`smallestScreenWidthDp >= 600`). Back on the watch page leaves the player. The video `Box` stays
+  the first child of one `BoxWithConstraints` and only its size changes, so the `PlayerView`/SurfaceView
+  is never recreated on a mode switch — keep it that way (no Column/Row swap around it).
 
 - **Optional features no-op when unconfigured.** TMDB artwork is gated on build-time
   config that defaults to blank; **MAL sync needs no config at all** (username only). Build-time keys flow
