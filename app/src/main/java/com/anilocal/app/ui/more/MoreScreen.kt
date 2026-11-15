@@ -1,5 +1,24 @@
 package com.anilocal.app.ui.more
 
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.ClosedCaption
+import androidx.compose.material.icons.outlined.HighQuality
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.BorderStroke
+import com.anilocal.app.ui.common.ScreenHeader
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.LaunchedEffect
 import android.widget.Toast
@@ -66,6 +85,7 @@ import com.anilocal.app.domain.model.DownloadQuality
 import com.anilocal.app.domain.source.Sources
 import kotlin.math.roundToInt
 
+@kotlin.OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MoreScreen(
     onBrowseExtensions: () -> Unit,
@@ -89,23 +109,27 @@ fun MoreScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         item(key = "title", contentType = "title") {
-            Text("Settings", style = MaterialTheme.typography.titleLarge, modifier = ContentWidth)
+            ScreenHeader(
+                "Settings",
+                ContentWidth.padding(bottom = 4.dp),
+                subtitle = "Sources, playback, downloads and sync",
+                horizontalPadding = 0.dp,
+            )
         }
 
         // Streaming source first: it's the one thing a new install must set up (the app ships
         // with no sources), so it shouldn't sit below every playback preference.
         item(key = "sources", contentType = "settings") {
-            SectionCard {
+            SectionCard(
+                Icons.Outlined.Hub,
+                "Streaming source",
+                "Where video is resolved from. Browsing and metadata always come from AniList.",
+            ) {
                 val sources by vm.sources.collectAsStateWithLifecycle()
                 val selectedSourceId by vm.selectedSourceId.collectAsStateWithLifecycle()
                 val lastAutoWinner by vm.lastAutoWinner.collectAsStateWithLifecycle()
                 val provisioning by vm.provisioning.collectAsStateWithLifecycle()
                 val provisionStatus by vm.provisionStatus.collectAsStateWithLifecycle()
-                Text("Streaming source", style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold)
-                Text("Where video is resolved from. Browsing and metadata always come from AniList.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 // "Auto" only helps when there's a choice to make — hide it with 0/1 source
                 // installed. Keep it visible when it is already selected, though: extension
                 // removal can reduce the list after the preference was saved, and hiding the
@@ -140,12 +164,26 @@ fun MoreScreen(
                 if (sources.isEmpty()) {
                     // The app ships with no sources on purpose; say so plainly instead of leaving
                     // an empty list the user has to interpret.
-                    Text(
-                        "No sources installed. Add a repo in Browse extensions, or install the " +
-                            "recommended sources.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Outlined.Info, null,
+                                tint = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Text(
+                                "No sources installed yet. Add a repo in Browse extensions, or " +
+                                    "install the recommended sources.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(start = 10.dp),
+                            )
+                        }
+                    }
                 }
                 sources.forEach { src ->
                     Row(
@@ -171,16 +209,31 @@ fun MoreScreen(
                         }
                     }
                 }
-                Row(
+                // Stacked full-width actions: side by side, the long label wrapped onto three lines.
+                Column(
                     Modifier.fillMaxWidth().padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    OutlinedButton(onClick = onBrowseExtensions) { Text("Browse extensions") }
-                    OutlinedButton(onClick = vm::installRecommended, enabled = !provisioning) {
+                    Button(
+                        onClick = onBrowseExtensions,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                    ) {
+                        Icon(Icons.Outlined.Extension, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Browse extensions", fontWeight = FontWeight.SemiBold)
+                    }
+                    OutlinedButton(
+                        onClick = vm::installRecommended,
+                        enabled = !provisioning,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                    ) {
                         if (provisioning) {
                             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                         } else {
+                            Icon(Icons.Outlined.AutoAwesome, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
                             Text("Install recommended sources")
                         }
                     }
@@ -197,7 +250,7 @@ fun MoreScreen(
             val autoSkip by vm.autoSkip.collectAsStateWithLifecycle()
             val autoPlayNext by vm.autoPlayNext.collectAsStateWithLifecycle()
             val wifiOnly by vm.wifiOnly.collectAsStateWithLifecycle()
-            SectionCard {
+            SectionCard(Icons.Outlined.PlayCircle, "Playback") {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Auto-skip intro/outro", style = MaterialTheme.typography.bodyLarge)
@@ -232,16 +285,30 @@ fun MoreScreen(
 
         item(key = "quality", contentType = "settings") {
             val downloadQuality by vm.downloadQuality.collectAsStateWithLifecycle()
-            SectionCard {
-                Text("Default download quality", style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold)
-                DownloadQuality.entries.forEach { q ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { vm.setDownloadQuality(q) },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = downloadQuality == q, onClick = { vm.setDownloadQuality(q) })
-                        Text(q.label, modifier = Modifier.padding(start = 8.dp))
+            SectionCard(
+                Icons.Outlined.HighQuality,
+                "Default download quality",
+                "Used when a source offers several qualities.",
+            ) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    DownloadQuality.entries.forEach { q ->
+                        FilterChip(
+                            selected = downloadQuality == q,
+                            onClick = { vm.setDownloadQuality(q) },
+                            label = { Text(q.label) },
+                            leadingIcon = if (downloadQuality == q) {
+                                { Icon(Icons.Filled.Check, null, Modifier.size(16.dp)) }
+                            } else null,
+                            shape = RoundedCornerShape(100.dp),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = Color.White,
+                                selectedLeadingIconColor = Color.White,
+                            ),
+                        )
                     }
                 }
             }
@@ -250,8 +317,7 @@ fun MoreScreen(
         item(key = "subtitles", contentType = "settings") {
             val subtitleScale by vm.subtitleScale.collectAsStateWithLifecycle()
             val subtitleBackground by vm.subtitleBackground.collectAsStateWithLifecycle()
-            SectionCard {
-                Text("Subtitles", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            SectionCard(Icons.Outlined.ClosedCaption, "Subtitles") {
                 var sliderScale by remember(subtitleScale) { mutableStateOf(subtitleScale) }
                 // Live preview — reflects the in-progress slider value and the background toggle so the
                 // effect is visible before leaving the screen. Mirrors the player's white-text /
@@ -274,21 +340,25 @@ fun MoreScreen(
         }
 
         item(key = "mal", contentType = "settings") {
-            SectionCard {
-                // MyAnimeList Sync — expandable subsection.
-                var malExpanded by rememberSaveable { mutableStateOf(false) }
+            // MyAnimeList Sync — expandable subsection.
+            var malExpanded by rememberSaveable { mutableStateOf(false) }
+            SectionCard(
+                Icons.Outlined.Sync,
+                "MyAnimeList Sync",
+                "Mirror your public MAL list into My List",
+                onHeaderClick = { malExpanded = !malExpanded },
+                trailing = {
+                    Icon(
+                        if (malExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        if (malExpanded) "Collapse" else "Expand",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+            ) {
                 val malUsername by vm.malUsername.collectAsStateWithLifecycle()
                 val malSyncEnabled by vm.malSyncEnabled.collectAsStateWithLifecycle()
                 val syncStatus by vm.syncStatus.collectAsStateWithLifecycle()
                 val syncing by vm.syncing.collectAsStateWithLifecycle()
-                Row(
-                    Modifier.fillMaxWidth().clickable { malExpanded = !malExpanded },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("MyAnimeList Sync", style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    Icon(if (malExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, "Toggle")
-                }
                 if (malExpanded) {
                     var usernameField by rememberSaveable(malUsername) { mutableStateOf(malUsername) }
                     OutlinedTextField(
@@ -329,19 +399,54 @@ fun MoreScreen(
 /** Settings read best at a column width; on tablets, full-bleed 2900px rows are hard to scan. */
 private val ContentWidth = Modifier.widthIn(max = 840.dp).fillMaxWidth()
 
-/** Rounded settings-group card: the 9anime panel look for each More section. */
+/**
+ * Rounded settings-group card with an icon-badged header (title + optional muted subtitle and a
+ * trailing slot), matching the raised cards of the watch page.
+ */
 @Composable
-private fun SectionCard(content: @Composable ColumnScope.() -> Unit) {
+private fun SectionCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String? = null,
+    onHeaderClick: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Surface(
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = ContentWidth,
     ) {
-        Column(
-            Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            content = content,
-        )
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .then(if (onHeaderClick != null) Modifier.clickable(onClick = onHeaderClick) else Modifier),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(11.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(20.dp))
+                }
+                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    if (subtitle != null) {
+                        Text(
+                            subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                trailing?.invoke()
+            }
+            content()
+        }
     }
 }
 
