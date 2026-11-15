@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Commit message check for AniLocal. The rules are in CLAUDE.md -> "Git & commit rules".
+#
+# Used two ways:
+#   - as a local git hook:  git config core.hooksPath .github/hooks   (git passes the message file)
+#   - from CI:              .github/hooks/commit-msg <file-containing-message>
+set -euo pipefail
+
+msg_file="${1:?usage: commit-msg <message-file>}"
+
+# Ignore git's comment lines.
+body="$(grep -v '^#' "$msg_file" || true)"
+header="$(printf '%s\n' "$body" | sed -n 1p)"
+second="$(printf '%s\n' "$body" | sed -n 2p)"
+
+# Let git's own generated messages through.
+case "$header" in
+  "Merge "*|"fixup! "*|"squash! "*|"amend! "*) exit 0 ;;
+esac
+
+types='feat|fix|perf|refactor|docs|build|ci|test|chore|revert|style'
+pattern="^(${types})(\([a-z0-9][a-z0-9/-]*\))?!?: [^ ].*[^. ]$"
+
+fail() {
+  printf 'commit-msg: %s\n  header: "%s"\n' "$1" "$header" >&2
+  printf '  expected: type(scope): summary   e.g. "fix(player): keep position after rotation"\n' >&2
+  printf '  types: %s\n' "${types//|/, }" >&2
+  exit 1
+}
+
+[[ -n "$header" ]] || fail "empty commit message"
+[[ "$header" =~ $pattern ]] || fail "header must be 'type(scope): summary' (lowercase type and scope, no trailing period)"
+(( ${#header} <= 72 )) || fail "header is ${#header} characters; keep it to 72 or fewer"
+[[ "${header#*: }" =~ ^[a-z0-9] ]] || fail "summary must start lowercase and imperative ('add', 'fix', not 'Added')"
+[[ -z "$second" ]] || fail "leave a blank line between the header and the body"
+
+exit 0
