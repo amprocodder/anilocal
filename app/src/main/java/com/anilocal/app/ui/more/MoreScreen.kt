@@ -89,7 +89,7 @@ fun MoreScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         item(key = "title", contentType = "title") {
-            Text("More", style = MaterialTheme.typography.titleLarge, modifier = ContentWidth)
+            Text("Settings", style = MaterialTheme.typography.titleLarge, modifier = ContentWidth)
         }
 
         // Streaming source first: it's the one thing a new install must set up (the app ships

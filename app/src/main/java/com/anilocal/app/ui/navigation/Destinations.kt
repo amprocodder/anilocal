@@ -6,7 +6,7 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.VideoLibrary
-import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /** Top-level tabs — the AniLab-style bottom menu. */
@@ -15,7 +15,7 @@ enum class TopTab(val route: String, val label: String, val icon: ImageVector) {
     Explore("explore", "Explore", Icons.Outlined.Explore),
     Library("library", "My List", Icons.Outlined.VideoLibrary),
     Downloads("downloads", "Downloads", Icons.Outlined.Download),
-    More("more", "More", Icons.Outlined.MoreHoriz),
+    Settings("settings", "Settings", Icons.Outlined.Settings),
 }
 
 object Routes {

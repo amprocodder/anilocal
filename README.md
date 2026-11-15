@@ -24,12 +24,12 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   **Downloads tab** (offline-accessible) lists them with progress + **pause / resume / cancel**
   controls, and browser posters get a **downloaded badge**. Everything the UI shows reads from
   Room, so it works fully offline.
-- **WiFi-only downloads** setting (More tab): sets the `DownloadManager` requirement to
+- **WiFi-only downloads** setting (Settings tab): sets the `DownloadManager` requirement to
   unmetered, so downloads auto-pause on mobile data and resume on WiFi.
-- **Download quality selection**: a default-quality preference (More tab) plus a per-episode
+- **Download quality selection**: a default-quality preference (Settings tab) plus a per-episode
   quality picker shown when the source offers multiple variants (pre-selected from the
   default). The chosen quality is stored and shown on the Downloads tab.
-- **Auto-skip** toggle (More tab) persisted via **DataStore**; when on, the player seeks past
+- **Auto-skip** toggle (Settings tab) persisted via **DataStore**; when on, the player seeks past
   each intro/outro window automatically (once per marker).
 - **Real catalog** via **AniList** GraphQL (trending on Home, search in Explore, full detail
   pages). No API key needed. *(TMDB wired as optional artwork enrichment — see config.)*
@@ -42,11 +42,11 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   progress saved during playback.
 - **In-list search**: the Explore-style search box on the My List tab (filters My List or the
   selected MAL category by title) and on the Downloads tab (filters the season folders).
-- **User-selectable stream sources**: a runtime **source registry** + picker (More tab). No
+- **User-selectable stream sources**: a runtime **source registry** + picker (Settings tab). No
   built-in sources ship; **installed Aniyomi extensions** appear automatically and resolve
-  streams for AniList-browsed titles. **Browse extensions** (More → Browse extensions) is where you add
+  streams for AniList-browsed titles. **Browse extensions** (Settings → Browse extensions) is where you add
   extension repos (`index.min.json`) and install sources in-app; **Install recommended sources**
-  in More is an explicit one-tap opt-in for a small community-recommended set.
+  in Settings is an explicit one-tap opt-in for a small community-recommended set.
 - Hilt DI, Compose + Material3, Coil images, OkHttp 5/Retrofit/Moshi.
 
 ## Configure optional features (the app builds & runs without these)
@@ -69,7 +69,7 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
    scripts (`gradlew`) and sync. (Wrapper pinned to Gradle 8.9 for AGP 8.7.)
 2. JDK 17, Android SDK 35 installed. `minSdk 24`.
 3. Run the `app` config on a device/emulator. Browse works immediately (AniList); to **play**,
-   install an extension first (More → Browse extensions), then pick it in the source picker.
+   install an extension first (Settings → Browse extensions), then pick it in the source picker.
 
 ## Architecture — 4 Gradle modules
 The dependency direction is compile-enforced (not just convention):

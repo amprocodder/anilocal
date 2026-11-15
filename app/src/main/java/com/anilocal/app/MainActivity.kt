@@ -143,7 +143,7 @@ private fun AppRoot() {
             composable(TopTab.Downloads.route) {
                 DownloadsScreen(onPlay = { animeId, ep -> nav.navigate(Routes.player(animeId, ep)) })
             }
-            composable(TopTab.More.route) {
+            composable(TopTab.Settings.route) {
                 MoreScreen(
                     onBrowseExtensions = { nav.navigate(Routes.EXTENSIONS) },
                     onConfigureSource = { nav.navigate(Routes.sourcePreferences(it)) },

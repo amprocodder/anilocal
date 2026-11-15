@@ -344,7 +344,7 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
                 "Add extension repos and install third-party sources — unaffiliated community APKs, " +
                     "installed in-app (signing cert verified against the repo when it publishes one). " +
                     "AniList still provides browsing; the selected source only resolves streams. " +
-                    "Pick one — or “Auto (best source)” — in More → Streaming source.",
+                    "Pick one — or “Auto (best source)” — in Settings → Streaming source.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
@@ -388,7 +388,7 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
                     item(key = "no-repos", contentType = "hint") {
                         Text(
                             "No repos added yet. AniLocal ships with no sources — add an extension " +
-                                "repo URL above, or use “Install recommended sources” in More.",
+                                "repo URL above, or use “Install recommended sources” in Settings.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(vertical = 16.dp),

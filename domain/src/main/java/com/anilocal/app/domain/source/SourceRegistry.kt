@@ -25,7 +25,7 @@ object Sources {
  * from an ordinary resolve failure so the UI can say "install a source" instead of retrying.
  */
 class NoSourceInstalledException :
-    IllegalStateException("No streaming source installed. Add one in More → Streaming source.")
+    IllegalStateException("No streaming source installed. Add one in Settings → Streaming source.")
 
 /**
  * Registry of every [AnimeSource] currently available to resolve streams: the in-app built-ins

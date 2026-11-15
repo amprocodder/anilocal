@@ -171,7 +171,7 @@ Streams are **no longer one compile-time binding** (the old `bindAnimeSource` is
 empty — `@Multibinds` declares it); `SourceRegistryImpl` (in `:data`) merges that set with the
 extensions `AnimeExtensionLoader` discovers and exposes a reactive `sources: StateFlow`.
 `SourceStreamRepository` injects the `SourceRegistry` + `SettingsRepository` and routes resolution to
-the **user-selected** source (`selectedSourceId` in DataStore, chosen in the More-screen picker),
+the **user-selected** source (`selectedSourceId` in DataStore, chosen in the Settings-tab picker),
 falling back to the first available source. **To add a built-in source, add one `@Binds @IntoSet`
 line** — selection, routing, and the picker are automatic. The `AnimeSource` contract is **five required suspend methods** —
 `popular`/`search`/`detail` (catalog-shaped) *and* `servers`/`resolve` (stream-shaped) — **plus a
@@ -317,7 +317,7 @@ for the old MAL client id).
     `MalRepositoryImpl`. Sync is one-way/read-only: it pages the list (~300/page, ≤50 pages), then
     `dao.clear()` + `upsertAll()` (full replace, not merge), throttled to once per 30 min. Requires the
     user's MAL list privacy to be Public. It fires from `AppViewModel.onAppOpen()` (a `MainActivity`
-    `LaunchedEffect` on every app open) through the gated/throttled `syncIfDue()`; **"Sync now"** in More
+    `LaunchedEffect` on every app open) through the gated/throttled `syncIfDue()`; **"Sync now"** in Settings
     calls the un-throttled `sync()`. Library's **"My List"** then merges the Room library with the *entire*
     MAL mirror (deduped by MAL id, local wins); MAL-only rows get a synthetic `mal-<malId>` id, so opening
     one must first resolve `catalog.anilistIdForMal(malId)` before navigating — the detail route is keyed by
@@ -384,7 +384,7 @@ for the old MAL client id).
   ranked community allow-list (verified against `RecommendedSources.REPO_URL`, the yuzono repo;
   HiAnime/AnimeKai are dead & removed — don't re-add); `installRecommended(target)` adds that repo to the
   user's list and tops up to `target` verified seeds (idempotent) — run ONLY from the "Install recommended
-  sources" button in More. Selecting Auto must never trigger it. With zero sources, resolution throws the
+  sources" button in Settings. Selecting Auto must never trigger it. With zero sources, resolution throws the
   domain `NoSourceInstalledException`, which the player shows as-is (paused, no reconnect loop). The empirical scoreboard takes over ranking
   from there — no ongoing curation. **Auto-eviction** closes the loop: `ExtensionRepository.pruneLosers`
   (run alongside provisioning) uninstalls app-installed packages whose sources have a poor aggregate
@@ -399,7 +399,7 @@ for the old MAL client id).
 ## Conventions
 
 - Navigation is a single Compose `NavHost` in `MainActivity.kt`; routes live in
-  `app/.../ui/navigation/Destinations.kt` (`TopTab` enum = bottom nav = Home/Explore/Library/Downloads/More;
+  `app/.../ui/navigation/Destinations.kt` (`TopTab` enum = bottom nav = Home/Explore/Library/Downloads/Settings — the Settings tab is `MoreScreen`/`MoreViewModel` in code;
   `Routes` = the non-tab routes: `detail`, `player`, `extensions` (Browse extensions → install via the
   system installer), and `source/{sourceId}/preferences` (per-source settings, shown when
   `SourceInfo.configurable`)). The bottom `NavigationBar` shows only when the current route is a `TopTab`
@@ -426,7 +426,7 @@ for the old MAL client id).
   Explore additionally debounces typed queries 300 ms).
 - Settings persist via DataStore (`DataStoreSettingsRepository`) exposed as Kotlin `Flow`s — including
   `autoPlayNext`, `autoSkip`, `wifiOnlyDownloads`, default download quality, and **subtitle
-  scale/background** (the player applies these live to the `SubtitleView`; More shows a to-scale preview
+  scale/background** (the player applies these live to the `SubtitleView`; Settings shows a to-scale preview
   that reproduces the caption's true on-screen px).
 - Every module keeps its Kotlin sources under `src/main/java/` (`:domain` was moved there from
   `src/main/kotlin/` to match). Put new files there, not in a `kotlin/` directory.
