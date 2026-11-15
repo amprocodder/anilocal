@@ -1,5 +1,8 @@
 package com.anilocal.app.ui.more
 
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.channels.Channel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.anilocal.app.domain.model.DownloadQuality
@@ -72,6 +75,9 @@ class MoreViewModel @Inject constructor(
     val provisioning: StateFlow<Boolean> = _provisioning
     private val _provisionStatus = MutableStateFlow<String?>(null)
     val provisionStatus: StateFlow<String?> = _provisionStatus
+    private val _installEvents = Channel<String>(Channel.BUFFERED)
+    /** One-shot messages when a user-requested install finishes (shown as a toast). */
+    val installEvents: Flow<String> = _installEvents.receiveAsFlow()
 
     private val autoSkipWrites = ConflatedSetting(viewModelScope, settings::setAutoSkip)
     private val autoPlayWrites = ConflatedSetting(viewModelScope, settings::setAutoPlayNext)
@@ -98,7 +104,7 @@ class MoreViewModel @Inject constructor(
     private suspend fun provision() {
         // Claim the run atomically so repeated taps cannot install/prune the same set twice.
         if (!_provisioning.compareAndSet(expect = false, update = true)) return
-        _provisionStatus.value = "Updating sources…"
+        _provisionStatus.value = UPDATING
         try {
             // Repo fetches and APK verification are network/disk work. Keep the provisioning
             // claim held while retrying so a second tap cannot duplicate installs or pruning.
@@ -124,6 +130,7 @@ class MoreViewModel @Inject constructor(
             _provisionStatus.value = "Couldn't update sources. Tap Install recommended sources to retry."
         } finally {
             _provisioning.value = false
+            _provisionStatus.value?.takeIf { it != UPDATING }?.let { _installEvents.trySend(it) }
         }
     }
 
@@ -150,3 +157,5 @@ class MoreViewModel @Inject constructor(
     fun setMalSyncEnabled(enabled: Boolean) = malEnabledWrites.set(enabled)
     fun syncMalNow(username: String? = null) = malActions.sync(username)
 }
+
+private const val UPDATING = "Updating sources…"

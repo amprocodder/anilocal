@@ -1,5 +1,8 @@
 package com.anilocal.app.ui.more
 
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.LaunchedEffect
+import android.widget.Toast
 import android.util.TypedValue
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
@@ -70,6 +73,11 @@ fun MoreScreen(
     vm: MoreViewModel = hiltViewModel(),
 ) {
     val switchColors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary)
+    val context = LocalContext.current
+    // One-shot confirmation when a requested install finishes (the inline status is easy to miss).
+    LaunchedEffect(vm) {
+        vm.installEvents.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+    }
 
     LazyColumn(
         Modifier
@@ -78,8 +86,112 @@ fun MoreScreen(
             .imePadding(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        item(key = "title", contentType = "title") { Text("More", style = MaterialTheme.typography.titleLarge) }
+        item(key = "title", contentType = "title") {
+            Text("More", style = MaterialTheme.typography.titleLarge, modifier = ContentWidth)
+        }
+
+        // Streaming source first: it's the one thing a new install must set up (the app ships
+        // with no sources), so it shouldn't sit below every playback preference.
+        item(key = "sources", contentType = "settings") {
+            SectionCard {
+                val sources by vm.sources.collectAsStateWithLifecycle()
+                val selectedSourceId by vm.selectedSourceId.collectAsStateWithLifecycle()
+                val lastAutoWinner by vm.lastAutoWinner.collectAsStateWithLifecycle()
+                val provisioning by vm.provisioning.collectAsStateWithLifecycle()
+                val provisionStatus by vm.provisionStatus.collectAsStateWithLifecycle()
+                Text("Streaming source", style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold)
+                Text("Where video is resolved from. Browsing and metadata always come from AniList.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // "Auto" only helps when there's a choice to make — hide it with 0/1 source
+                // installed. Keep it visible when it is already selected, though: extension
+                // removal can reduce the list after the preference was saved, and hiding the
+                // selected row leaves the settings screen with no selected option.
+                // With no saved choice (or a since-removed one) streams resolve via the first
+                // installed source, so show THAT as selected rather than an empty radio group.
+                val effectiveId = when {
+                    selectedSourceId == Sources.AUTO -> Sources.AUTO
+                    sources.any { it.id == selectedSourceId } -> selectedSourceId
+                    else -> sources.firstOrNull()?.id
+                }
+                if (sources.size > 1 || selectedSourceId == Sources.AUTO) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { vm.setSelectedSource(Sources.AUTO) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = effectiveId == Sources.AUTO,
+                            onClick = { vm.setSelectedSource(Sources.AUTO) },
+                        )
+                        Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                            Text("Auto (best source)", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                if (lastAutoWinner.isBlank()) "Races your installed sources and reuses the fastest"
+                                else "Races your installed sources · last: $lastAutoWinner",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                if (sources.isEmpty()) {
+                    // The app ships with no sources on purpose; say so plainly instead of leaving
+                    // an empty list the user has to interpret.
+                    Text(
+                        "No sources installed. Add a repo in Browse extensions, or install the " +
+                            "recommended sources.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                }
+                sources.forEach { src ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { vm.setSelectedSource(src.id) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = effectiveId == src.id,
+                            onClick = { vm.setSelectedSource(src.id) },
+                        )
+                        Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                            Text(src.name, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                if (src.isExternal) "Extension · ${src.lang}" else "Built-in",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (src.configurable) {
+                            IconButton(onClick = { onConfigureSource(src.id) }) {
+                                Icon(Icons.Filled.Settings, contentDescription = "Source settings")
+                            }
+                        }
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedButton(onClick = onBrowseExtensions) { Text("Browse extensions") }
+                    OutlinedButton(onClick = vm::installRecommended, enabled = !provisioning) {
+                        if (provisioning) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("Install recommended sources")
+                        }
+                    }
+                }
+                provisionStatus?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
 
         item(key = "playback", contentType = "settings") {
             val autoSkip by vm.autoSkip.collectAsStateWithLifecycle()
@@ -204,105 +316,18 @@ fun MoreScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Text("Enter your MAL username to mirror your PUBLIC list (read-only) — no API key " +
-                        "needed. Make sure your list privacy is Public on MAL, then filter it on the Library tab.",
+                        "needed. Make sure your list privacy is Public on MAL, then filter it on the My List tab.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
 
-        item(key = "sources", contentType = "settings") {
-            SectionCard {
-                val sources by vm.sources.collectAsStateWithLifecycle()
-                val selectedSourceId by vm.selectedSourceId.collectAsStateWithLifecycle()
-                val lastAutoWinner by vm.lastAutoWinner.collectAsStateWithLifecycle()
-                val provisioning by vm.provisioning.collectAsStateWithLifecycle()
-                val provisionStatus by vm.provisionStatus.collectAsStateWithLifecycle()
-                Text("Streaming source", style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold)
-                Text("Where video is resolved from. Browsing and metadata always come from AniList.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                // "Auto" only helps when there's a choice to make — hide it with 0/1 source
-                // installed. Keep it visible when it is already selected, though: extension
-                // removal can reduce the list after the preference was saved, and hiding the
-                // selected row leaves the settings screen with no selected option.
-                if (sources.size > 1 || selectedSourceId == Sources.AUTO) {
-                    Row(
-                        Modifier.fillMaxWidth().clickable { vm.setSelectedSource(Sources.AUTO) },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(
-                            selected = selectedSourceId == Sources.AUTO,
-                            onClick = { vm.setSelectedSource(Sources.AUTO) },
-                        )
-                        Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                            Text("Auto (best source)", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                if (lastAutoWinner.isBlank()) "Races your installed sources and reuses the fastest"
-                                else "Races your installed sources · last: $lastAutoWinner",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-                if (sources.isEmpty()) {
-                    // The app ships with no sources on purpose; say so plainly instead of leaving
-                    // an empty list the user has to interpret.
-                    Text(
-                        "No sources installed. Add a repo in Browse extensions, or install the " +
-                            "recommended sources.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
-                }
-                sources.forEach { src ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { vm.setSelectedSource(src.id) },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(
-                            selected = selectedSourceId == src.id,
-                            onClick = { vm.setSelectedSource(src.id) },
-                        )
-                        Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                            Text(src.name, style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                if (src.isExternal) "Extension · ${src.lang}" else "Built-in",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        if (src.configurable) {
-                            IconButton(onClick = { onConfigureSource(src.id) }) {
-                                Icon(Icons.Filled.Settings, contentDescription = "Source settings")
-                            }
-                        }
-                    }
-                }
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedButton(onClick = onBrowseExtensions) { Text("Browse extensions") }
-                    OutlinedButton(onClick = vm::installRecommended, enabled = !provisioning) {
-                        if (provisioning) {
-                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Text("Install recommended sources")
-                        }
-                    }
-                }
-                provisionStatus?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
     }
 }
+
+/** Settings read best at a column width; on tablets, full-bleed 2900px rows are hard to scan. */
+private val ContentWidth = Modifier.widthIn(max = 840.dp).fillMaxWidth()
 
 /** Rounded settings-group card: the 9anime panel look for each More section. */
 @Composable
@@ -310,7 +335,7 @@ private fun SectionCard(content: @Composable ColumnScope.() -> Unit) {
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = ContentWidth,
     ) {
         Column(
             Modifier.padding(14.dp),
