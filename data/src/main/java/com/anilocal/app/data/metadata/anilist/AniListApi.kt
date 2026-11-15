@@ -56,7 +56,12 @@ data class MediaDto(
     val isAdult: Boolean?,
     val startDate: FuzzyDateDto?,
     val relations: RelationsDto?,
+    // Only requested by the detail query: per-episode titles/thumbnails (Crunchyroll-sourced; often
+    // empty for currently-airing shows). Titled "Episode N - Name".
+    val streamingEpisodes: List<StreamingEpisodeDto>? = null,
 )
+
+data class StreamingEpisodeDto(val title: String?, val thumbnail: String?)
 
 data class RelationsDto(val edges: List<RelationEdgeDto>?)
 

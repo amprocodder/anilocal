@@ -91,7 +91,8 @@ class AniListCatalogRepository @Inject constructor(
     override suspend fun detail(animeId: String): AnimeDetail = withContext(Dispatchers.IO) {
         val q = """
             query(${'$'}id:Int){ Media(id:${'$'}id, type:ANIME){
-              id idMal title{romaji english native} synonyms coverImage{large} bannerImage
+              id idMal title{romaji english native} synonyms coverImage{large extraLarge} bannerImage
+              streamingEpisodes { title thumbnail }
               description(asHtml:false) genres episodes
               format averageScore status seasonYear duration
               studios(isMain: true) { nodes { name } } nextAiringEpisode { episode }
@@ -109,11 +110,17 @@ class AniListCatalogRepository @Inject constructor(
             title = m.displayTitle(),
             romajiTitle = m.title?.romaji?.trim()?.takeIf { it.isNotEmpty() && it != m.displayTitle() },
             posterUrl = m.coverImage?.large,
+            posterHdUrl = m.coverImage?.extraLarge,
             bannerUrl = m.bannerImage,
             synopsis = m.description?.stripHtml().orEmpty(),
             genres = m.genres.orEmpty(),
             idMal = m.idMal,
-            episodes = (1..count).map { Episode(id = "${m.id}-$it", number = it, title = "Episode $it") },
+            episodes = m.episodeArt(count).let { art ->
+                (1..count).map {
+                    val (name, thumb) = art[it] ?: (null to null)
+                    Episode(id = "${m.id}-$it", number = it, title = name ?: "Episode $it", thumbnailUrl = thumb)
+                }
+            },
             format = m.format?.prettyFormat(),
             averageScore = m.averageScore,
             status = m.status?.prettyStatus(),
@@ -219,6 +226,29 @@ class AniListCatalogRepository @Inject constructor(
         else -> episodes
     }
 
+    /**
+     * Episode number → (name, thumbnail) from AniList's `streamingEpisodes` ("Episode 3 - Name").
+     * Sequels sometimes number across the franchise ("Episode 17" for season 2's fifth): when no
+     * parsed number fits 1..[count] but the list is a complete contiguous run of exactly [count],
+     * it's shifted to start at 1; anything else that doesn't fit is dropped rather than mismatched.
+     */
+    private fun MediaDto.episodeArt(count: Int): Map<Int, Pair<String?, String?>> {
+        if (count <= 0) return emptyMap()
+        val parsed = streamingEpisodes.orEmpty().mapNotNull { e ->
+            val match = EPISODE_TITLE.find(e.title.orEmpty()) ?: return@mapNotNull null
+            val n = match.groupValues[1].toIntOrNull() ?: return@mapNotNull null
+            Triple(n, match.groupValues[2].trim().ifEmpty { null }, e.thumbnail?.ifBlank { null })
+        }.distinctBy { it.first }
+        if (parsed.isEmpty()) return emptyMap()
+        val offset = if (parsed.none { it.first in 1..count }) {
+            val nums = parsed.map { it.first }.sorted()
+            if (nums.size == count && nums.last() - nums.first() == count - 1) nums.first() - 1 else return emptyMap()
+        } else 0
+        return parsed.mapNotNull { (n, name, thumb) ->
+            (n - offset).takeIf { it in 1..count }?.let { it to (name to thumb) }
+        }.toMap()
+    }
+
     private fun MediaDto.toSummary() = AnimeSummary(
         id = id.toString(),
         title = displayTitle(),
@@ -298,3 +328,6 @@ class AniListCatalogRepository @Inject constructor(
 
 /** Partial Home responses can be displayed, but must not poison the persisted shelves. */
 internal data class AniListHomeResult(val catalog: HomeCatalog, val cacheable: Boolean)
+
+/** "Episode 12 - The Name" (also "–"/":" separators); group 1 = number, group 2 = name. */
+private val EPISODE_TITLE = Regex("""^\s*Episode\s+(\d+)\s*(?:[-–—:]\s*(.*))?$""", RegexOption.IGNORE_CASE)

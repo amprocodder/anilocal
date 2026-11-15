@@ -36,6 +36,8 @@ data class AnimeDetail(
     val title: String,
     val posterUrl: String?,
     val bannerUrl: String? = null,
+    /** Higher-resolution cover, for large slots (and as banner art when a title has no banner). */
+    val posterHdUrl: String? = null,
     val synopsis: String = "",
     val genres: List<String> = emptyList(),
     val idMal: Int? = null,
