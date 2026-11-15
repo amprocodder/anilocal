@@ -44,7 +44,7 @@ data class AnimeDetail(
     val episodes: List<Episode> = emptyList(),
     val format: String? = null,            // prettified, e.g. "TV", "Movie"
     val averageScore: Int? = null,         // 0–100, as AniList reports it
-    val status: String? = null,            // prettified, e.g. "Releasing"
+    val status: String? = null,            // prettified, e.g. "Airing"
     val seasonYear: Int? = null,
     val duration: Int? = null,             // minutes per episode
     val studio: String? = null,            // first main studio name

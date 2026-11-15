@@ -127,8 +127,9 @@ class CachedCatalogRepository @Inject constructor(
 
     // A detail cached before altTitles existed parses with none, and stream matching needs them to
     // tell a sequel from its prequel on a source — refresh such a row now rather than after the TTL.
+    // Same for a row still carrying the old "Releasing" label (now "Airing").
     override suspend fun detail(animeId: String): AnimeDetail =
-        cache.cached("detail:$animeId", DETAIL, TTL_DETAIL, outdated = { it.altTitles.isEmpty() }) {
+        cache.cached("detail:$animeId", DETAIL, TTL_DETAIL, outdated = { it.altTitles.isEmpty() || it.status == "Releasing" }) {
             upstream.detail(animeId)
         }
 

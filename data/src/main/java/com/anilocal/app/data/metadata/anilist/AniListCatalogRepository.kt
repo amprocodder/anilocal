@@ -290,7 +290,7 @@ class AniListCatalogRepository @Inject constructor(
     }
 
     private fun String.prettyStatus() = when (this) {
-        "RELEASING" -> "Releasing"
+        "RELEASING" -> "Airing"   // MAL's wording
         "FINISHED" -> "Finished"
         "NOT_YET_RELEASED" -> "Upcoming"
         "CANCELLED" -> "Cancelled"
