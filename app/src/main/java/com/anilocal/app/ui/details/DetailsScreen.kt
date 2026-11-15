@@ -383,8 +383,12 @@ fun DetailsScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // Only released episodes are listed, so none means nothing is out yet:
+                        // there's nothing to play or download, only to save for later.
+                        val released = d.episodes.isNotEmpty()
                         Button(
-                            onClick = { onPlay(d.id, d.episodes.firstOrNull()?.number ?: 1) },
+                            onClick = { d.episodes.firstOrNull()?.let { onPlay(d.id, it.number) } },
+                            enabled = released,
                             shape = RoundedCornerShape(100.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
@@ -392,16 +396,21 @@ fun DetailsScreen(
                             ),
                             modifier = Modifier.weight(1f).height(46.dp),
                         ) {
-                            Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
-                            Text("  Watch", fontWeight = FontWeight.Bold)
+                            if (released) {
+                                Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
+                                Text("  Watch", fontWeight = FontWeight.Bold)
+                            } else {
+                                Text("Not released yet", fontWeight = FontWeight.Bold)
+                            }
                         }
-                        SeasonDownloadButton(
-                            state = seasonDownload,
-                            allInDownloads = d.episodes.isNotEmpty() &&
-                                d.episodes.all { it.number in inDownloads },
-                            onDownload = vm::downloadSeason,
-                            onCancel = vm::cancelSeasonDownload,
-                        )
+                        if (released) {
+                            SeasonDownloadButton(
+                                state = seasonDownload,
+                                allInDownloads = d.episodes.all { it.number in inDownloads },
+                                onDownload = vm::downloadSeason,
+                                onCancel = vm::cancelSeasonDownload,
+                            )
+                        }
                         FilledTonalIconButton(
                             onClick = vm::toggleSaved,
                             colors = IconButtonDefaults.filledTonalIconButtonColors(
@@ -431,7 +440,7 @@ fun DetailsScreen(
                         )
                     }
                 }
-                item {
+                if (d.episodes.isNotEmpty()) item {
                     Column(
                         Modifier.padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),

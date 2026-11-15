@@ -50,6 +50,7 @@ class AniListCatalogRepository @Inject constructor(
             }
             fragment Summary on Media {
               id idMal title { romaji english } coverImage { large } format episodes averageScore
+              status nextAiringEpisode { episode }
             }
         """.trimIndent()
         val response = api.query(body(q, JSONObject().put("season", season).put("year", year)))
@@ -68,7 +69,7 @@ class AniListCatalogRepository @Inject constructor(
         val q = """
             query(${'$'}page:Int){ Page(page:${'$'}page, perPage:30){
               media(sort:TRENDING_DESC, type:ANIME, isAdult:false){
-                id idMal title{romaji english} coverImage{large} format episodes averageScore
+                id idMal title{romaji english} coverImage{large} format episodes averageScore status nextAiringEpisode{episode}
               } } }
         """.trimIndent()
         api.query(body(q, JSONObject().put("page", page)))
@@ -80,7 +81,7 @@ class AniListCatalogRepository @Inject constructor(
         val q = """
             query(${'$'}search:String){ Page(page:1, perPage:30){
               media(search:${'$'}search, type:ANIME, isAdult:false){
-                id idMal title{romaji english} coverImage{large} format episodes averageScore
+                id idMal title{romaji english} coverImage{large} format episodes averageScore status nextAiringEpisode{episode}
               } } }
         """.trimIndent()
         api.query(body(q, JSONObject().put("search", query)))
@@ -96,20 +97,13 @@ class AniListCatalogRepository @Inject constructor(
               studios(isMain: true) { nodes { name } } nextAiringEpisode { episode }
               relations { edges { relationType(version: 2) node {
                 id idMal type format isAdult title{romaji english native} synonyms coverImage{large}
-                episodes averageScore startDate{year month}
+                episodes averageScore startDate{year month} status nextAiringEpisode{episode}
               } } }
             } }
         """.trimIndent()
         val m = api.query(body(q, JSONObject().put("id", animeId.toInt()))).requireData().media
             ?: error("AniList: media $animeId not found")
-        // Airing shows report episodes as null OR as the full planned count; while releasing, cap
-        // at what has actually aired so the grid can't offer episodes no source can resolve yet.
-        val aired = m.nextAiringEpisode?.episode?.minus(1)?.coerceAtLeast(0)
-        val count = if (m.status == "RELEASING" && aired != null) {
-            minOf(m.episodes ?: Int.MAX_VALUE, aired)
-        } else {
-            m.episodes ?: 0
-        }
+        val count = m.releasedEpisodes() ?: 0
         AnimeDetail(
             id = m.id.toString(),
             title = m.displayTitle(),
@@ -163,7 +157,7 @@ class AniListCatalogRepository @Inject constructor(
         val q = """
             query(${'$'}page:Int, ${'$'}genre:String) { Page(page:${'$'}page, perPage:30) {
               media(genre:${'$'}genre, sort:${sort.anilist}, type:ANIME, isAdult:false) {
-                id idMal title{romaji english} coverImage{large} format episodes averageScore
+                id idMal title{romaji english} coverImage{large} format episodes averageScore status nextAiringEpisode{episode}
               }
             } }
         """.trimIndent()
@@ -186,7 +180,7 @@ class AniListCatalogRepository @Inject constructor(
         val q = """
             query(${'$'}page:Int){ Page(page:${'$'}page, perPage:30){
               media($mediaArgs, type:ANIME, isAdult:false){
-                id idMal title{romaji english} coverImage{large} format episodes averageScore
+                id idMal title{romaji english} coverImage{large} format episodes averageScore status nextAiringEpisode{episode}
               } } }
         """.trimIndent()
         api.query(body(q, JSONObject().put("page", page))).requireData().page?.media?.map { it.toSummary() }
@@ -211,13 +205,27 @@ class AniListCatalogRepository @Inject constructor(
         return season to (if (month == 11) year + 1 else year)
     }
 
+    /**
+     * Episodes that have actually been RELEASED — never AniList's planned total. Nothing for a title
+     * that hasn't started; for an airing one, everything before the next scheduled episode (AniList
+     * reports `episodes` as null or as the full planned count while airing). Null when unknown.
+     */
+    private fun MediaDto.releasedEpisodes(): Int? = when (status) {
+        "NOT_YET_RELEASED" -> 0
+        "RELEASING" -> nextAiringEpisode?.episode?.minus(1)?.coerceAtLeast(0)
+            ?.let { aired -> minOf(episodes ?: Int.MAX_VALUE, aired) }
+            ?: episodes
+        else -> episodes
+    }
+
     private fun MediaDto.toSummary() = AnimeSummary(
         id = id.toString(),
         title = displayTitle(),
         posterUrl = coverImage?.large,
         idMal = idMal,
         format = format?.prettyFormat(),
-        episodes = episodes,
+        // Cards show the released count; hide the badge entirely when nothing is out yet.
+        episodes = releasedEpisodes()?.takeIf { it > 0 },
         averageScore = averageScore,
         altTitles = altTitles(),
     )
