@@ -1,5 +1,6 @@
 package com.anilocal.app.data.source
 
+import com.anilocal.app.domain.source.NoSourceInstalledException
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.VideoStream
 import com.anilocal.app.domain.source.AnimeSource
@@ -52,7 +53,7 @@ internal class FreshStreamRecovery(
     ): RecoveredStream {
         val available = registry.sources.value.takeIf { it.isNotEmpty() }
             ?: withTimeoutOrNull(REGISTRY_WAIT_MS) { registry.sources.first { it.isNotEmpty() } }
-            ?: error("no stream sources available")
+            ?: throw NoSourceInstalledException()
         val sources = available.sortedBy { if (it.info.id == selectedSourceId) 0 else 1 }
         val target = TitleMatcher.Target(anime)
         val candidates = ArrayList<Candidate>()

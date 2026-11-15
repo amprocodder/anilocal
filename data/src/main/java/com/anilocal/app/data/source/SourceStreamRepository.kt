@@ -1,5 +1,6 @@
 package com.anilocal.app.data.source
 
+import com.anilocal.app.domain.source.NoSourceInstalledException
 import android.os.SystemClock
 import com.anilocal.app.data.cache.JsonCache
 import com.anilocal.app.domain.model.AnimeDetail
@@ -71,7 +72,7 @@ class SourceStreamRepository internal constructor(
     private suspend fun sourceFor(selectedId: String): AnimeSource {
         registry.get(selectedId)?.let { return it }
         val available = withTimeoutOrNull(REGISTRY_WAIT_MS) { registry.sources.first { it.isNotEmpty() } }
-        return available?.firstOrNull() ?: error("no stream sources available")
+        return available?.firstOrNull() ?: throw NoSourceInstalledException()
     }
 
     override suspend fun resolveStreams(anime: AnimeDetail, episodeNumber: Int): List<VideoStream> =

@@ -1,5 +1,6 @@
 package com.anilocal.app.ui.player
 
+import com.anilocal.app.domain.source.NoSourceInstalledException
 import android.content.Context
 import android.net.Uri
 import android.os.Looper
@@ -388,6 +389,18 @@ class PlayerViewModel @Inject constructor(
             throw cancelled
         } catch (error: Exception) {
             checkSession(generation)
+            if (error.isNoSourceInstalled()) {
+                // Nothing to reconnect to: the app ships with no sources. Say so plainly and stop,
+                // rather than "Reconnecting… (1/3)" over a player that looks like it's playing.
+                // The player was never started, so pause() fires no callback: reflect it directly
+                // or the controls keep showing "Pause" over a player with nothing loaded.
+                currentPlayer.playWhenReady = false
+                session.playWhenReady = false
+                _playWhenReady.value = false
+                _isPlaying.value = false
+                _error.value = error.message
+                return
+            }
             session.failed(currentPlayer.currentPosition, currentPlayer.duration)
             _error.value = "Couldn't start playback: ${error.message ?: error.javaClass.simpleName}"
             // Use the same bounded recovery for synchronous prepare/resolve failures.
@@ -963,3 +976,6 @@ class PlayerViewModel @Inject constructor(
         }
     }
 }
+
+private fun Throwable.isNoSourceInstalled(): Boolean =
+    generateSequence(this) { it.cause }.take(5).any { it is NoSourceInstalledException }

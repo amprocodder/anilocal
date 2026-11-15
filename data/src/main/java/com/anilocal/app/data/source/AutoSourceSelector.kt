@@ -1,5 +1,6 @@
 package com.anilocal.app.data.source
 
+import com.anilocal.app.domain.source.NoSourceInstalledException
 import android.os.SystemClock
 import com.anilocal.app.data.cache.JsonCache
 import com.anilocal.app.domain.model.VideoStream
@@ -84,7 +85,7 @@ class AutoSourceSelector @Inject constructor(
         probe: suspend (AnimeSource) -> SourceResolution,
     ): SourceResolution {
         val available = awaitSources()
-        if (available.isEmpty()) error("no stream sources available")
+        if (available.isEmpty()) throw NoSourceInstalledException()
         val key = memoKey(animeId)
 
         // One source → no race, but still bound the hang and record the outcome.

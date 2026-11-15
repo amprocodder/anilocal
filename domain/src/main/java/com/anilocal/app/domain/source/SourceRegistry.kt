@@ -21,6 +21,13 @@ object Sources {
 }
 
 /**
+ * Thrown by stream resolution when no source is installed at all (the app ships with none). Distinct
+ * from an ordinary resolve failure so the UI can say "install a source" instead of retrying.
+ */
+class NoSourceInstalledException :
+    IllegalStateException("No streaming source installed. Add one in More → Streaming source.")
+
+/**
  * Registry of every [AnimeSource] currently available to resolve streams: the in-app built-ins
  * now, plus dynamically loaded user extensions later. Lets the UI present a source picker and
  * lets [com.anilocal.app.domain.repo.StreamRepository] route resolution to whichever source the
