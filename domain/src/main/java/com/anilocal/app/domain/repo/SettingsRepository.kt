@@ -39,7 +39,8 @@ interface SettingsRepository {
     val lastAutoWinner: Flow<String>
     suspend fun setLastAutoWinner(name: String)
 
-    /** Base URLs of extension repos (each serving an `index.min.json`). Pre-seeded with yuzono. */
+    /** Base URLs of extension repos (each serving an `index.min.json`). Empty by default — repos
+     *  are only ever added by the user (manually, or via "Install recommended sources"). */
     val extensionRepoBaseUrls: Flow<List<String>>
     suspend fun setExtensionRepoBaseUrls(urls: List<String>)
 

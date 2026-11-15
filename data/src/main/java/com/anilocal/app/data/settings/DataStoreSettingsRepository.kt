@@ -12,6 +12,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.anilocal.app.domain.model.DownloadQuality
 import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.source.Sources
+import com.anilocal.app.data.metadata.extension.RecommendedSources
+import com.anilocal.app.extensions.loader.AnimeExtensionLoader
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -24,8 +26,18 @@ private val Context.dataStore by preferencesDataStore(name = "settings")
 @Singleton
 class DataStoreSettingsRepository internal constructor(
     private val store: DataStore<Preferences>,
+    /** True when this install predates the blank-by-default repo list and already has private
+     *  extensions — those installs relied on the old implicit yuzono default and keep it. */
+    private val hasLegacyExtensions: () -> Boolean = { false },
 ) : SettingsRepository {
-    @Inject constructor(@ApplicationContext context: Context) : this(context.dataStore)
+    @Inject constructor(@ApplicationContext context: Context) : this(
+        context.dataStore,
+        {
+            AnimeExtensionLoader.privateDir(context)
+                .listFiles { f -> f.name.endsWith(AnimeExtensionLoader.PRIVATE_APK_SUFFIX) }
+                ?.isNotEmpty() == true
+        },
+    )
 
     private object Keys {
         val AUTO_SKIP = booleanPreferencesKey("auto_skip")
@@ -105,8 +117,11 @@ class DataStoreSettingsRepository internal constructor(
 
     override val extensionRepoBaseUrls: Flow<List<String>> =
         store.data.map { prefs ->
+            // The app ships with NO repos: the user adds one, or explicitly taps "Install
+            // recommended sources". An unset key only falls back to the old implicit default for
+            // installs that already have extensions from it (so upgrading doesn't orphan them).
             prefs[Keys.EXTENSION_REPOS]?.lines()?.map { it.trim() }?.filter { it.isNotEmpty() }
-                ?: listOf("https://raw.githubusercontent.com/yuzono/anime-repo/repo")
+                ?: if (hasLegacyExtensions()) listOf(RecommendedSources.REPO_URL) else emptyList()
         }.distinctUntilChanged()
 
     override suspend fun setExtensionRepoBaseUrls(urls: List<String>) {

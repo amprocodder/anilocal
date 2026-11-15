@@ -67,7 +67,7 @@ class MoreViewModel @Inject constructor(
     val syncStatus = malActions.status
     val syncing = malActions.syncing
 
-    /** True while community-recommended sources are being auto-installed (for a spinner/label). */
+    /** True while the user-requested recommended sources are being installed (for a spinner/label). */
     private val _provisioning = MutableStateFlow(false)
     val provisioning: StateFlow<Boolean> = _provisioning
     private val _provisionStatus = MutableStateFlow<String?>(null)
@@ -80,11 +80,9 @@ class MoreViewModel @Inject constructor(
     private val scaleWrites = ConflatedSetting(viewModelScope, settings::setSubtitleScale)
     private val backgroundWrites = ConflatedSetting(viewModelScope, settings::setSubtitleBackground)
     private val malEnabledWrites = ConflatedSetting(viewModelScope, settings::setMalSyncEnabled)
-    private val sourceWrites = ConflatedSetting<String>(viewModelScope) { id ->
-        settings.setSelectedSourceId(id)
-        // Installing extensions must not hold up a later source-selection preference write.
-        if (id == Sources.AUTO) installRecommended()
-    }
+    // Selecting a source (including Auto) never installs anything: sources are only added when the
+    // user explicitly asks (Browse extensions, or the "Install recommended sources" button).
+    private val sourceWrites = ConflatedSetting(viewModelScope, settings::setSelectedSourceId)
 
     fun setAutoSkip(enabled: Boolean) = autoSkipWrites.set(enabled)
     fun setAutoPlayNext(enabled: Boolean) = autoPlayWrites.set(enabled)
@@ -98,8 +96,7 @@ class MoreViewModel @Inject constructor(
     fun installRecommended() = viewModelScope.launch { provision() }
 
     private suspend fun provision() {
-        // The Auto radio and the explicit button can trigger provisioning from separate
-        // coroutines. Claim the run atomically so they cannot install/prune the same set twice.
+        // Claim the run atomically so repeated taps cannot install/prune the same set twice.
         if (!_provisioning.compareAndSet(expect = false, update = true)) return
         _provisionStatus.value = "Updating sources…"
         try {
@@ -108,7 +105,7 @@ class MoreViewModel @Inject constructor(
             val added = retryProvision { extensions.installRecommended() }
             val removed = retryProvision { extensions.pruneLosers() }
             _provisionStatus.value = if (added == null || removed == null) {
-                "Couldn't update sources. Tap Install recommended to retry."
+                "Couldn't update sources. Tap Install recommended sources to retry."
             } else buildString {
                 if (added > 0) append("Added $added source${if (added == 1) "" else "s"}")
                 if (removed > 0) {
@@ -116,7 +113,7 @@ class MoreViewModel @Inject constructor(
                     append("removed $removed dead")
                 }
             }.ifBlank {
-                "No verified recommended sources available yet. Tap Install recommended to retry."
+                "No verified recommended sources available yet. Tap Install recommended sources to retry."
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -124,7 +121,7 @@ class MoreViewModel @Inject constructor(
             // Provisioning is best-effort: a dead repo, unavailable network, or failed signature
             // check must leave Auto usable and give the user a safe retry affordance instead of an
             // unhandled coroutine exception or a silent empty source list.
-            _provisionStatus.value = "Couldn't update sources. Tap Install recommended to retry."
+            _provisionStatus.value = "Couldn't update sources. Tap Install recommended sources to retry."
         } finally {
             _provisioning.value = false
         }

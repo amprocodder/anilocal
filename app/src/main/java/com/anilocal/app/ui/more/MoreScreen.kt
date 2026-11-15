@@ -247,6 +247,16 @@ fun MoreScreen(
                         }
                     }
                 }
+                if (sources.isEmpty()) {
+                    // The app ships with no sources on purpose; say so plainly instead of leaving
+                    // an empty list the user has to interpret.
+                    Text(
+                        "No sources installed. Add a repo in Browse extensions, or install the " +
+                            "recommended sources.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                }
                 sources.forEach { src ->
                     Row(
                         Modifier.fillMaxWidth().clickable { vm.setSelectedSource(src.id) },
@@ -281,7 +291,7 @@ fun MoreScreen(
                         if (provisioning) {
                             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                         } else {
-                            Text("Install recommended")
+                            Text("Install recommended sources")
                         }
                     }
                 }

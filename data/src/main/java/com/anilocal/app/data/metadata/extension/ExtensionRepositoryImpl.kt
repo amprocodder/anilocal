@@ -22,7 +22,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Lists extensions from each configured repo's `index.min.json` (pre-seeded with the yuzono repo)
+ * Lists extensions from each configured repo's `index.min.json` (none by default — user-added)
  * and downloads their APKs to app cache. Each repo's parsed index is cached ([JsonCache]) so the
  * Browse list still renders offline when a repo has previously been seen. A cold, unavailable
  * set of repos is surfaced as a failure so the UI can retry automatically instead of showing an
@@ -191,6 +191,12 @@ class ExtensionRepositoryImpl @Inject constructor(
     override suspend fun privatelyInstalled(): Set<String> = withContext(Dispatchers.IO) { privatePackageNames() }
 
     override suspend fun installRecommended(target: Int): Int = withContext(Dispatchers.IO) {
+        // Explicit user action: make sure the recommended repo is configured (the app ships with
+        // none) so the seeds can be found, and so the user can browse/update/remove it later.
+        val repos = settings.extensionRepoBaseUrls.first()
+        if (repos.none { it.trimEnd('/') == RecommendedSources.REPO_URL }) {
+            settings.setExtensionRepoBaseUrls(repos + RecommendedSources.REPO_URL)
+        }
         val evicted = settings.evictedSources.first()
         // [available] already isolates ordinary repo failures. Preserve cancellation so leaving
         // the settings screen cannot continue provisioning in the background.
