@@ -38,9 +38,9 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
 - **Player** (Media3/ExoPlayer) with the **Skip-Intro/Outro button** (`FreakIntroButton`
   equivalent), fed by **AniSkip** (real op/ed times by MAL id); titles without a MAL id simply have
   no markers.
-- **Room persistence**: "My List" (Library tab) + "Continue Watching" (Home), with watch
+- **Room persistence**: "My List" (My List tab) + "Continue Watching" (Home), with watch
   progress saved during playback.
-- **In-list search**: the Explore-style search box on the Library tab (filters My List or the
+- **In-list search**: the Explore-style search box on the My List tab (filters My List or the
   selected MAL category by title) and on the Downloads tab (filters the season folders).
 - **User-selectable stream sources**: a runtime **source registry** + picker (More tab). No
   built-in sources ship; **installed Aniyomi extensions** appear automatically and resolve

@@ -187,10 +187,10 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
                     Hint("No titles match “${query.trim()}”.")
 
                 gridItems.isEmpty() && filter == null ->
-                    Hint("Your list is empty — add titles from a detail page, or sync your MAL list in Settings.")
+                    Hint("Your list is empty — add titles from a detail page, or sync your MAL list in More.")
 
                 gridItems.isEmpty() ->
-                    Hint("Nothing here yet — sync from Settings → MyAnimeList Sync.")
+                    Hint("Nothing here yet — sync from More → MyAnimeList Sync.")
 
                 else -> Grid {
                     items(gridItems, key = { it.id }, contentType = { "poster" }) { summary ->
