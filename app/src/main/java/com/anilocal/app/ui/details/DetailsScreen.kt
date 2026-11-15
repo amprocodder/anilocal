@@ -1,11 +1,15 @@
 package com.anilocal.app.ui.details
 
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.blur
+import androidx.compose.foundation.layout.aspectRatio
 import android.widget.Toast
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -19,10 +23,8 @@ import com.anilocal.app.ui.common.scrolledPast
 import kotlinx.coroutines.flow.combine
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -336,9 +338,10 @@ private fun pickForQuality(options: List<VideoStream>, quality: DownloadQuality)
 }
 
 private const val EPISODE_RANGE_SIZE = 100
-private const val EPISODES_PER_ROW = 5
-private const val EPISODES_PER_ROW_WIDE = 8
-private val TWO_PANE_MIN_WIDTH = 840.dp
+private val EPISODE_CARD_MIN_WIDTH = 180.dp
+/** Width AniList serves banner images at. */
+private const val BANNER_NATIVE_WIDTH_PX = 1900
+private val EPISODE_GAP = 12.dp
 private val ACTIONS_MAX_WIDTH = 640.dp
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -363,14 +366,12 @@ fun DetailsScreen(
     val d = detail
 
     val mainState = rememberLazyListState()
-    val episodesState = rememberLazyListState()
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        // Wide landscape (tablets): overview on the left, episodes + related on the right, each
-        // scrolling on its own — a single column leaves most of the width empty.
-        val twoPane = maxWidth >= TWO_PANE_MIN_WIDTH && maxWidth > maxHeight
         if (d != null) {
-            val perRow = if (twoPane) EPISODES_PER_ROW_WIDE else EPISODES_PER_ROW
+            // Episode cards in as many columns as fit (2 on a phone, ~8 on a landscape tablet).
+            val perRow = ((maxWidth - 32.dp + EPISODE_GAP) / (EPISODE_CARD_MIN_WIDTH + EPISODE_GAP))
+                .toInt().coerceAtLeast(1)
             val showRanges = d.episodes.size > EPISODE_RANGE_SIZE
             var rangeIndex by remember(d.id, d.episodes.size) { mutableStateOf(0) }
             val rangeStart = if (showRanges) rangeIndex * EPISODE_RANGE_SIZE else 0
@@ -553,11 +554,12 @@ fun DetailsScreen(
                 items(episodeRows.size, key = { "eps-" + episodeRows[it].first().id }, contentType = { "episodes" }) { rowIndex ->
                     Row(
                         Modifier.padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(EPISODE_GAP),
                     ) {
                         episodeRows[rowIndex].forEach { ep ->
-                            EpisodeCell(
+                            EpisodeCard(
                                 episode = ep,
+                                fallbackArt = d.bannerUrl ?: d.posterHdUrl ?: d.posterUrl,
                                 downloaded = ep.number in downloaded,
                                 queued = ep.number in inDownloads,
                                 busy = ep.number in busyEpisodes,
@@ -594,38 +596,14 @@ fun DetailsScreen(
                 }
             }
 
-            if (twoPane) {
-                Row(Modifier.fillMaxSize()) {
-                    LazyColumn(
-                        Modifier.weight(0.42f).fillMaxHeight(),
-                        state = mainState,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        overview()
-                        item { Box(Modifier.navigationBarsPadding().height(8.dp)) }
-                    }
-                    LazyColumn(
-                        Modifier.weight(0.58f).fillMaxHeight(),
-                        state = episodesState,
-                        contentPadding = WindowInsets.statusBars.asPaddingValues().let {
-                            PaddingValues(top = it.calculateTopPadding() + 16.dp)
-                        },
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        episodesAndRelated()
-                        item { Box(Modifier.navigationBarsPadding().height(8.dp)) }
-                    }
-                }
-            } else {
-                LazyColumn(
-                    Modifier.fillMaxSize(),
-                    state = mainState,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    overview()
-                    episodesAndRelated()
-                    item { Box(Modifier.navigationBarsPadding().height(8.dp)) }
-                }
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                state = mainState,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                overview()
+                episodesAndRelated()
+                item { Box(Modifier.navigationBarsPadding().height(8.dp)) }
             }
         }
 
@@ -633,14 +611,8 @@ fun DetailsScreen(
             CatalogFeedback(loadState, vm::retry, Modifier.align(Alignment.Center))
         }
 
-        // Once the banner scrolls away (or the episode pane scrolls at all), text would run under
-        // the clock — fade in a band behind the status bar.
-        val scrolled by remember {
-            derivedStateOf {
-                mainState.scrolledPast(thresholdPx = 300) ||
-                    episodesState.firstVisibleItemIndex > 0 || episodesState.firstVisibleItemScrollOffset > 0
-            }
-        }
+        // Once the banner scrolls away, text would run under the clock — fade in a band behind it.
+        val scrolled by remember { derivedStateOf { mainState.scrolledPast(thresholdPx = 300) } }
         StatusBarScrim(visible = scrolled, modifier = Modifier.align(Alignment.TopCenter))
 
         // Floating back button (over the header art; also the only chrome while loading).
@@ -746,13 +718,50 @@ private fun SeasonDownloadButton(
 private fun DetailHero(d: AnimeDetail) {
     val bg = MaterialTheme.colorScheme.background
     Box(Modifier.fillMaxWidth().height(252.dp)) {
-        Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(210.dp)) {
-            AsyncImage(
-                model = d.bannerUrl ?: d.posterUrl,
-                contentDescription = d.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
+        BoxWithConstraints(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(210.dp)) {
+            val art = d.bannerUrl ?: d.posterHdUrl ?: d.posterUrl
+            // AniList banners are ~1900px wide; stretched across a tablet they're upscaled and soft.
+            // Wider than that, draw the banner at its native width (feathered at the edges) over a
+            // blurred, dimmed copy that fills the rest — sharp art, still edge to edge.
+            val nativeWidth = with(LocalDensity.current) { BANNER_NATIVE_WIDTH_PX.toDp() }
+            if (d.bannerUrl != null && maxWidth > nativeWidth) {
+                AsyncImage(
+                    model = art,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().blur(32.dp),
+                )
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)))
+                AsyncImage(
+                    model = art,
+                    contentDescription = d.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .width(nativeWidth)
+                        .fillMaxHeight()
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .drawWithContent {
+                            drawContent()
+                            drawRect(
+                                Brush.horizontalGradient(
+                                    0f to Color.Transparent,
+                                    0.08f to Color.Black,
+                                    0.92f to Color.Black,
+                                    1f to Color.Transparent,
+                                ),
+                                blendMode = BlendMode.DstIn,
+                            )
+                        },
+                )
+            } else {
+                AsyncImage(
+                    model = art,
+                    contentDescription = d.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
@@ -842,12 +851,15 @@ private fun ExpandableSynopsis(synopsis: String) {
 }
 
 /**
- * 9anime-style numbered episode cell: tapping the number plays it, tapping its download icon saves
- * it (no long-press — a hidden, slow gesture). The icon reflects queued/downloaded/resolving state.
+ * Episode card: a 16:9 thumbnail (AniList's per-episode art, or the title's banner dimmed under a
+ * big number when there's none) with "Episode N" and the episode's name below. Tapping the card
+ * plays it; tapping the download icon saves it. The icon reflects resolving/queued state and a
+ * check badge marks a completed download.
  */
 @Composable
-private fun EpisodeCell(
+private fun EpisodeCard(
     episode: Episode,
+    fallbackArt: String?,
     downloaded: Boolean,
     queued: Boolean,
     busy: Boolean,
@@ -855,49 +867,109 @@ private fun EpisodeCell(
     onDownload: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val bg = if (downloaded) MaterialTheme.colorScheme.primaryContainer
-    else MaterialTheme.colorScheme.surfaceContainerHighest
-    val fg = if (downloaded) MaterialTheme.colorScheme.onPrimaryContainer
-    else MaterialTheme.colorScheme.onSurfaceVariant
-    Row(
+    val name = episode.title?.takeIf { it.isNotBlank() && it != "Episode ${episode.number}" }
+    val thumb = episode.thumbnailUrl
+    Column(
         modifier
-            .height(40.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(bg)
-            .testTag("ep-${episode.number}"),
-        verticalAlignment = Alignment.CenterVertically,
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClickLabel = "Play", onClick = onPlay)
+            .testTag("ep-${episode.number}")
+            .semantics(mergeDescendants = true) {
+                contentDescription = buildString {
+                    append("Episode ${episode.number}")
+                    name?.let { append(", $it") }
+                    if (downloaded) append(", downloaded")
+                }
+            },
     ) {
         Box(
             Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .clickable(onClickLabel = "Play", onClick = onPlay)
-                .semantics {
-                    contentDescription =
-                        if (downloaded) "Episode ${episode.number}, downloaded" else "Episode ${episode.number}"
-                },
-            contentAlignment = Alignment.Center,
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
         ) {
-            Text("${episode.number}", style = MaterialTheme.typography.labelLarge, color = fg)
+            AsyncImage(
+                model = thumb ?: fallbackArt,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (thumb == null) {
+                // Shared fallback art: dim it and lead with the number so cards stay tellable apart.
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                Text(
+                    "${episode.number}",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            } else {
+                Text(
+                    "${episode.number}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(6.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+            if (downloaded) {
+                Icon(
+                    Icons.Filled.DownloadDone,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        .padding(3.dp)
+                        .size(14.dp),
+                )
+            }
         }
-        Box(
-            Modifier
-                .width(32.dp)
-                .fillMaxHeight()
-                .clickable(enabled = !busy && !queued, onClickLabel = "Download", onClick = onDownload)
-                .semantics {
-                    contentDescription = when {
-                        downloaded -> "Episode ${episode.number} downloaded"
-                        queued -> "Episode ${episode.number} in downloads"
-                        else -> "Download episode ${episode.number}"
-                    }
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            when {
-                busy -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp, color = fg)
-                queued -> Icon(Icons.Filled.DownloadDone, null, Modifier.size(16.dp), tint = fg)
-                else -> Icon(Icons.Filled.Download, null, Modifier.size(16.dp), tint = fg.copy(alpha = 0.7f))
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Episode ${episode.number}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
+                if (name != null) {
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .clickable(enabled = !busy && !queued, onClickLabel = "Download", onClick = onDownload)
+                    .semantics {
+                        contentDescription = when {
+                            downloaded -> "Episode ${episode.number} downloaded"
+                            queued -> "Episode ${episode.number} in downloads"
+                            else -> "Download episode ${episode.number}"
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                val tint = MaterialTheme.colorScheme.onSurfaceVariant
+                when {
+                    busy -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 1.5.dp, color = tint)
+                    queued -> Icon(Icons.Filled.DownloadDone, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.tertiary)
+                    else -> Icon(Icons.Filled.Download, null, Modifier.size(18.dp), tint = tint)
+                }
             }
         }
     }
