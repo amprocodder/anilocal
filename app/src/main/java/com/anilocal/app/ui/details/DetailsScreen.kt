@@ -1,5 +1,6 @@
 package com.anilocal.app.ui.details
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -18,7 +19,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.platform.LocalContext
 import com.anilocal.app.domain.repo.MalRepository
-import com.anilocal.app.ui.common.StatusBarScrim
 import com.anilocal.app.ui.common.scrolledPast
 import kotlinx.coroutines.flow.combine
 import androidx.compose.animation.animateContentSize
@@ -505,16 +505,18 @@ fun DetailsScreen(
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "Episodes",
-                                style = MaterialTheme.typography.titleMedium,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                "${d.episodes.size}",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            SectionHeader("Episodes", Modifier.weight(1f), horizontalPadding = 0.dp)
+                            Surface(
+                                shape = RoundedCornerShape(100.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            ) {
+                                Text(
+                                    "${d.episodes.size}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                                )
+                            }
                         }
                         val sd = seasonDownload
                         Text(
@@ -611,20 +613,43 @@ fun DetailsScreen(
             CatalogFeedback(loadState, vm::retry, Modifier.align(Alignment.Center))
         }
 
-        // Once the banner scrolls away, text would run under the clock — fade in a band behind it.
-        val scrolled by remember { derivedStateOf { mainState.scrolledPast(thresholdPx = 300) } }
-        StatusBarScrim(visible = scrolled, modifier = Modifier.align(Alignment.TopCenter))
+        // Once the banner scrolls away, a solid top bar (back + title) fades in behind the back
+        // button, so it never floats over the Watch button or the episode grid.
+        val scrolled by remember { derivedStateOf { mainState.scrolledPast(thresholdPx = 420) } }
+        val barAlpha by animateFloatAsState(if (scrolled) 1f else 0f, label = "detailsBar")
+        Box(
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .graphicsLayer { alpha = barAlpha }
+                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.96f))
+                .statusBarsPadding()
+                .height(56.dp),
+        ) {
+            Text(
+                d?.title.orEmpty(),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.CenterStart).padding(start = 64.dp, end = 16.dp),
+            )
+        }
 
-        // Floating back button (over the header art; also the only chrome while loading).
+        // Back button: a dark disc over the header art, melting into the top bar once scrolled
+        // (also the only chrome while loading).
         Box(
             Modifier
                 .statusBarsPadding()
-                .padding(8.dp)
+                .padding(4.dp)
                 .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.45f)),
+                .background(Color.Black.copy(alpha = 0.45f * (1f - barAlpha))),
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack, "Back",
+                    tint = if (barAlpha > 0.5f) MaterialTheme.colorScheme.onSurface else Color.White,
+                )
             }
         }
     }
@@ -777,7 +802,7 @@ private fun DetailHero(d: AnimeDetail) {
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .size(width = 104.dp, height = 148.dp)
-                    .clip(RoundedCornerShape(6.dp)),
+                    .clip(RoundedCornerShape(10.dp)),
             )
             Column(
                 Modifier.align(Alignment.Bottom).padding(start = 12.dp),
@@ -871,7 +896,7 @@ private fun EpisodeCard(
     val thumb = episode.thumbnailUrl
     Column(
         modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(10.dp))
             .clickable(onClickLabel = "Play", onClick = onPlay)
             .testTag("ep-${episode.number}")
             .semantics(mergeDescendants = true) {
@@ -886,23 +911,28 @@ private fun EpisodeCard(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                .clip(RoundedCornerShape(10.dp))
+                .background(
+                    Brush.linearGradient(
+                        listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.surfaceContainerHighest),
+                    ),
+                ),
         ) {
+            // No per-episode art: a midnight gradient tile over a faint wash of the series art, led
+            // by the number (the same full-strength banner on every card read as a wall of clones).
             AsyncImage(
                 model = thumb ?: fallbackArt,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                alpha = if (thumb == null) 0.18f else 1f,
                 modifier = Modifier.fillMaxSize(),
             )
             if (thumb == null) {
-                // Shared fallback art: dim it and lead with the number so cards stay tellable apart.
-                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
                 Text(
                     "${episode.number}",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                     modifier = Modifier.align(Alignment.Center),
                 )
             } else {
