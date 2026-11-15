@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -42,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -290,7 +292,7 @@ private fun HeroCarousel(
         }
     }
 
-    BoxWithConstraints(Modifier.fillMaxWidth().height(410.dp)) {
+    BoxWithConstraints(Modifier.fillMaxWidth().height(460.dp)) {
         // A portrait cover cropped into a wide slot gets upscaled several times over (blurry on
         // tablets/landscape); use the wide banner there, and the HD cover on squarer phone slots.
         val wide = maxWidth / maxHeight > 1.6f
@@ -317,82 +319,104 @@ private fun HeroCarousel(
 
         val page = pagerState.currentPage.coerceIn(items.indices)
         val current = items[page]
-        // The 9anime signature: a solid info band pinned to the slide bottom.
+        val bg = MaterialTheme.colorScheme.background
+        // Cinematic fade: the art melts into the page instead of ending in a hard band, and the
+        // spotlight's details sit over the darkest part of the fade.
         Box(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .heightIn(min = 112.dp)
-                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.94f)),
+                .height(240.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.45f to bg.copy(alpha = 0.75f),
+                        1f to bg,
+                    )
+                ),
+        )
+        Column(
+            Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            Text(
+                "#${page + 1} SPOTLIGHT",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.tertiary,
+                letterSpacing = 1.4.sp,
+            )
+            Text(
+                current.title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 560.dp),
+            )
+            val meta = listOfNotNull(
+                current.format,
+                // The format already says "Movie"; only series get a count.
+                episodeBadge(null, current.episodes).takeUnless { current.format.equals("Movie", true) },
+                current.averageScore?.let(::scoreLabel),
+            )
+            if (meta.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    meta.forEach { HeroPill(it) }
+                }
+            }
             Row(
-                Modifier
-                    .align(Alignment.Center)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                Modifier.fillMaxWidth().padding(top = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(
-                        "#${page + 1} SPOTLIGHT",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.tertiary,
-                        letterSpacing = 1.sp,
-                    )
-                    Text(
-                        current.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    val meta = listOfNotNull(
-                        current.format,
-                        // The format already says "Movie"; only series get a count.
-                        episodeBadge(null, current.episodes).takeUnless { current.format.equals("Movie", true) },
-                        current.averageScore?.let(::scoreLabel),
-                    ).joinToString("  •  ")
-                    if (meta.isNotEmpty()) {
-                        Text(
-                            meta,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                    }
-                }
-                Spacer(Modifier.width(12.dp))
                 Button(
                     onClick = { onOpen(current.id) },
                     shape = RoundedCornerShape(100.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White,
-                        contentColor = Color(0xFF0B1230),
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = Color.White,
                     ),
+                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp),
                 ) {
-                    Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text("Watch now", fontWeight = FontWeight.Bold)
                 }
-            }
-            Row(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                items.indices.forEach { i ->
-                    val active = i == pagerState.currentPage
-                    Box(
-                        Modifier
-                            .size(width = if (active) 10.dp else 4.dp, height = 4.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(
-                                if (active) MaterialTheme.colorScheme.tertiary
-                                else Color.White.copy(alpha = 0.4f)
-                            )
-                    )
+                Spacer(Modifier.weight(1f))
+                // Page dots, right-aligned beside the call to action.
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    items.indices.forEach { i ->
+                        val active = i == pagerState.currentPage
+                        Box(
+                            Modifier
+                                .size(width = if (active) 16.dp else 6.dp, height = 6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(
+                                    if (active) MaterialTheme.colorScheme.tertiary
+                                    else Color.White.copy(alpha = 0.35f)
+                                )
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+/** Frosted meta chip over hero art. */
+@Composable
+private fun HeroPill(text: String) {
+    Surface(shape = RoundedCornerShape(6.dp), color = Color.White.copy(alpha = 0.14f)) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium,
+            color = Color.White,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+        )
     }
 }
 
