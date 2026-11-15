@@ -419,5 +419,5 @@ for the old MAL client id).
   `autoPlayNext`, `autoSkip`, `wifiOnlyDownloads`, default download quality, and **subtitle
   scale/background** (the player applies these live to the `SubtitleView`; More shows a to-scale preview
   that reproduces the caption's true on-screen px).
-- Source-dir quirk: `:domain` keeps sources under `src/main/kotlin/`, while `:data` and `:app` use
-  `src/main/java/` (still Kotlin). Put new files in the directory the module already uses.
+- Every module keeps its Kotlin sources under `src/main/java/` (`:domain` was moved there from
+  `src/main/kotlin/` to match). Put new files there, not in a `kotlin/` directory.
