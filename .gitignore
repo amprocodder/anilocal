@@ -31,3 +31,6 @@ keystore.properties
 /.local-dev/
 /dist/
 __pycache__/
+
+# Claude Code personal settings
+.claude/settings.local.json
