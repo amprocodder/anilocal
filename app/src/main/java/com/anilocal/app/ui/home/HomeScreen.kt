@@ -1,5 +1,11 @@
 package com.anilocal.app.ui.home
 
+import com.anilocal.app.ui.common.episodeBadge
+import com.anilocal.app.ui.common.StatusBarScrim
+import com.anilocal.app.ui.common.scrolledPast
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -180,8 +186,13 @@ fun HomeScreen(
     val downloadedIds by vm.downloadedIds.collectAsStateWithLifecycle()
     val actionStatus by vm.actionStatus.collectAsStateWithLifecycle()
 
+    val listState = rememberLazyListState()
+    // The hero has its own top scrim; once it scrolls mostly away, shelves would run under the clock.
+    val scrolled by remember { derivedStateOf { listState.scrolledPast(thresholdPx = 600) } }
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
         Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
@@ -221,6 +232,8 @@ fun HomeScreen(
                 ranked = row.ranked,
             )
         }
+    }
+    StatusBarScrim(visible = scrolled, modifier = Modifier.align(Alignment.TopCenter))
     }
 }
 
@@ -337,7 +350,8 @@ private fun HeroCarousel(
                     )
                     val meta = listOfNotNull(
                         current.format,
-                        current.episodes?.let { "$it ep" },
+                        // The format already says "Movie"; only series get a count.
+                        episodeBadge(null, current.episodes).takeUnless { current.format.equals("Movie", true) },
                         current.averageScore?.let(::scoreLabel),
                     ).joinToString("  •  ")
                     if (meta.isNotEmpty()) {

@@ -86,9 +86,9 @@ fun PosterCard(
                         .padding(horizontal = 5.dp, vertical = 2.dp),
                 )
             }
-            item.episodes?.let { eps ->
+            episodeBadge(item.format, item.episodes)?.let { label ->
                 Text(
-                    text = "EP $eps",
+                    text = label,
                     color = MaterialTheme.colorScheme.onPrimary,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
@@ -192,4 +192,15 @@ fun PosterCard(
             )
         }
     }
+}
+
+/**
+ * Card/spotlight count label: "1 ep" / "25 eps" — or "Movie" for a movie, where a count of one says
+ * nothing. Null when there's nothing to show (no released episodes yet).
+ */
+fun episodeBadge(format: String?, episodes: Int?): String? = when {
+    format.equals("Movie", ignoreCase = true) -> "Movie"
+    episodes == null || episodes <= 0 -> null
+    episodes == 1 -> "1 ep"
+    else -> "$episodes eps"
 }
