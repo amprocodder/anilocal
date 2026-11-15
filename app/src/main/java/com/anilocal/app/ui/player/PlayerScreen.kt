@@ -1,5 +1,9 @@
 package com.anilocal.app.ui.player
 
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.BorderStroke
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -335,6 +339,8 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                 episodeNumber = currentEpisode,
                 isPlaying = playWhenReady,
                 isBuffering = isBuffering && error == null,
+                // A failed load has nothing to transport; the error card takes the centre instead.
+                showTransport = error == null,
                 position = position,
                 buffered = buffered,
                 duration = duration,
@@ -428,19 +434,52 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
         // A failed load/resolve/playback shows its reason here rather than leaving a black screen.
         error?.let { message ->
             Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = ScrimColor,
-                modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(if (fullscreen) 24.dp else 12.dp)
+                    .widthIn(max = 420.dp),
             ) {
-                Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(message, color = Color.White, style = MaterialTheme.typography.bodyMedium)
-                    if (recoveryState == PlaybackRecoveryState.Failed) {
-                        Text(
-                            "Retry",
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clickable(onClick = vm::retryPlayback).padding(12.dp),
+                Column(
+                    Modifier.padding(horizontal = 20.dp, vertical = if (fullscreen) 18.dp else 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (fullscreen) {
+                        Icon(
+                            Icons.Outlined.ErrorOutline, null,
+                            tint = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(32.dp),
                         )
+                        Text(
+                            "Can't play this episode",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Text(
+                        message,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                    if (recoveryState == PlaybackRecoveryState.Failed) {
+                        Surface(
+                            onClick = vm::retryPlayback,
+                            shape = RoundedCornerShape(100.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 4.dp),
+                        ) {
+                            Text(
+                                "Retry",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -610,6 +649,7 @@ private fun PlayerControls(
     episodeNumber: Int,
     isPlaying: Boolean,
     isBuffering: Boolean,
+    showTransport: Boolean,
     position: Long,
     buffered: Long,
     duration: Long,
@@ -725,7 +765,7 @@ private fun PlayerControls(
 
             // Center: previous · rewind 10s · play/pause · forward 10s · next, each on a soft dark
             // disc. While rebuffering the screen-level spinner takes the play button's spot.
-            Row(
+            if (showTransport) Row(
                 Modifier.align(Alignment.Center),
                 horizontalArrangement = Arrangement.spacedBy(if (fullscreen) 32.dp else 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -742,6 +782,7 @@ private fun PlayerControls(
                     iconSize = if (fullscreen) 48.dp else 34.dp,
                     showIcon = !isBuffering,
                     enabled = !isBuffering,
+                    accent = !isBuffering,
                 )
                 CenterButton(Icons.Filled.Forward10, "Forward 10s", onForward, side, sideIcon)
                 CenterButton(Icons.Filled.SkipNext, "Next episode", onNext, side, sideIcon, enabled = hasNext)
@@ -803,11 +844,15 @@ private fun CenterButton(
     iconSize: androidx.compose.ui.unit.Dp,
     enabled: Boolean = true,
     showIcon: Boolean = true,
+    // The primary action (play/pause) wears the app's accent, like the watch page's play buttons.
+    accent: Boolean = false,
 ) {
     IconButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.size(size).background(DiscColor, CircleShape),
+        modifier = Modifier
+            .size(size)
+            .background(if (accent) MaterialTheme.colorScheme.primary else DiscColor, CircleShape),
     ) {
         if (showIcon) {
             Icon(
