@@ -34,9 +34,10 @@ gradle :domain:test                # JVM unit tests for the pure-Kotlin domain m
 gradle :data:testDebugUnitTest     # Android-library unit tests
 ```
 
-**No test suite is committed** and CI only assembles: CI (`.github/workflows/android.yml`) runs
-`gradle :app:assembleDebug` on every push and uploads the APK (artifact `anilocal-debug-apk`) for
-sideloading — it provisions Gradle 8.9 via `gradle/actions/setup-gradle`, **not** a committed wrapper,
+**No test suite is committed** and CI only lints and assembles: CI (`.github/workflows/android.yml`)
+runs on every push — it checks the commit messages, runs `:domain:check` plus lint on the Android
+modules, assembles `:app:assembleDebug` and `:app:assembleBenchmark`, and uploads both APKs (artifacts
+`anilocal-debug-apk` and `anilocal-optimized-apk`) for sideloading — it provisions Gradle 8.9 via `gradle/actions/setup-gradle`, **not** a committed wrapper,
 so don't "fix" CI by adding one. The pure-JVM `:domain` module is the fast, dependency-free place to add
 unit tests.
 
@@ -56,6 +57,48 @@ every push), so don't assume an uncompiled first build.
 
 `gradle.properties` turns on `org.gradle.configuration-cache` and `nonTransitiveRClass`; if a first
 build trips a config-cache violation, disabling it is a fair triage step.
+
+## Git & commit rules
+
+Solo project; every commit and push is made through Claude Code. These rules are mandatory.
+
+**Branching**
+- `main` is the only long-lived branch and always holds the latest working build. Commit to it directly.
+- A short-lived branch (`feat/<topic>`, `fix/<topic>`) is fine for risky work, but merge it back
+  (fast-forward or squash) and delete it the same session — never leave work stranded off `main`.
+- Never force-push `main`, never rewrite pushed history, never delete `main`.
+- Old branch tips are preserved as `archive/<name>` tags; don't delete those.
+
+**Commit messages** — Conventional Commits, checked by `.github/hooks/commit-msg` (locally via
+`git config core.hooksPath .github/hooks`, and by CI on every push):
+
+```
+type(scope): imperative lowercase summary, ≤72 chars, no trailing period
+
+Optional body: what changed and why (not how), wrapped at ~72 columns.
+```
+
+- **type** — `feat` (user-visible feature), `fix` (bug fix), `perf`, `refactor` (no behaviour
+  change), `docs`, `build` (Gradle, deps, signing), `ci`, `test`, `chore` (housekeeping, releases),
+  `revert`, `style`. Add `!` after the type/scope for a breaking change (e.g. a Room schema bump
+  without a migration path).
+- **scope** — optional, lowercase, the feature area: `player`, `downloads`, `sources`, `extensions`,
+  `settings`, `library`, `home`, `explore`, `details`, `mal`, `skip`, `cache`, `net`, `ui`, `app`, or a
+  module (`domain`, `data`). Nest with `/` (`extensions/ui`). Reuse an existing scope before inventing one
+  (`git log --format=%s | grep -oE '^[a-z]+\([^)]+\)' | sort | uniq -c`).
+- One logical change per commit. Don't bundle an unrelated fix into a feature commit; split it.
+
+**Before pushing**
+- The build must pass locally (`gradle :app:assembleDebug`) for any code change; docs/CI-only changes
+  are exempt. Check CI after pushing (`gh run list --limit 1`) and fix a red build immediately with a
+  `fix`/`build` commit — no reverting history.
+- Never commit secrets, `local.properties`, a release keystore, or local dev tooling (see above);
+  `app/debug.keystore` is the one intentional exception.
+
+**Releases**
+- Bump `versionCode` (+1) and `versionName` (semver) in `app/build.gradle.kts` in a dedicated
+  `chore(release): vX.Y.Z` commit, tag it `vX.Y.Z`, and publish a GitHub release with the CI-built
+  APKs (`gh release create vX.Y.Z <apks> --generate-notes`).
 
 ## Module architecture — the boundary is compile-enforced
 
