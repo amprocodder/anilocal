@@ -40,6 +40,7 @@ import com.anilocal.app.domain.model.OfflineEpisode
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.Subtitle
 import com.anilocal.app.domain.model.VideoStream
+import com.anilocal.app.domain.model.withFallback
 import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.ProgressRepository
@@ -216,6 +217,10 @@ class PlayerViewModel @Inject constructor(
     private var markersFetched = false
     private var firstReadyAtMs = 0L
     private var markersJob: Job? = null
+    // Skip windows known for the CURRENT media before any AniSkip lookup: the source's own
+    // per-stream timestamps online, or the download's snapshot offline. AniSkip only ever fills a
+    // type these lack — its crowd-sourced times belong to the submitter's cut, not this file.
+    private var knownMarkers: List<SkipMarker> = emptyList()
 
     private val episodeLoaded: Boolean get() = session.attached
     private data class TextChoice(val label: String?, val language: String?, val ordinal: Int)
@@ -370,14 +375,12 @@ class PlayerViewModel @Inject constructor(
             // row intact for Downloads, but switch this player to fresh online source discovery.
             offlineRecoveryActive = true
             _offline.value = false
-            _markers.value = emptyList()
-            markersFetched = false
-            firstReadyAtMs = 0L
-        } else {
-            _markers.value = emptyList()
-            markersFetched = false
-            firstReadyAtMs = 0L
         }
+        // The replacement stream may come from another source/cut: its windows are re-derived.
+        _markers.value = emptyList()
+        knownMarkers = emptyList()
+        markersFetched = false
+        firstReadyAtMs = 0L
         _error.value = "Reconnecting… checking sources"
         recovery.onError(PlaybackRestart(session.positionMs, session.playWhenReady, currentUri))
     }
@@ -446,6 +449,7 @@ class PlayerViewModel @Inject constructor(
                 prefetchedStream ?: streams.resolveStream(d, episode)
             }
             checkSession(generation)
+            knownMarkers = stream.skips
             play(stream.url, stream.mimeType, stream.subtitles, stream.headers, generation)
         } finally {
             if (session.generation == generation) loading = false
@@ -527,14 +531,13 @@ class PlayerViewModel @Inject constructor(
         // The duration is normally unknown until the offline media prepares; the tick loop applies
         // the same playable-window filter once Media3 reports it.
         _markers.value = ep.markers
-        // Latch ONLY when the cached record actually carried markers. An empty list means "nothing
-        // was known at enqueue time" — not "this episode has no intro/outro". Downloads capture
-        // markers best-effort (a failed lookup becomes an empty list), so an AniSkip outage, or a
-        // season queued the day an episode airs (before submissions land), bakes [] into
-        // skipMarkersJson. That column has exactly one writer and no refresh path — even a download
-        // retry carries it forward — so latching here made the Skip control permanently dead for
-        // that episode, recoverable only by deleting and re-downloading.
-        markersFetched = ep.markers.isNotEmpty()
+        // Never latch here: maybeFetchMarkers skips the lookup only when the record already holds
+        // BOTH windows. A snapshot is best-effort (a failed lookup bakes [] into skipMarkersJson; a
+        // season queued the day an episode airs has no submissions yet) and often holds just one
+        // type, and that column has no refresh path — latching on "any marker" made the missing
+        // window permanently dead for that episode.
+        knownMarkers = ep.markers
+        markersFetched = false
         play(ep.streamUri, ep.mimeType, ep.subtitles, generation = generation)
     }
 
@@ -678,6 +681,7 @@ class PlayerViewModel @Inject constructor(
         _playWhenReady.value = true
         _isPlaying.value = false
         _markers.value = emptyList()
+        knownMarkers = emptyList()
         markersFetched = false
         firstReadyAtMs = 0L
         autoSkipped.clear()
@@ -718,13 +722,11 @@ class PlayerViewModel @Inject constructor(
         if (autoSkipped.add(active.startMs)) seekTo(active.endMs)
     }
 
-    // Fetch AniSkip markers exactly once per episode, but only after a RELIABLE (>0) duration is known
-    // (so the length-matched query pins us to the same cut). After a short grace, accept a still-unknown
-    // duration (length=0, best-effort) so the Skip control never wedges to "never appears".
+    // Settle this episode's skip windows once, after a RELIABLE (>0) duration is known (so AniSkip's
+    // length-matched query pins the same cut). After a short grace, accept a still-unknown duration
+    // (length=0, best-effort) so the Skip control never wedges to "never appears".
+    // The media's own windows (knownMarkers) always win; AniSkip is asked only for a type they lack.
     private fun maybeFetchMarkers() {
-        // No `_offline` guard: markersFetched already covers it — it is true whenever the offline
-        // record supplied real markers. A downloaded episode whose cached list is EMPTY gets one
-        // lookup (cache-first; with no network it fails to empty and changes nothing).
         if (markersFetched) return
         if (currentPlayer.playbackState != Player.STATE_READY) return
         if (firstReadyAtMs == 0L) firstReadyAtMs = SystemClock.elapsedRealtime()
@@ -732,15 +734,19 @@ class PlayerViewModel @Inject constructor(
         val durKnown = durMs > 0
         if (!durKnown && SystemClock.elapsedRealtime() - firstReadyAtMs < MARKER_GRACE_MS) return
         markersFetched = true   // set before the suspend fetch so the next tick doesn't double-fire.
+        val known = if (durKnown) playableMarkers(knownMarkers, durMs) else knownMarkers
+        if (known.isNotEmpty()) _markers.value = known
+        if (SkipMarker.Type.entries.all { type -> known.any { it.type == type } }) return
         val lengthSec = durMs.coerceAtLeast(0) / 1000
         val ep = episodeNumber
         val generation = session.generation
         markersJob = viewModelScope.launch {
+            // A failed lookup is empty, so the merge below can only ADD windows, never clobber
+            // the ones already on screen.
             val m = optional { skip.markers(idMal, ep, lengthSec) }.orEmpty()
             checkSession(generation)
-            // Assign only a non-empty result, so a failed or empty lookup can never clobber markers
-            // already on screen (the old `!_offline` guard's intent, without blocking the case above).
-            val playable = if (durMs > 0L) playableMarkers(m, durMs) else m
+            val merged = known.withFallback(m)
+            val playable = if (durKnown) playableMarkers(merged, durMs) else merged
             if (playable.isNotEmpty()) _markers.value = playable
         }
     }

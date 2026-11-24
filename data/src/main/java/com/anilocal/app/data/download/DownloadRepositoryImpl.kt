@@ -22,6 +22,7 @@ import com.anilocal.app.domain.model.OfflineEpisode
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.Subtitle
 import com.anilocal.app.domain.model.VideoStream
+import com.anilocal.app.domain.model.withFallback
 import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.SettingsRepository
@@ -263,7 +264,9 @@ class DownloadRepositoryImpl @Inject constructor(
                         mimeType = stream.mimeType,
                         quality = stream.quality,
                         subtitlesJson = subAdapter.toJson(localSubs),
-                        skipMarkersJson = markerAdapter.toJson(markers),
+                        // The source's windows are measured on THIS file; AniSkip's (any-cut, length 0
+                        // at enqueue) only fill a type the source didn't publish.
+                        skipMarkersJson = markerAdapter.toJson(stream.skips.withFallback(markers)),
                         state = STATE_DOWNLOADING,
                         progress = 0,
                         createdAt = System.currentTimeMillis(),
@@ -367,6 +370,10 @@ class DownloadRepositoryImpl @Inject constructor(
                         mimeType = stream.mimeType,
                         quality = stream.quality ?: e.quality,
                         subtitlesJson = subAdapter.toJson(localSubs),
+                        // The re-resolved file may be another source's cut: its own windows replace
+                        // the old snapshot's for every type it publishes.
+                        skipMarkersJson = markerAdapter.toJson(stream.skips.withFallback(
+                            runCatching { markerAdapter.fromJson(e.skipMarkersJson) }.getOrNull().orEmpty())),
                         state = STATE_DOWNLOADING,
                         progress = 0,
                         headersJson = headerAdapter.toJson(stream.headers),

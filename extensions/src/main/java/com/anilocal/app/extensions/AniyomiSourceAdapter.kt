@@ -14,6 +14,7 @@ import androidx.preference.TwoStatePreference
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.Episode
+import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.Subtitle
 import com.anilocal.app.domain.model.VideoServer
 import com.anilocal.app.domain.model.VideoStream
@@ -23,6 +24,7 @@ import com.anilocal.app.domain.source.SourcePreference
 import eu.kanade.tachiyomi.animesource.AnimeCatalogueSource
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
+import eu.kanade.tachiyomi.animesource.model.ChapterType
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
@@ -261,8 +263,30 @@ class AniyomiSourceAdapter(
                 .map { Subtitle(url = it.url, language = it.lang, label = it.lang) },
             quality = videoTitle.ifBlank { resolution?.let { "${it}p" } },
             height = resolution,
+            skips = skipMarkers(),
         )
     }
+
+    /**
+     * The source's own intro/outro windows for this file. Sites behind the HiAnime-family players
+     * (megacloud/megaplay — Anikoto & co.) publish them per stream, so unlike AniSkip they already
+     * account for this cut's pre-roll. Unknown windows arrive as 0..0 and are dropped; at most one
+     * window per type (the earliest). Recap/Other chapters have no skip control, so they're ignored.
+     */
+    private fun Video.skipMarkers(): List<SkipMarker> =
+        runCatching { timestamps }.getOrNull().orEmpty()
+            .mapNotNull { ts ->
+                val type = when (ts.type) {
+                    ChapterType.Opening, ChapterType.MixedOp -> SkipMarker.Type.INTRO
+                    ChapterType.Ending -> SkipMarker.Type.OUTRO
+                    else -> return@mapNotNull null
+                }
+                val startMs = (ts.start * 1000).toLong()
+                val endMs = (ts.end * 1000).toLong()
+                if (startMs < 0 || endMs <= startMs) null else SkipMarker(type, startMs, endMs)
+            }
+            .sortedBy { it.startMs }
+            .distinctBy { it.type }
 
     /**
      * Carry the cookie jar's cookies for the stream host into the stream's own headers. The resolve

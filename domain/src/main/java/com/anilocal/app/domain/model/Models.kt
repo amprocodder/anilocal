@@ -86,6 +86,10 @@ data class VideoStream(
     val subtitles: List<Subtitle> = emptyList(),
     val quality: String? = null,           // human label, e.g. "1080p"
     val height: Int? = null,               // vertical resolution, for sorting/matching
+    // Intro/outro windows the SOURCE published for this exact file (Aniyomi `Video.timestamps`).
+    // Aligned to this stream by construction, so they beat AniSkip's crowd-sourced times, which
+    // belong to whatever cut the submitter watched (a different pre-roll shifts every timestamp).
+    val skips: List<SkipMarker> = emptyList(),
 )
 
 data class Subtitle(val url: String, val language: String, val label: String = language)
@@ -97,6 +101,16 @@ data class SkipMarker(
     val endMs: Long,
 ) {
     enum class Type { INTRO, OUTRO }
+}
+
+/**
+ * Per type, keep this list's window and take [fallback]'s only for a type this list lacks. Each type
+ * is decided independently because sources and AniSkip both routinely know one window but not the
+ * other; treating "has any marker" as "has every marker" is what lost outros.
+ */
+fun List<SkipMarker>.withFallback(fallback: List<SkipMarker>): List<SkipMarker> {
+    val have = mapTo(HashSet()) { it.type }
+    return this + fallback.filter { it.type !in have }.distinctBy { it.type }
 }
 
 /** A selectable stream host/server for an episode (Source decides what these mean). */
