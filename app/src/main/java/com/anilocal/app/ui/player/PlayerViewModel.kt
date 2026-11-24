@@ -256,7 +256,7 @@ class PlayerViewModel @Inject constructor(
                 // episode (offline records need the same protection).
                 if (session.durationMs > 0L && _markers.value.isNotEmpty()) {
                     val playable = playableMarkers(_markers.value, session.durationMs)
-                    if (playable.size != _markers.value.size) _markers.value = playable
+                    if (playable != _markers.value) _markers.value = playable
                 }
                 if (!loading && recoveryState.value == PlaybackRecoveryState.Idle) {
                     captureProgress()
