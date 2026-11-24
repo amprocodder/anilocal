@@ -831,7 +831,6 @@ private fun PlayerControls(
                     iconSize = if (fullscreen) 48.dp else 34.dp,
                     showIcon = !isBuffering,
                     enabled = !isBuffering,
-                    accent = !isBuffering,
                 )
                 CenterButton(Icons.Filled.Forward10, "Forward 10s", onForward, side, sideIcon)
                 CenterButton(Icons.Filled.SkipNext, "Next episode", onNext, side, sideIcon, enabled = hasNext)
@@ -893,15 +892,13 @@ private fun CenterButton(
     iconSize: androidx.compose.ui.unit.Dp,
     enabled: Boolean = true,
     showIcon: Boolean = true,
-    // The primary action (play/pause) wears the app's accent, like the watch page's play buttons.
-    accent: Boolean = false,
 ) {
     IconButton(
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier
             .size(size)
-            .background(if (accent) MaterialTheme.colorScheme.primary else DiscColor, CircleShape),
+            .background(DiscColor, CircleShape),
     ) {
         if (showIcon) {
             Icon(
