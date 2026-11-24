@@ -113,6 +113,12 @@ private val OverlayMask = Color(0x99121318)
 private val DimColor = Color.Black.copy(alpha = 0.45f)
 private val DiscColor = Color.Black.copy(alpha = 0.35f)
 
+/**
+ * One-shot double-tap seek feedback. Deliberately NOT a data class: each instance has distinct
+ * identity, so `LaunchedEffect(seekFlash)` re-triggers its fade on every rapid double-tap.
+ */
+private class SeekFlash(val forward: Boolean)
+
 @OptIn(UnstableApi::class)
 private val ResizeModes = listOf(
     AspectRatioFrameLayout.RESIZE_MODE_FIT to "Fit",
@@ -164,6 +170,7 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
     val anyMenuOpen = ccMenuOpen || speedMenuOpen || episodesOpen
 
     var resizeLabel by remember { mutableStateOf<String?>(null) }
+    var seekFlash by remember { mutableStateOf<SeekFlash?>(null) }
     var unlockVisible by remember { mutableStateOf(true) }
     // Read inside the pointerInput(Unit) block so a lock/unlock doesn't restart the tap detector.
     val isLocked by rememberUpdatedState(locked)
@@ -227,6 +234,7 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
     }
 
     LaunchedEffect(resizeLabel) { if (resizeLabel != null) { delay(900); resizeLabel = null } }
+    LaunchedEffect(seekFlash) { if (seekFlash != null) { delay(650); seekFlash = null } }
     LaunchedEffect(locked, unlockVisible) {
         if (locked && unlockVisible) { delay(2_500); unlockVisible = false }
     }
@@ -309,8 +317,9 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
         )
 
         // Tap layer — sits UNDER the control overlay; the overlay's buttons/seek bar consume their
-        // own touches, so a tap anywhere else (including the scrims) just toggles the controls.
-        // Deliberately no other gestures: every action is a button.
+        // own touches, so a tap anywhere else (including the scrims) lands here. A single tap
+        // toggles the controls; a double-tap on the left/right third seeks 10s back/forward (the
+        // middle third ignores it). No other gestures: everything else is a button.
         Box(
             Modifier
                 .fillMaxSize()
@@ -323,6 +332,22 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                                 controlsVisible = !controlsVisible
                                 if (controlsVisible) interactionTick++
                             }
+                        },
+                        onDoubleTap = onDoubleTap@{ o ->
+                            if (isLocked) return@onDoubleTap
+                            val third = size.width / 3f
+                            when {
+                                o.x < third -> {
+                                    vm.seekBack()
+                                    seekFlash = SeekFlash(forward = false)
+                                }
+                                o.x > 2 * third -> {
+                                    vm.seekForward()
+                                    seekFlash = SeekFlash(forward = true)
+                                }
+                                else -> return@onDoubleTap
+                            }
+                            interactionTick++
                         },
                     )
                 }
@@ -385,6 +410,30 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                 color = Color.White,
                 modifier = Modifier.align(Alignment.Center).size(46.dp),
             )
+        }
+
+        // Double-tap seek flash on the tapped side. The watch page's smaller video gets an icon-only
+        // disc hugging the edge so it clears the centred transport row.
+        seekFlash?.let { flash ->
+            Surface(
+                shape = CircleShape,
+                color = ScrimColor,
+                modifier = Modifier
+                    .align(if (flash.forward) Alignment.CenterEnd else Alignment.CenterStart)
+                    .padding(horizontal = if (fullscreen) 42.dp else 12.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(horizontal = if (fullscreen) 14.dp else 8.dp, vertical = if (fullscreen) 10.dp else 8.dp),
+                ) {
+                    Icon(
+                        if (flash.forward) Icons.Filled.Forward10 else Icons.Filled.Replay10,
+                        null, tint = Color.White, modifier = Modifier.size(if (fullscreen) 26.dp else 22.dp),
+                    )
+                    if (fullscreen) Text("10s", color = Color.White, style = MaterialTheme.typography.labelLarge)
+                }
+            }
         }
 
         // Resize-mode name flash.
