@@ -36,8 +36,9 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
 - **Related titles** on every detail page: the franchise's prequels, sequels, seasons, movies
   and side stories in watch-order (AniList relations), each tagged and one tap away.
 - **Player** (Media3/ExoPlayer) with the **Skip-Intro/Outro button** (`FreakIntroButton`
-  equivalent), fed by **AniSkip** (real op/ed times by MAL id); titles without a MAL id simply have
-  no markers.
+  equivalent), fed by the **source's own per-episode timestamps** where the extension publishes them
+  (exactly aligned to the file being played), with **AniSkip** (crowd-sourced op/ed times by MAL id)
+  filling any window the source lacks; titles without a MAL id get AniSkip nothing.
 - **Room persistence**: "My List" (My List tab) + "Continue Watching" (Home), with watch
   progress saved during playback.
 - **In-list search**: the Explore-style search box on the My List tab (filters My List or the

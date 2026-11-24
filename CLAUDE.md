@@ -290,16 +290,30 @@ for the old MAL client id).
 
 - **Player has a dual online/offline path** (`app/.../player/PlayerViewModel.kt`): on load it first
   checks `downloads.getOffline(...)`. Offline → skip markers and subtitles come from the cached Room
-  record. Online → AniList resolves the title, the bound `AnimeSource` resolves the stream, and AniSkip
-  markers are fetched once per episode from the tick loop once the player is `STATE_READY`. An offline
-  record latches `markersFetched` only if it actually carried markers (downloads snapshot markers once
-  at enqueue, best-effort, so an empty snapshot means "unknown" and gets one online lookup), and only a
-  non-empty result is ever assigned, so a lookup never overrides markers already shown. When a title has **no MAL id** (anything AniSkip can't key),
-  `AniSkipRepository` returns **no markers** — never fabricated ones (the old demo markers existed for a
-  bundled sample clip that is gone; a Skip button jumping to made-up times is worse than none). Auto-skip
-  fires at most once per marker. AniSkip is queried with the player's real `episodeLengthSec` first and
-  **retried with `episodeLength=0`** if that finds nothing (a length mismatch >~±25s makes AniSkip answer
-  `found:false`; `0` disables its length filter and still returns absolute op/ed times — keep the retry).
+  record. Online → AniList resolves the title, the bound `AnimeSource` resolves the stream.
+  **Skip markers: the source's own timestamps first, AniSkip only fills gaps.** Aniyomi extensions
+  publish per-file intro/outro windows (`Video.timestamps`; the HiAnime-family megaplay/megacloud
+  sources such as Anikoto fill them) — `AniyomiSourceAdapter` maps them onto `VideoStream.skips`. They
+  are aligned to that exact file, whereas AniSkip's crowd-sourced times belong to whatever cut the
+  submitter watched (a source's ~16s pre-roll shifts every timestamp; AoT ep 1's "same-length" AniSkip
+  OP covered the cold open). The player holds them as `knownMarkers` (online: `stream.skips`; offline:
+  the download's snapshot) and, once per episode at `STATE_READY` with a real duration, asks AniSkip
+  **only for a type they lack**, merging per type via the domain `withFallback` (each type is decided
+  independently — "has any marker" ≠ "has both"; that conflation is what lost outros). Downloads snapshot
+  `stream.skips.withFallback(aniskip)` at enqueue, and a retry re-snapshots from the re-resolved file. A
+  merge can only add windows, never clobber shown ones. `playableMarkers` clamps an OUTRO that runs past
+  the file's end (instead of dropping it) and drops anything else outside the media. When a title has
+  **no MAL id**, `AniSkipRepository` returns **no markers** — never fabricated ones (a Skip button
+  jumping to made-up times is worse than none). Auto-skip fires at most once per marker.
+  **How AniSkip answers** (`aniskip-api` source): per requested type independently, the top-voted
+  submission whose `episodeLength` is within **±20s** of ours (any length for `0`), each tagged with its
+  own `episodeLength`; HTTP 404 when no type matched. So a length-matched answer often holds only an OP
+  or only an ED: `AniSkipRepository` takes each type from the same-cut query if plausible, else from
+  the `episodeLength=0` query. An ED from a different-length cut is **shifted by the length
+  difference** (sampled across 239 episodes: OPs keep absolute time, EDs keep their distance from the
+  end); windows are rejected unless an OP starts in the first half and an ED in the second (no fixed
+  OP cap — Steins;Gate ep 1 opens at 10:42) and spans 10–150s (OP) / 10–180s (ED). Cache keys are
+  `skip:v2:<mal>:<ep>:<lenSec>` holding that query's raw submissions (24h).
   On `STATE_ENDED` the player **auto-advances to the next episode in place** (reuses the same ExoPlayer,
   resets per-episode state, re-runs `load()` so a downloaded next ep plays from cache), gated on the
   `autoPlayNext` setting and `hasEpisode()`; an `advancing` guard fires it exactly once, and with no next
