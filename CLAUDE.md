@@ -314,10 +314,22 @@ for the old MAL client id).
   end); windows are rejected unless an OP starts in the first half and an ED in the second (no fixed
   OP cap — Steins;Gate ep 1 opens at 10:42) and spans 10–150s (OP) / 10–180s (ED). Cache keys are
   `skip:v2:<mal>:<ep>:<lenSec>` holding that query's raw submissions (24h).
-  On `STATE_ENDED` the player **auto-advances to the next episode in place** (reuses the same ExoPlayer,
-  resets per-episode state, re-runs `load()` so a downloaded next ep plays from cache), gated on the
-  `autoPlayNext` setting and `hasEpisode()`; an `advancing` guard fires it exactly once, and with no next
-  episode it `progress.remove()`s the title from Continue Watching. The player's built-in next/prev
+  On `STATE_ENDED` the player **auto-advances to the next episode in place** (same screen and
+  `PlayerView`; `playEpisode` resets per-episode state and normally re-runs `load()`, which builds a
+  fresh ExoPlayer — a downloaded next ep plays from cache), gated on the `autoPlayNext` setting and
+  `hasEpisode()`; an `advancing` guard fires it exactly once, and with no next episode it
+  `progress.remove()`s the title from Continue Watching. **Pre-cache next episode**
+  (`precacheNextEpisode`, default on, only with `autoPlayNext`) makes that switch instant: in the last
+  2 min `maybePrecacheNext` re-resolves the next episode's link (the READY-time `prefetchNext` is a
+  whole episode old by then, and tokenized links expire), builds its media into a hidden, paused
+  **standby** ExoPlayer (its `PlayerOwner` holds an inactive generation, so its callbacks are ignored),
+  and lets it buffer only once the current episode is fully buffered — or in the last 20 s if the
+  current one isn't stalled — so the two never compete for bandwidth; `StandbyLoadControl` caps it at
+  15 s. `playEpisode` then `takeStandby`s and `promote`s it (re-binds the owner, lifts the cap, swaps
+  `_player`) instead of loading: ~20–40 ms from `STATE_ENDED` to the next episode's first frame. Any
+  standby failure (expired link, no second decoder) just releases it and the normal `load()` runs; it
+  is also released on seeking back >5 min from the end, recovery, the setting going off, an episode
+  jump, and `onCleared`. The player's built-in next/prev
   buttons are disabled.
   **Two layouts, one tree** (`PlayerScreen`): playback opens **fullscreen** (sensor-landscape, bars
   hidden); exiting fullscreen (button or Back) shows the **watch page** (`WatchPanel.kt`: details +
@@ -446,7 +458,7 @@ for the old MAL client id).
   backoff on IO errors, or one honored short `Retry-After` on 429 — AniList rate-limits at 90 req/min;
   Explore additionally debounces typed queries 300 ms).
 - Settings persist via DataStore (`DataStoreSettingsRepository`) exposed as Kotlin `Flow`s — including
-  `autoPlayNext`, `autoSkip`, `wifiOnlyDownloads`, default download quality, and **subtitle
+  `autoPlayNext`, `precacheNextEpisode`, `autoSkip`, `wifiOnlyDownloads`, default download quality, and **subtitle
   scale/background** (the player applies these live to the `SubtitleView`; Settings shows a to-scale preview
   that reproduces the caption's true on-screen px).
 - Every module keeps its Kotlin sources under `src/main/java/` (`:domain` was moved there from

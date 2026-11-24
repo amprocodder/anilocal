@@ -31,6 +31,9 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   default). The chosen quality is stored and shown on the Downloads tab.
 - **Auto-skip** toggle (Settings tab) persisted via **DataStore**; when on, the player seeks past
   each intro/outro window automatically (once per marker).
+- **Auto-play next episode** with **pre-cache** (Settings tab, both on by default): near the end of
+  an episode the next one is resolved and buffered in a hidden player, so the advance starts
+  instantly instead of loading. Turn pre-cache off to load the next episode only when one ends.
 - **Real catalog** via **AniList** GraphQL (trending on Home, search in Explore, full detail
   pages). No API key needed. *(TMDB wired as optional artwork enrichment — see config.)*
 - **Related titles** on every detail page: the franchise's prequels, sequels, seasons, movies
