@@ -67,6 +67,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -249,6 +250,7 @@ fun MoreScreen(
         item(key = "playback", contentType = "settings") {
             val autoSkip by vm.autoSkip.collectAsStateWithLifecycle()
             val autoPlayNext by vm.autoPlayNext.collectAsStateWithLifecycle()
+            val precacheNext by vm.precacheNext.collectAsStateWithLifecycle()
             val wifiOnly by vm.wifiOnly.collectAsStateWithLifecycle()
             SectionCard(Icons.Outlined.PlayCircle, "Playback") {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -269,6 +271,18 @@ fun MoreScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(checked = autoPlayNext, onCheckedChange = vm::setAutoPlayNext, colors = switchColors)
+                }
+
+                // Only meaningful with auto-play on: it prepares the episode auto-play would start.
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).alpha(if (autoPlayNext) 1f else 0.38f)) {
+                        Text("Pre-cache next episode", style = MaterialTheme.typography.bodyLarge)
+                        Text("Load the next episode near the end so it starts instantly",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = precacheNext, onCheckedChange = vm::setPrecacheNext,
+                        enabled = autoPlayNext, colors = switchColors)
                 }
 
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

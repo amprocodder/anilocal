@@ -42,6 +42,7 @@ class DataStoreSettingsRepository internal constructor(
     private object Keys {
         val AUTO_SKIP = booleanPreferencesKey("auto_skip")
         val AUTO_PLAY_NEXT = booleanPreferencesKey("auto_play_next")
+        val PRECACHE_NEXT = booleanPreferencesKey("precache_next_episode")
         val WIFI_ONLY = booleanPreferencesKey("wifi_only_downloads")
         val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality")
         val SUBTITLE_SCALE = floatPreferencesKey("subtitle_scale")
@@ -68,6 +69,13 @@ class DataStoreSettingsRepository internal constructor(
 
     override suspend fun setAutoPlayNext(enabled: Boolean) {
         writePreference(Keys.AUTO_PLAY_NEXT, enabled, true)
+    }
+
+    override val precacheNextEpisode: Flow<Boolean> =
+        preference(Keys.PRECACHE_NEXT, true)
+
+    override suspend fun setPrecacheNextEpisode(enabled: Boolean) {
+        writePreference(Keys.PRECACHE_NEXT, enabled, true)
     }
 
     override val wifiOnlyDownloads: Flow<Boolean> =

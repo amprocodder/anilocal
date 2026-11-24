@@ -24,8 +24,10 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.PlaceholderDataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.LoadControl
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
@@ -207,8 +209,16 @@ class PlayerViewModel @Inject constructor(
     private var advancing = false
 
     // Background-resolved next episode (keyed by number; a Deferred so a racing advance joins it
-    // instead of restarting the multi-second source resolve). Consumed/cancelled in load().
+    // instead of restarting the multi-second source resolve). Consumed/cancelled in load() or promote().
     private var prefetched: Pair<Int, Deferred<VideoStream?>>? = null
+    private var prefetchedAtMs = 0L
+
+    // Pre-cache: a hidden, paused player holding the next episode, built during the last stretch of
+    // this one and promoted onto the screen at the advance instead of a load (maybePrecacheNext).
+    private var standby: Standby? = null
+    private var standbyJob: Job? = null
+    private var standbyAttemptAtMs = 0L
+    private var precacheEnabled = true
 
     // AniSkip markers are fetched once per episode, but only after a RELIABLE duration is known — at
     // the first STATE_READY the duration is often still TIME_UNSET, which would disable AniSkip's
@@ -236,6 +246,7 @@ class PlayerViewModel @Inject constructor(
     init {
         viewModelScope.launch { settings.autoSkip.collect { autoSkipEnabled = it } }
         viewModelScope.launch { settings.autoPlayNext.collect { autoPlayNextEnabled = it } }
+        viewModelScope.launch { settings.precacheNextEpisode.collect { precacheEnabled = it } }
 
         viewModelScope.launch {
             recovery.state.collect { state ->
@@ -267,6 +278,7 @@ class PlayerViewModel @Inject constructor(
                     captureProgress()
                     maybeAutoSkip(session.positionMs)
                     maybeFetchMarkers()
+                    maybePrecacheNext()
                 }
                 _position.value = session.positionMs
                 _duration.value = session.durationMs
@@ -298,8 +310,10 @@ class PlayerViewModel @Inject constructor(
                 if (offline) PlaceholderDataSource.FACTORY else http))
     }
 
-    private fun createPlayer(dataSource: CacheDataSource.Factory): ExoPlayer {
-        val generation = session.generation
+    // [owner] ties the player's callbacks to an episode generation; a pre-cache standby is built with
+    // an inactive owner and re-bound when it's promoted. [loadControl] caps that standby's buffer.
+    private fun createPlayer(dataSource: CacheDataSource.Factory,
+        owner: PlayerOwner = PlayerOwner(session.generation), loadControl: LoadControl? = null): ExoPlayer {
         // Phase2's legacy renderer and isolated sidecars must survive every recreation.
         val replacement = ExoPlayer.Builder(context, object : DefaultRenderersFactory(context) {
             @Suppress("DEPRECATION")
@@ -309,20 +323,15 @@ class PlayerViewModel @Inject constructor(
             }
         }).setSeekBackIncrementMs(10_000L).setSeekForwardIncrementMs(10_000L)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource).experimentalParseSubtitlesDuringExtraction(false))
+            .apply { if (loadControl != null) setLoadControl(loadControl) }
             .build()
         replacement.addListener(object : Player.Listener {
-            private fun active() = !cleared && session.generation == generation && _player.value === replacement
+            private fun active() = !cleared && session.generation == owner.generation && _player.value === replacement
 
             override fun onPlaybackStateChanged(state: Int) {
                 if (!active()) return
                 if (state == Player.STATE_READY) {
-                    // A replacement reached READY, so a previously failed offline file is no
-                    // longer the active media. Future episode switches may use their own downloads.
-                    offlineRecoveryActive = false
-                    session.ready(replacement.currentPosition, replacement.duration)
-                    _error.value = null
-                    recovery.onPlayerReady()
-                    if (!_offline.value) prefetchNext()
+                    onReady(replacement)
                 } else if (state == Player.STATE_ENDED && episodeLoaded && !advancing && !loading) {
                     advancing = true
                     loadJob?.cancel()
@@ -365,10 +374,21 @@ class PlayerViewModel @Inject constructor(
         return replacement
     }
 
+    private fun onReady(player: ExoPlayer) {
+        // A replacement reached READY, so a previously failed offline file is no
+        // longer the active media. Future episode switches may use their own downloads.
+        offlineRecoveryActive = false
+        session.ready(player.currentPosition, player.duration)
+        _error.value = null
+        recovery.onPlayerReady()
+        if (!_offline.value) prefetchNext()
+    }
+
     private fun startRecovery() {
         if (cleared) return
         prefetched?.second?.cancel()
         prefetched = null
+        discardStandby()
         markersJob?.cancel()
         if (_offline.value || offlineRecoveryActive) {
             // A completed Room row may still point to a truncated/corrupt cache entry. Leave the
@@ -507,6 +527,12 @@ class PlayerViewModel @Inject constructor(
     }
 
     private suspend fun playOffline(ep: OfflineEpisode, generation: Int) {
+        applyOfflineEpisode(ep, generation)
+        play(ep.streamUri, ep.mimeType, ep.subtitles, generation = generation)
+    }
+
+    // A downloaded episode's title/picker/marker bookkeeping, shared by a load and a promotion.
+    private suspend fun applyOfflineEpisode(ep: OfflineEpisode, generation: Int) {
         offlineEpisode = ep
         offlineRecoveryActive = false
         idMal = ep.idMal
@@ -538,12 +564,42 @@ class PlayerViewModel @Inject constructor(
         // window permanently dead for that episode.
         knownMarkers = ep.markers
         markersFetched = false
-        play(ep.streamUri, ep.mimeType, ep.subtitles, generation = generation)
     }
 
     private suspend fun play(uri: String, mimeType: String?, subtitles: List<Subtitle>,
         headers: Map<String, String> = emptyMap(), generation: Int = session.generation) {
         val dataSource = playbackDataSource(headers, offline = _offline.value)
+        val media = buildMedia(uri, mimeType, subtitles, dataSource)
+
+        checkSession(generation)
+        val previous = currentPlayer
+        val replacement = createPlayer(dataSource)
+        replacement.setPlaybackSpeed(_speed.value)
+        replacement.volume = previous.volume
+        replacement.trackSelectionParameters = carriedTrackParameters(previous)
+        restoreTextChoice = textChoice != null
+        textGroups = emptyList()
+        _textTracks.value = emptyList()
+        currentUri = uri
+        _player.value = replacement
+        previous.release()
+        session.attach()
+        replacement.setMediaSource(media, session.positionMs)
+        replacement.playWhenReady = session.playWhenReady
+        // A prepare can remain in BUFFERING without ever emitting a fatal callback. Let the
+        // recovery watchdog retry this replacement when the user's intent is to keep playing.
+        recovery.onReplacementPrepared(replacement.playWhenReady)
+        replacement.prepare()
+    }
+
+    // The outgoing player's track parameters minus its text override (that names the old media's
+    // TrackGroup); captions stay off if the user turned them off.
+    private fun carriedTrackParameters(from: ExoPlayer) = from.trackSelectionParameters.buildUpon()
+        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, _textDisabled.value).build()
+
+    private suspend fun buildMedia(uri: String, mimeType: String?, subtitles: List<Subtitle>,
+        dataSource: CacheDataSource.Factory): MediaSource {
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSource)
             .experimentalParseSubtitlesDuringExtraction(false)
 
@@ -594,41 +650,22 @@ class PlayerViewModel @Inject constructor(
             subFactory.createMediaSource(subConfig, C.TIME_UNSET)
         }
 
-        val media: MediaSource =
-            if (subSources.isEmpty()) videoSource
+        return if (subSources.isEmpty()) videoSource
             else MergingMediaSource(*(listOf(videoSource) + subSources).toTypedArray())
-
-        checkSession(generation)
-        val previous = currentPlayer
-        val replacement = createPlayer(dataSource)
-        replacement.setPlaybackSpeed(_speed.value)
-        replacement.volume = previous.volume
-        replacement.trackSelectionParameters = previous.trackSelectionParameters.buildUpon()
-            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, _textDisabled.value).build()
-        restoreTextChoice = textChoice != null
-        textGroups = emptyList()
-        _textTracks.value = emptyList()
-        currentUri = uri
-        _player.value = replacement
-        previous.release()
-        session.attach()
-        replacement.setMediaSource(media, session.positionMs)
-        replacement.playWhenReady = session.playWhenReady
-        // A prepare can remain in BUFFERING without ever emitting a fatal callback. Let the
-        // recovery watchdog retry this replacement when the user's intent is to keep playing.
-        recovery.onReplacementPrepared(replacement.playWhenReady)
-        replacement.prepare()
     }
 
     // Resolve the next episode's stream in the background so the advance/Next transition isn't stalled
-    // on a fresh source resolve. One-shot per next-episode (STATE_READY fires repeatedly after seeks).
-    private fun prefetchNext() {
+    // on a fresh source resolve. One-shot per next-episode (STATE_READY fires repeatedly after seeks),
+    // unless the existing resolve is older than [maxAgeMs] — the pre-cache asks for a fresh link.
+    private fun prefetchNext(maxAgeMs: Long = Long.MAX_VALUE): Deferred<VideoStream?>? {
         val next = episodeNumber + 1
-        if (prefetched?.first == next) return
+        prefetched?.let { (episode, pending) ->
+            if (episode == next && SystemClock.elapsedRealtime() - prefetchedAtMs <= maxAgeMs) return pending
+        }
         prefetched?.second?.cancel()
-        val anime = detail ?: run { prefetched = null; return }
-        prefetched = next to viewModelScope.async(Dispatchers.IO) {
+        val anime = detail ?: run { prefetched = null; return null }
+        prefetchedAtMs = SystemClock.elapsedRealtime()
+        return viewModelScope.async(Dispatchers.IO) {
             // A failed speculative resolve is optional; cancellation must still stop its requests.
             optional {
                 coroutineContext.ensureActive()
@@ -638,7 +675,167 @@ class PlayerViewModel @Inject constructor(
                 coroutineContext.ensureActive()
                 streams.resolveStream(anime, next).also { coroutineContext.ensureActive() }
             }
+        }.also { prefetched = next to it }
+    }
+
+    // ---- Pre-cache next episode ---------------------------------------------------------------
+    //
+    // Near the end, resolve a FRESH link for the next episode (the READY-time prefetch is about a
+    // whole episode old by then, and tokenized links expire), build its media into a hidden, paused
+    // player, and let that buffer [STANDBY_BUFFER_US] once this episode has finished downloading, so
+    // the two never compete for bandwidth. The advance then promotes it instead of loading. Any
+    // failure just drops the standby; the ordinary advance path is untouched.
+
+    private fun maybePrecacheNext() {
+        if (advancing || !episodeLoaded) return
+        val next = episodeNumber + 1
+        val durationMs = session.durationMs
+        val remainingMs = durationMs - session.positionMs
+        // No _hasNext gate: a session started on a download doesn't know the episode count yet.
+        // buildStandby asks hasEpisode(), the same check the advance makes.
+        val wanted = precacheEnabled && autoPlayNextEnabled && session.prepared &&
+            durationMs > 0 && remainingMs <= STANDBY_KEEP_MS
+        if (!wanted) {
+            discardStandby()
+            return
         }
+        standby?.let { held ->
+            val expired = held.offline == null &&
+                SystemClock.elapsedRealtime() - held.resolvedAtMs > STANDBY_MAX_AGE_MS
+            if (held.episode != next || expired) discardStandby()
+        }
+        if (remainingMs > STANDBY_LEAD_MS || standby != null || standbyJob?.isActive == true) return
+        // A failed attempt (the source couldn't resolve) is retried at most once a minute.
+        val now = SystemClock.elapsedRealtime()
+        if (now - standbyAttemptAtMs < STANDBY_RETRY_MS) return
+        standbyAttemptAtMs = now
+        startStandby(next)
+    }
+
+    private fun startStandby(next: Int) {
+        val generation = session.generation
+        standbyJob = viewModelScope.launch {
+            val warm = optional { buildStandby(next, generation) } ?: return@launch
+            while (!standbyMayLoad()) delay(STANDBY_POLL_MS)
+            warm.prepare()
+        }
+    }
+
+    // Resolve and build (but don't prepare) the next episode's player. A downloaded copy needs no
+    // link. Registered as [standby] in the same main-thread step that creates the player, so a
+    // cancellation can never leak an unowned player.
+    private suspend fun buildStandby(next: Int, generation: Int): Standby? {
+        if (!hasEpisode(next)) return null
+        val offline = optional { downloads.getOffline(animeId, next) }
+        checkSession(generation)
+        var resolvedAtMs = SystemClock.elapsedRealtime()
+        var stream: VideoStream? = null
+        if (offline == null) {
+            val pending = prefetchNext(maxAgeMs = PREFETCH_FRESH_MS) ?: return null
+            resolvedAtMs = prefetchedAtMs
+            stream = try { pending.await() }
+                catch (cancelled: CancellationException) { coroutineContext.ensureActive(); null }
+            if (stream == null) {
+                // Don't let a failed resolve pass for a fresh one on the retry.
+                if (prefetched?.second === pending) prefetched = null
+                return null
+            }
+        }
+        checkSession(generation)
+        val uri = offline?.streamUri ?: checkNotNull(stream).url
+        val dataSource = playbackDataSource(stream?.headers.orEmpty(), offline = offline != null)
+        val media = buildMedia(uri, offline?.mimeType ?: stream?.mimeType,
+            offline?.subtitles ?: stream?.subtitles.orEmpty(), dataSource)
+        checkSession(generation)
+        val owner = PlayerOwner(INACTIVE_GENERATION)
+        val loadControl = StandbyLoadControl()
+        val player = createPlayer(dataSource, owner, loadControl)
+        player.setPlaybackSpeed(_speed.value)
+        player.volume = currentPlayer.volume
+        player.trackSelectionParameters = carriedTrackParameters(currentPlayer)
+        player.playWhenReady = false
+        // An expired link, or a device that won't open a second decoder, only drops the standby.
+        player.addListener(object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                if (standby?.player === player) discardStandby()
+            }
+        })
+        return Standby(next, player, owner, loadControl, media, uri,
+            skips = offline?.markers ?: stream?.skips.orEmpty(), offline = offline,
+            resolvedAtMs = resolvedAtMs).also { standby = it }
+    }
+
+    // Start the standby's download once this episode is fully buffered (Media3 buffers ~50s ahead,
+    // so roughly the last 50s), or in the final seconds anyway — but not while this episode is
+    // stalled for data (e.g. just after an outro skip): it needs the bandwidth first. Local media
+    // on either side needs no network, so it can start at once.
+    private fun standbyMayLoad(): Boolean {
+        if (_offline.value || standby?.offline != null) return true
+        val durationMs = session.durationMs
+        if (durationMs <= 0) return true
+        if (currentPlayer.bufferedPosition >= durationMs - BUFFERED_SLACK_MS) return true
+        return durationMs - session.positionMs <= STANDBY_FORCE_MS &&
+            currentPlayer.playbackState == Player.STATE_READY
+    }
+
+    // Claim the standby for [number], releasing any other.
+    private fun takeStandby(number: Int): Standby? {
+        val warm = standby?.takeIf { it.episode == number }
+        if (warm != null) standby = null
+        discardStandby()
+        return warm
+    }
+
+    private fun discardStandby() {
+        standbyJob?.cancel()
+        standbyJob = null
+        standby?.player?.release()
+        standby = null
+    }
+
+    // Put a pre-cached player on screen in place of a load: play()'s bookkeeping, minus the resolve
+    // and the buffering, which already happened while the previous episode was ending. False = it
+    // failed while hidden; the caller loads normally.
+    private suspend fun promote(warm: Standby, generation: Int): Boolean {
+        val player = warm.player
+        if (player.playerError != null) {
+            player.release()
+            return false
+        }
+        try {
+            val offline = warm.offline
+            if (offline != null) {
+                _offline.value = true
+                applyOfflineEpisode(offline, generation)
+            } else {
+                knownMarkers = warm.skips
+            }
+            checkSession(generation)
+        } catch (error: Throwable) {
+            player.release()
+            throw error
+        }
+        // Nothing below suspends, so the swap is atomic.
+        val previous = currentPlayer
+        warm.loadControl.capped = false
+        player.setPlaybackSpeed(_speed.value)
+        player.volume = previous.volume
+        player.trackSelectionParameters = carriedTrackParameters(previous)
+        restoreTextChoice = textChoice != null
+        textGroups = emptyList()
+        _textTracks.value = emptyList()
+        currentUri = warm.uri
+        prefetched = null   // this episode's link, now consumed
+        warm.owner.generation = generation
+        _player.value = player
+        previous.release()
+        session.attach()
+        warm.prepare()
+        player.playWhenReady = session.playWhenReady
+        // While hidden its callbacks were ignored: replay the ones that already happened.
+        if (!player.currentTracks.isEmpty) rebuildTextTracks(player.currentTracks)
+        if (player.playbackState == Player.STATE_READY) onReady(player)
+        return true
     }
 
     // Advance to the next episode within this screen when the current one ends, or end
@@ -669,6 +866,8 @@ class PlayerViewModel @Inject constructor(
         val outgoingPosition = session.positionMs
         val outgoingDuration = session.durationMs
         val saveOutgoing = episodeLoaded
+        // A pre-cached player for exactly this episode replaces the load below; any other is released.
+        val warm = takeStandby(number)
         recovery.reset()
         markersJob?.cancel()
         currentPlayer.pause()
@@ -695,11 +894,16 @@ class PlayerViewModel @Inject constructor(
         currentUri = null
         updateNavState()
         // Keep the captured episode number even if teardown occurs while Room saves this snapshot.
-        if (outgoing != null && saveOutgoing) appScope.async {
-            persist(outgoing, outgoingEpisode, outgoingPosition, outgoingDuration)
-        }.await()
-        checkSession(session.generation)
-        loadSafely(session.generation)
+        try {
+            if (outgoing != null && saveOutgoing) appScope.async {
+                persist(outgoing, outgoingEpisode, outgoingPosition, outgoingDuration)
+            }.await()
+            checkSession(session.generation)
+        } catch (error: Throwable) {
+            warm?.player?.release()
+            throw error
+        }
+        if (warm == null || !promote(warm, session.generation)) loadSafely(session.generation)
     }
 
     // Is there an episode [number] to advance into? A downloaded copy always counts; otherwise it must
@@ -901,6 +1105,7 @@ class PlayerViewModel @Inject constructor(
         cleared = true
         loadJob?.cancel()
         prefetched?.second?.cancel()
+        discardStandby()
         markersJob?.cancel()
         recovery.close()
         // Only persist if the current media matches episodeNumber (not mid-switch) — the outgoing
@@ -909,10 +1114,62 @@ class PlayerViewModel @Inject constructor(
         currentPlayer.release()
     }
 
+    /** The episode generation a player's callbacks belong to; mutable so a standby can be promoted. */
+    private class PlayerOwner(var generation: Int)
+
+    /** Caps a hidden standby's buffer; once promoted ([capped] = false) it's the default control. */
+    private class StandbyLoadControl : DefaultLoadControl() {
+        @Volatile var capped = true
+
+        override fun shouldContinueLoading(parameters: LoadControl.Parameters): Boolean =
+            super.shouldContinueLoading(parameters) &&
+                !(capped && parameters.bufferedDurationUs >= STANDBY_BUFFER_US)
+    }
+
+    /** The next episode's pre-cached player, its unprepared media, and what its promotion needs. */
+    private class Standby(
+        val episode: Int,
+        val player: ExoPlayer,
+        val owner: PlayerOwner,
+        val loadControl: StandbyLoadControl,
+        private val media: MediaSource,
+        val uri: String,
+        val skips: List<SkipMarker>,
+        val offline: OfflineEpisode?,
+        val resolvedAtMs: Long,
+    ) {
+        private var prepared = false
+
+        fun prepare() {
+            if (prepared) return
+            prepared = true
+            player.setMediaSource(media, 0L)
+            player.prepare()
+        }
+    }
+
     private companion object {
         const val END_THRESHOLD_MS = 5_000L
         const val MARKER_GRACE_MS = 2_500L
         const val SNIFF_TIMEOUT_MS = 1_500L
+
+        // Pre-cache timing: resolve the next episode this long before the end, keep a standby
+        // while within STANDBY_KEEP_MS of it (seeking further back releases it), and start its
+        // download by STANDBY_FORCE_MS before the end even if this episode is still downloading.
+        const val STANDBY_LEAD_MS = 120_000L
+        const val STANDBY_KEEP_MS = 300_000L
+        const val STANDBY_FORCE_MS = 20_000L
+        const val STANDBY_POLL_MS = 500L
+        const val STANDBY_RETRY_MS = 60_000L
+        // bufferedPosition can stop a hair short of the duration once fully loaded.
+        const val BUFFERED_SLACK_MS = 1_000L
+        // A link older than this is re-resolved before a standby uses it, and an unpromoted online
+        // standby older than STANDBY_MAX_AGE_MS (e.g. paused at the credits) is rebuilt.
+        const val PREFETCH_FRESH_MS = 180_000L
+        const val STANDBY_MAX_AGE_MS = 600_000L
+        // Enough to ride out a cold CDN connection's slow start; more buys nothing once promoted.
+        const val STANDBY_BUFFER_US = 15_000_000L
+        const val INACTIVE_GENERATION = -1
 
         // Duplicated from :data's DownloadModule rather than shared: :app must not import
         // com.anilocal.app.data.*, and a user-agent string is not domain logic.

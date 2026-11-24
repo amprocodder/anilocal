@@ -12,6 +12,13 @@ interface SettingsRepository {
     val autoPlayNext: Flow<Boolean>
     suspend fun setAutoPlayNext(enabled: Boolean)
 
+    /**
+     * When true (and [autoPlayNext] is on), the player buffers the start of the next episode near
+     * the end of the current one so the advance starts without a load.
+     */
+    val precacheNextEpisode: Flow<Boolean>
+    suspend fun setPrecacheNextEpisode(enabled: Boolean)
+
     /** When true, downloads only run on unmetered (WiFi) networks. */
     val wifiOnlyDownloads: Flow<Boolean>
     suspend fun setWifiOnlyDownloads(enabled: Boolean)

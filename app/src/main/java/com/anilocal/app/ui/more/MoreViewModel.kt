@@ -38,6 +38,9 @@ class MoreViewModel @Inject constructor(
     val autoPlayNext: StateFlow<Boolean> =
         settings.autoPlayNext.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    val precacheNext: StateFlow<Boolean> =
+        settings.precacheNextEpisode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
     val wifiOnly: StateFlow<Boolean> =
         settings.wifiOnlyDownloads.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
@@ -81,6 +84,7 @@ class MoreViewModel @Inject constructor(
 
     private val autoSkipWrites = ConflatedSetting(viewModelScope, settings::setAutoSkip)
     private val autoPlayWrites = ConflatedSetting(viewModelScope, settings::setAutoPlayNext)
+    private val precacheWrites = ConflatedSetting(viewModelScope, settings::setPrecacheNextEpisode)
     private val wifiWrites = ConflatedSetting(viewModelScope, settings::setWifiOnlyDownloads)
     private val qualityWrites = ConflatedSetting(viewModelScope, settings::setDownloadQuality)
     private val scaleWrites = ConflatedSetting(viewModelScope, settings::setSubtitleScale)
@@ -92,6 +96,7 @@ class MoreViewModel @Inject constructor(
 
     fun setAutoSkip(enabled: Boolean) = autoSkipWrites.set(enabled)
     fun setAutoPlayNext(enabled: Boolean) = autoPlayWrites.set(enabled)
+    fun setPrecacheNext(enabled: Boolean) = precacheWrites.set(enabled)
     fun setWifiOnly(enabled: Boolean) = wifiWrites.set(enabled)
     fun setDownloadQuality(quality: DownloadQuality) = qualityWrites.set(quality)
     fun setSubtitleScale(scale: Float) = scaleWrites.set(scale)
