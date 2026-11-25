@@ -22,7 +22,7 @@ import com.anilocal.app.data.metadata.mal.MalApi
 import com.anilocal.app.data.metadata.mal.MalRepositoryImpl
 import com.anilocal.app.data.remote.JsonHttp
 import com.anilocal.app.data.remote.NetworkModule
-import com.anilocal.app.data.settings.DataStoreSettingsRepository
+import com.anilocal.app.data.settings.SettingsRepositoryImpl
 import com.anilocal.app.data.skip.AniSkipApi
 import com.anilocal.app.data.skip.AniSkipRepository
 import com.anilocal.app.data.source.AutoSourceSelector
@@ -80,7 +80,7 @@ class DataGraph(context: Context) {
     private val database by lazy { DatabaseModule.database(app) }
     private val cacheDatabase by lazy { DatabaseModule.cacheDatabase(app) }
     private val jsonCache by lazy { JsonCache(cacheDatabase.cacheDao(), appScope) }
-    val settings: SettingsRepository by lazy { DataStoreSettingsRepository(app) }
+    val settings: SettingsRepository by lazy { SettingsRepositoryImpl(app, appScope) }
     val library: LibraryRepository by lazy { RoomLibraryRepository(database.libraryDao()) }
     val progress: ProgressRepository by lazy { RoomProgressRepository(database.progressDao()) }
 

@@ -3,7 +3,7 @@ package com.anilocal.app.domain.repo
 import com.anilocal.app.domain.model.DownloadQuality
 import kotlinx.coroutines.flow.Flow
 
-/** User settings, persisted via DataStore. */
+/** User settings, persisted in the app's settings file. */
 interface SettingsRepository {
     val autoSkip: Flow<Boolean>
     suspend fun setAutoSkip(enabled: Boolean)

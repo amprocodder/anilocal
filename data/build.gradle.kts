@@ -25,14 +25,13 @@ dependencies {
     // Vendored Aniyomi source-api + AniyomiSourceAdapter live here. `implementation` (not `api`)
     // so the vendored eu.kanade.* types never leak onto :app's classpath — the seam stays intact.
     implementation(project(":extensions"))
+    implementation(libs.coroutines.core)
 
 
 
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
-
-    implementation(libs.datastore.preferences)
 
     // HTTP + JSON: the same OkHttp and kotlinx.serialization the extension host already ships
     // (extensions link against them), so the data layer adds no library of its own for either.

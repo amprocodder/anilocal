@@ -31,7 +31,7 @@ internal class ConflatedSetting<T>(scope: CoroutineScope, persist: suspend (T) -
                     latest = queued.getOrThrow()
                 }
                 // Do not remember a last-written value: another screen may change this setting.
-                // Preference writes are tiny but can race DataStore/extension startup. Retry a
+                // Preference writes are tiny but can race settings/extension startup. Retry a
                 // transient failure while preserving cancellation so leaving the screen never
                 // leaves a worker running against a dead ViewModel.
                 var attempt = 0
