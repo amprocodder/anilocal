@@ -114,20 +114,42 @@ class AniyomiSourceAdapter(
 
     override suspend fun resolve(server: VideoServer): List<VideoStream> = withContext(Dispatchers.IO) {
         val sEpisode = server.episodeId.toSEpisode()
-        // Classic ext-lib-14 path first — the whole yuzono catalog implements only getVideoList(episode),
-        // so this resolves in a single request instead of first throwing AbstractMethodError on the
-        // lib-16 hoster API. Fall back to the lib-16 getHosterList → getVideoList(hoster) pipeline for
-        // sources that implement it. Wrapped so an unimplemented-API AbstractMethodError (lib mismatch)
-        // degrades to empty, never a crash.
-        val videos = sourceOrNull { src.getVideoList(sEpisode) }?.takeIf { it.isNotEmpty() }
-            ?: resolveViaHosters(sEpisode)
+        // Pick the pipeline the extension actually implements. The classic ext-lib-14 path
+        // (getVideoList(episode)) is the default — most of the yuzono catalog implements only that,
+        // and it resolves in a single request. A source that implements the lib-16 hoster API instead
+        // goes hosters-first: for it the classic call only reaches AnimeHttpSource's default, which
+        // GETs baseUrl + episode.url and hands the page to a videoListParse it doesn't implement — a
+        // wasted round trip (or, with a token-style url, an instant "Invalid URL host"). Each path
+        // falls back to the other, and every call is wrapped so an unimplemented-API
+        // AbstractMethodError (lib mismatch) degrades to empty, never a crash.
+        val videos = if (implementsHosterApi) {
+            resolveViaHosters(sEpisode).ifEmpty { sourceOrNull { src.getVideoList(sEpisode) }.orEmpty() }
+        } else {
+            sourceOrNull { src.getVideoList(sEpisode) }?.takeIf { it.isNotEmpty() }
+                ?: resolveViaHosters(sEpisode)
+        }
         // Extensions occasionally return a placeholder Video with an empty URL when a hoster
         // failed. Drop it here so the source pipeline can try another source instead of handing an
         // unplayable item to Media3 (which would force a visible player restart).
         videos.mapNotNull { it.toVideoStreamOrNull() }
     }
 
-    /** ext-lib-16 fallback: the first hoster that yields videos wins (sources order them by preference). */
+    /**
+     * Whether the extension's own classes (not the vendored base classes it inherits) implement the
+     * ext-lib-16 hoster API. Shared base classes an extension bundles (multisrc, lib) count as its own.
+     */
+    private val implementsHosterApi: Boolean by lazy {
+        runCatching {
+            var c: Class<*>? = src.javaClass
+            while (c != null && !c.name.startsWith(HOST_SOURCE_API)) {
+                if (c.declaredMethods.any { it.name in HOSTER_API_METHODS }) return@runCatching true
+                c = c.superclass
+            }
+            false
+        }.getOrDefault(false)
+    }
+
+    /** ext-lib-16 pipeline: the first hoster that yields videos wins (sources order them by preference). */
     private suspend fun resolveViaHosters(sEpisode: SEpisode): List<Video> {
         val hosters = sourceOrEmpty { src.getHosterList(sEpisode) }
         for (hoster in hosters) {
@@ -333,6 +355,12 @@ class AniyomiSourceAdapter(
 
         // Control-char delimiter that never appears in URLs/episode names.
         private const val EP = '\u0001' // SEpisode url / episode_number, packed into Episode.id
+
+        /** The vendored source API's package: the host's base classes, where the class walk stops. */
+        private const val HOST_SOURCE_API = "eu.kanade.tachiyomi.animesource."
+        private val HOSTER_API_METHODS = setOf(
+            "getHosterList", "hosterListRequest", "hosterListParse", "hosterListSelector", "hosterFromElement",
+        )
 
         private fun encodeEpisode(url: String, number: Float): String = "$url$EP$number"
     }
