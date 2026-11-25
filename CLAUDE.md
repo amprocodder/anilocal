@@ -267,8 +267,16 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   ids + match confidence, 4h) to cut round-trips, never server/stream URLs (tokenized/short-lived); a
   cached match that stops resolving falls back to one live re-run which overwrites the entry on success.
   Key by **AniList id, never title** (a remake shares its original's display title). A `detail:` row
-  cached before `altTitles` existed is refreshed on its next read (`JsonCache.cached`'s `outdated`). Posters survive offline via the app-wide Coil
-  loader in `AniLocalApp` (`respectCacheHeaders(false)` + 256 MB disk cache).
+  cached before `altTitles` existed is refreshed on its next read (`JsonCache.cached`'s `outdated`). Posters survive offline via the app's own
+  image loader (`app/.../ui/image/`, no Coil): `RemoteImage` is the composable every screen uses — it
+  fills the size its modifier gives it and loads + draws in one modifier node (an arriving image redraws
+  without recomposing; leaving the screen cancels the load). `ImageLoader` (built lazily by `AniLocalApp`,
+  which implements `ImageLoader.Provider`) keeps a memory LRU checked synchronously on the main thread, a
+  256 MB disk cache of the original bytes served regardless of cache headers, one shared download per
+  URL over the shared OkHttp client, and decodes off-main, downsampled to the drawn size, as hardware
+  bitmaps. `ImageDiskCache` keeps **Coil 2's file layout** (`cache/image_cache/<sha256(url) hex>.1`) so
+  images cached by older builds still render offline — keep those names. In a lazy list the node is
+  reused across items: `onReset` must keep the measured size (a reused item isn't remeasured).
 
 - **One shared Media3 `Cache`** (`data/.../download/DownloadModule.kt`) is written by the
   `DownloadManager` and read back by the player's `CacheDataSource.Factory` (built per stream in

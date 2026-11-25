@@ -51,7 +51,7 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   streams for AniList-browsed titles. **Browse extensions** (Settings → Browse extensions) is where you add
   extension repos (`index.min.json`) and install sources in-app; **Install recommended sources**
   in Settings is an explicit one-tap opt-in for a small community-recommended set.
-- Compose + Material3, Coil images; no DI framework (a hand-written object graph) and hand-written
+- Compose + Material3 and a hand-written image loader; no DI framework (a hand-written object graph) and hand-written
   navigation (typed routes, a back stack per tab, predictive back); HTTP and JSON via OkHttp 5 +
   kotlinx.serialization (the
   libraries extensions already need), with a small hand-written JSON client instead of Retrofit/Moshi.
