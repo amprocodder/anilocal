@@ -150,10 +150,13 @@ Four Gradle modules with a strict, one-way dependency direction:
   on it). A library extensions call that isn't listed there is stripped from optimized builds only —
   debug still works — so add any new one to that file. The vendored `parseAs` uses Kotlin context *parameters*
   (`context(json: Json)`, as upstream does; same compiled signature as the old context receivers).
-  `AniyomiSourceAdapter.resolve()` tries the ext-lib-14 `getVideoList(episode)` path **first**, falling
-  back to the lib-16 `getHosterList → getVideoList(hoster)` pipeline — classic-first avoids an
-  `AbstractMethodError` on lib-14 sources, and every source call is `runCatching`-wrapped so a
-  lib-mismatched extension degrades to empty. The adapter also implements `preferences()`/`setPreference()`
+  `AniyomiSourceAdapter.resolve()` picks the pipeline the extension implements: the ext-lib-14
+  `getVideoList(episode)` path by default (classic-first avoids an `AbstractMethodError` on lib-14
+  sources), but **hosters-first** (`getHosterList → getVideoList(hoster)`) when the extension's own
+  classes declare the lib-16 hoster API (`implementsHosterApi`, a reflective walk that stops at the
+  vendored `eu.kanade.tachiyomi.animesource.*` base classes) — for those the classic call only reaches
+  `AnimeHttpSource`'s default, a wasted `GET baseUrl + episode.url`. Each path falls back to the other,
+  and every source call is `runCatching`-wrapped so a lib-mismatched extension degrades to empty. The adapter also implements `preferences()`/`setPreference()`
   by building a real androidx `PreferenceScreen` and reading/writing the source's own `source_<id>`
   SharedPreferences. The vendored `network/interceptor/CloudflareInterceptor` (+ `WebViewInterceptor`,
   `util/system/WebViewUtil`) is wired into NetworkHelper's single client, so the **Cloudflare bypass is
@@ -447,7 +450,9 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   matched confidently, is kept on a weak result rather than re-raced every episode); (2) on a pin miss/fail, **races**
   the top-K(≤4) sources ranked by a persisted scoreboard (`srcstats:<sourceId>`: latency EWMA that moves
   only on success ÷ Laplace-smoothed success rate), staggered 300 ms, gated by a shared `Semaphore(3)`,
-  12 s per candidate / 15 s overall; the FIRST *strong* success (non-empty **and** a confident title
+  12 s per candidate / 15 s overall (each probe runs detached and is *awaited* under its deadline —
+  a blocking lib-14 call or a 30 s Cloudflare latch ignores cancellation, so a `withTimeout` around the
+  call itself never fired on time); the FIRST *strong* success (non-empty **and** a confident title
   match) wins immediately, unconfident "weak" ones (a site's unverified top hit) are a fallback only if
   nothing strong lands. Probes run in a
   scope **detached** from the caller (a child of `appScope`) so a slow blocking lib-14 loser can't hold
