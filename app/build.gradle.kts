@@ -17,9 +17,6 @@ android {
         versionCode = 3
         versionName = "0.3.0"
         vectorDrawables { useSupportLibrary = true }
-
-        // Optional features (blank = no-op). See README. (MAL sync is keyless — username only.)
-        buildConfigField("String", "TMDB_API_KEY", "\"${project.findProperty("TMDB_API_KEY") ?: ""}\"")
     }
 
     // Debug builds are signed with the COMMITTED app/debug.keystore (a standard, non-secret
@@ -57,7 +54,6 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures {
         compose = true
-        buildConfig = true
     }
 }
 

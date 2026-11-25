@@ -124,7 +124,7 @@ Four Gradle modules with a strict, one-way dependency direction:
   installer). The `AnimeSource` seam (`source/`) also defines
   `SourcePreference` (sealed: Toggle/EditText/Select/MultiSelect) — a UI-agnostic mapping of an
   extension's settings so `:app` can render/persist them without touching `androidx.preference`/`eu.kanade.*`.
-- **`:data`** — Android library. *All* repository implementations live here: AniList/TMDB/MAL APIs,
+- **`:data`** — Android library. *All* repository implementations live here: AniList/MAL APIs,
   AniSkip, Room, DataStore, the Media3 download stack, the source registry, the
   extension-repo browse/install impls, and the Hilt wiring (`di/AppModule`). Depends on `:domain` and
   `:extensions`.
@@ -201,12 +201,11 @@ subtitles**, so captions on lower renditions aren't lost to the height sort → 
 
 The single `@Binds` module is **`AppModule` (in `:data`, package `com.anilocal.app.di`)**, which
 `@Binds` every domain interface → `:data` impl. `:data` additionally has three `@Provides` `object`
-modules under `com.anilocal.app.data.*`: `NetworkModule` (Retrofit/Moshi/OkHttp + the five APIs —
-AniList/AniSkip/TMDB/MAL/extension-repo), `DatabaseModule` (Room), and `DownloadModule` (the Media3
+modules under `com.anilocal.app.data.*`: `NetworkModule` (Retrofit/Moshi/OkHttp + the four APIs —
+AniList/AniSkip/MAL/extension-repo), `DatabaseModule` (Room), and `DownloadModule` (the Media3
 cache/manager stack). Adding a new repo/source
-impl → add a `@Binds` in `AppModule`. **`:app` has no DI module:** build-time keys (currently just
-`TMDB_API_KEY`) live only in `:app`'s `BuildConfig`, and nothing bridges `:app`'s
-`BuildConfig` into `:data`. If a future data-layer impl needs an `:app` build-time key, add a small
+impl → add a `@Binds` in `AppModule`. **`:app` has no DI module and no build-time keys** (no module
+generates a `BuildConfig`). If a future data-layer impl needs an `:app` build-time key, add a small
 `@Provides @Named(...)` Hilt module in `:app` to surface it (the now-removed `AppConfigModule` did this
 for the old MAL client id).
 
@@ -365,11 +364,8 @@ for the old MAL client id).
   mirrors into the play intent. A call is a *transient* loss: playback is held while still READY (so the
   recovery watchdog ignores it) and resumes on its own.
 
-- **Optional features no-op when unconfigured.** TMDB artwork is gated on build-time
-  config that defaults to blank; **MAL sync needs no config at all** (username only). Build-time keys flow
-  `gradle.properties` (or `~/.gradle/gradle.properties`) → `app/build.gradle.kts` `buildConfigField` →
-  `BuildConfig` — which **only `:app` generates** (`buildConfig = true` is set there, not in `:data`).
-  Each feature consumes its config differently:
+- **Optional features no-op when unconfigured.** **MAL sync needs no config at all** (username only),
+  and nothing needs a build-time key:
   - **MAL sync** uses **no API key and no OAuth** — it mirrors the user's PUBLIC list from MAL's own
     `load.json` page endpoint (`myanimelist.net/animelist/{username}/load.json?status=7`), by **username
     only** (entered in Settings → DataStore). Per-entry status is MAL's numeric code, mapped in
@@ -381,8 +377,7 @@ for the old MAL client id).
     MAL mirror (deduped by MAL id, local wins); MAL-only rows get a synthetic `mal-<malId>` id, so opening
     one must first resolve `catalog.anilistIdForMal(malId)` before navigating — the detail route is keyed by
     **AniList id** (`DetailsScreen` does `animeId.toInt()`), and a miss shows a "not found" Toast.
-  - **TMDB** is a documented *scaffold* (`data/.../metadata/tmdb/TmdbApi.kt`) — it doesn't consume its key
-    yet (AniList already supplies artwork). Code paths must stay functional with all of these absent.
+  Code paths must stay functional with MAL unconfigured.
 
 - **Catalog vs. source are separate concerns.** AniList (`CatalogRepository`) provides the *metadata*
   catalog with no API key; the bound `AnimeSource` provides the *playable streams*. `CatalogRepository` is

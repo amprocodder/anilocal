@@ -35,7 +35,7 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   an episode the next one is resolved and buffered in a hidden player, so the advance starts
   instantly instead of loading. Turn pre-cache off to load the next episode only when one ends.
 - **Real catalog** via **AniList** GraphQL (trending on Home, search in Explore, full detail
-  pages). No API key needed. *(TMDB wired as optional artwork enrichment — see config.)*
+  pages). No API key needed.
 - **Related titles** on every detail page: the franchise's prequels, sequels, seasons, movies
   and side stories in watch-order (AniList relations), each tagged and one tap away.
 - **Player** (Media3/ExoPlayer) with the **Skip-Intro/Outro button** (`FreakIntroButton`
@@ -52,10 +52,6 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   extension repos (`index.min.json`) and install sources in-app; **Install recommended sources**
   in Settings is an explicit one-tap opt-in for a small community-recommended set.
 - Hilt DI, Compose + Material3, Coil images, OkHttp 5/Retrofit/Moshi.
-
-## Configure optional features (the app builds & runs without these)
-- **TMDB artwork** (optional): get a free v3 key at themoviedb.org, add to
-  `~/.gradle/gradle.properties` or the project `gradle.properties`: `TMDB_API_KEY=xxxx`.
 
 ## Extension sources & posture
 - **No backend, no ads, no signature spoofing.** AniList stays the only browse layer; extensions
@@ -85,7 +81,7 @@ The dependency direction is compile-enforced (not just convention):
 
 - **`:domain`** — pure Kotlin (`kotlin("jvm")`, no Android dependency). Models, repository
   interfaces, the `AnimeSource` seam. `import android.*` here won't compile — that's the boundary.
-- **`:data`** — Android library. All repository implementations: AniList/TMDB, AniSkip, Room,
+- **`:data`** — Android library. All repository implementations: AniList, AniSkip, Room,
   DataStore, Media3 downloads, the source registry, extension-repo
   browse/install, and the Hilt wiring (`di/AppModule`). Depends on `:domain` + `:extensions`.
 - **`:extensions`** — Android library hosting Aniyomi extensions: the vendored Aniyomi source-api
