@@ -10,7 +10,9 @@ plugins {
 // Hilt-free — Injekt is the DI mechanism inside the vendored source classes, separate from Hilt.
 android {
     namespace = "com.anilocal.app.extensions"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) { minorApiLevel = 2 }
+    }
 
     defaultConfig {
         minSdk = 24
