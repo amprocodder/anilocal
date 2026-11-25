@@ -343,6 +343,15 @@ for the old MAL client id).
   (`smallestScreenWidthDp >= 600`). Back on the watch page leaves the player. The video `Box` stays
   the first child of one `BoxWithConstraints` and only its size changes, so the `PlayerView`/SurfaceView
   is never recreated on a mode switch — keep it that way (no Column/Row swap around it).
+  **Headset/Bluetooth play-pause** rides a Media3 `MediaSession` owned by `PlayerViewModel` (no
+  service, no notification; Media3 registers its own media-button receiver at runtime). Every player
+  swap goes through `swapPlayer`, which re-points the session — put a new player on screen any other
+  way and the buttons drive a released one. The session sees a `SessionPlayer` (`MediaButtons.kt`) that
+  exposes only play/pause and routes both to `setPlaying`, the same path as the overlay button.
+  Everything else is withheld: Media3's play handler `prepare()`s an IDLE player (one still connecting
+  or in recovery), and seek-to-next on a single item jumps to the end and auto-advances. A toggle key
+  (`PLAY_PAUSE`/`HEADSETHOOK`) is intercepted in the session callback and calls `togglePlay()`, because
+  Media3 reads an IDLE player as paused, so the button could never pause a loading episode.
 
 - **Optional features no-op when unconfigured.** TMDB artwork is gated on build-time
   config that defaults to blank; **MAL sync needs no config at all** (username only). Build-time keys flow
