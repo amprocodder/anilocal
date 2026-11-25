@@ -1,5 +1,6 @@
 package com.anilocal.app.ui.common
 
+import com.anilocal.app.ui.icons.AppIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -11,9 +12,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalTextStyle
@@ -132,7 +130,7 @@ fun PosterCard(
                         .padding(4.dp),
                 ) {
                     Icon(
-                        Icons.Filled.Close,
+                        AppIcons.Filled.Close,
                         contentDescription = "Remove from Continue Watching",
                         tint = Color.White,
                         modifier = Modifier.size(14.dp),
@@ -165,7 +163,7 @@ fun PosterCard(
                         .padding(4.dp),
                 ) {
                     Icon(
-                        Icons.Filled.DownloadDone,
+                        AppIcons.Filled.DownloadDone,
                         contentDescription = "Downloaded",
                         tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(14.dp),

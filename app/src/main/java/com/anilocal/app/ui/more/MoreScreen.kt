@@ -1,15 +1,7 @@
 package com.anilocal.app.ui.more
 
+import com.anilocal.app.ui.icons.AppIcons
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.material.icons.outlined.Sync
-import androidx.compose.material.icons.outlined.ClosedCaption
-import androidx.compose.material.icons.outlined.HighQuality
-import androidx.compose.material.icons.outlined.PlayCircle
-import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.Extension
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Hub
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -43,10 +35,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -122,7 +110,7 @@ fun MoreScreen(
         // with no sources), so it shouldn't sit below every playback preference.
         item(key = "sources", contentType = "settings") {
             SectionCard(
-                Icons.Outlined.Hub,
+                AppIcons.Outlined.Hub,
                 "Streaming source",
                 "Where video is resolved from. Browsing and metadata always come from AniList.",
             ) {
@@ -173,7 +161,7 @@ fun MoreScreen(
                     ) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                Icons.Outlined.Info, null,
+                                AppIcons.Outlined.Info, null,
                                 tint = MaterialTheme.colorScheme.tertiary,
                                 modifier = Modifier.size(20.dp),
                             )
@@ -205,7 +193,7 @@ fun MoreScreen(
                         }
                         if (src.configurable) {
                             IconButton(onClick = { onConfigureSource(src.id) }) {
-                                Icon(Icons.Filled.Settings, contentDescription = "Source settings")
+                                Icon(AppIcons.Filled.Settings, contentDescription = "Source settings")
                             }
                         }
                     }
@@ -220,7 +208,7 @@ fun MoreScreen(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                     ) {
-                        Icon(Icons.Outlined.Extension, null, modifier = Modifier.size(18.dp))
+                        Icon(AppIcons.Outlined.Extension, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("Browse extensions", fontWeight = FontWeight.SemiBold)
                     }
@@ -233,7 +221,7 @@ fun MoreScreen(
                         if (provisioning) {
                             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                         } else {
-                            Icon(Icons.Outlined.AutoAwesome, null, modifier = Modifier.size(18.dp))
+                            Icon(AppIcons.Outlined.AutoAwesome, null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
                             Text("Install recommended sources")
                         }
@@ -252,7 +240,7 @@ fun MoreScreen(
             val autoPlayNext by vm.autoPlayNext.collectAsStateWithLifecycle()
             val precacheNext by vm.precacheNext.collectAsStateWithLifecycle()
             val wifiOnly by vm.wifiOnly.collectAsStateWithLifecycle()
-            SectionCard(Icons.Outlined.PlayCircle, "Playback") {
+            SectionCard(AppIcons.Outlined.PlayCircle, "Playback") {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Auto-skip intro/outro", style = MaterialTheme.typography.bodyLarge)
@@ -300,7 +288,7 @@ fun MoreScreen(
         item(key = "quality", contentType = "settings") {
             val downloadQuality by vm.downloadQuality.collectAsStateWithLifecycle()
             SectionCard(
-                Icons.Outlined.HighQuality,
+                AppIcons.Outlined.HighQuality,
                 "Default download quality",
                 "Used when a source offers several qualities.",
             ) {
@@ -314,7 +302,7 @@ fun MoreScreen(
                             onClick = { vm.setDownloadQuality(q) },
                             label = { Text(q.label) },
                             leadingIcon = if (downloadQuality == q) {
-                                { Icon(Icons.Filled.Check, null, Modifier.size(16.dp)) }
+                                { Icon(AppIcons.Filled.Check, null, Modifier.size(16.dp)) }
                             } else null,
                             shape = RoundedCornerShape(100.dp),
                             colors = FilterChipDefaults.filterChipColors(
@@ -331,7 +319,7 @@ fun MoreScreen(
         item(key = "subtitles", contentType = "settings") {
             val subtitleScale by vm.subtitleScale.collectAsStateWithLifecycle()
             val subtitleBackground by vm.subtitleBackground.collectAsStateWithLifecycle()
-            SectionCard(Icons.Outlined.ClosedCaption, "Subtitles") {
+            SectionCard(AppIcons.Outlined.ClosedCaption, "Subtitles") {
                 var sliderScale by remember(subtitleScale) { mutableStateOf(subtitleScale) }
                 // Live preview — reflects the in-progress slider value and the background toggle so the
                 // effect is visible before leaving the screen. Mirrors the player's white-text /
@@ -357,13 +345,13 @@ fun MoreScreen(
             // MyAnimeList Sync — expandable subsection.
             var malExpanded by rememberSaveable { mutableStateOf(false) }
             SectionCard(
-                Icons.Outlined.Sync,
+                AppIcons.Outlined.Sync,
                 "MyAnimeList Sync",
                 "Mirror your public MAL list into My List",
                 onHeaderClick = { malExpanded = !malExpanded },
                 trailing = {
                     Icon(
-                        if (malExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        if (malExpanded) AppIcons.Filled.ExpandLess else AppIcons.Filled.ExpandMore,
                         if (malExpanded) "Collapse" else "Expand",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

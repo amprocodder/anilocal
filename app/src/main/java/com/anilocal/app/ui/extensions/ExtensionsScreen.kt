@@ -1,9 +1,6 @@
 package com.anilocal.app.ui.extensions
 
-import androidx.compose.material.icons.outlined.Link
-import androidx.compose.material.icons.outlined.Inventory2
-import androidx.compose.material.icons.outlined.Extension
-import androidx.compose.material.icons.outlined.VerifiedUser
+import com.anilocal.app.ui.icons.AppIcons
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
@@ -29,9 +26,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
@@ -338,7 +332,7 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
                 title = { Text("Extensions") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                        Icon(AppIcons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 },
                 actions = { TextButton(onClick = vm::load, enabled = !loading) { Text("Reload") } },
@@ -359,7 +353,7 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
             ) {
                 Row(Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
                     Icon(
-                        Icons.Outlined.VerifiedUser, null,
+                        AppIcons.Outlined.VerifiedUser, null,
                         tint = MaterialTheme.colorScheme.tertiary,
                         modifier = Modifier.size(20.dp),
                     )
@@ -409,7 +403,7 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel
                     item(key = "no-repos", contentType = "hint") {
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                             EmptyState(
-                                Icons.Outlined.Extension,
+                                AppIcons.Outlined.Extension,
                                 "No repos added yet",
                                 "AniLocal ships with no sources. Add an extension repo URL above, " +
                                     "or use “Install recommended sources” in Settings.",
@@ -575,7 +569,7 @@ private fun RepoSection(
                         .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(11.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Outlined.Inventory2, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(20.dp))
+                    Icon(AppIcons.Outlined.Inventory2, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(20.dp))
                 }
                 Column(Modifier.padding(start = 12.dp)) {
                     Text("Repositories", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -591,7 +585,7 @@ private fun RepoSection(
                 Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                     Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            Icons.Outlined.Link, null,
+                            AppIcons.Outlined.Link, null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
                         )
@@ -603,7 +597,7 @@ private fun RepoSection(
                             modifier = Modifier.weight(1f).padding(start = 10.dp),
                         )
                         IconButton(onClick = { onRemove(url) }) {
-                            Icon(Icons.Filled.Close, contentDescription = "Remove repo")
+                            Icon(AppIcons.Filled.Close, contentDescription = "Remove repo")
                         }
                     }
                 }

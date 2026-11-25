@@ -1,7 +1,6 @@
 package com.anilocal.app.ui.downloads
 
-import androidx.compose.material.icons.outlined.DownloadForOffline
-import androidx.compose.material.icons.outlined.SearchOff
+import com.anilocal.app.ui.icons.AppIcons
 import com.anilocal.app.ui.common.EmptyState
 import com.anilocal.app.ui.common.ScreenHeader
 import androidx.compose.foundation.clickable
@@ -20,13 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -261,7 +253,7 @@ fun DownloadsScreen(
             ScreenHeader("Downloads")
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 EmptyState(
-                    Icons.Outlined.DownloadForOffline,
+                    AppIcons.Outlined.DownloadForOffline,
                     "No downloads yet",
                     "Tap the download icon on any episode to watch it offline, anywhere.",
                     Modifier.padding(bottom = 48.dp),
@@ -283,7 +275,7 @@ fun DownloadsScreen(
         if (folders.isEmpty()) {
             // Query matched nothing (there ARE downloads — the !hasDownloads case returned above).
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                EmptyState(Icons.Outlined.SearchOff, "No matches", "No downloads match “${query.trim()}”.")
+                EmptyState(AppIcons.Outlined.SearchOff, "No matches", "No downloads match “${query.trim()}”.")
             }
         } else {
             LazyColumn(
@@ -410,10 +402,10 @@ private fun SeasonHeader(
             if (deleting) {
                 CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
             } else {
-                IconButton(onClick = onDeleteAll) { Icon(Icons.Filled.Delete, "Delete season") }
+                IconButton(onClick = onDeleteAll) { Icon(AppIcons.Filled.Delete, "Delete season") }
             }
             Icon(
-                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                if (expanded) AppIcons.Filled.ExpandLess else AppIcons.Filled.ExpandMore,
                 if (expanded) "Collapse" else "Expand",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -480,22 +472,22 @@ private fun EpisodeRow(
             // State-dependent controls.
             when (item.state) {
                 DownloadState.DOWNLOADING, DownloadState.QUEUED ->
-                    IconButton(onClick = onPause) { Icon(Icons.Filled.Pause, "Pause") }
+                    IconButton(onClick = onPause) { Icon(AppIcons.Filled.Pause, "Pause") }
                 DownloadState.PAUSED ->
-                    IconButton(onClick = onResume) { Icon(Icons.Filled.PlayArrow, "Resume") }
+                    IconButton(onClick = onResume) { Icon(AppIcons.Filled.PlayArrow, "Resume") }
                 // Retry must NOT be resume(): a failed download's stop-reason change is a no-op in
                 // Media3, and its URL is usually an expired token anyway — retry() re-resolves.
                 DownloadState.FAILED -> if (retrying) {
                     CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 } else {
-                    IconButton(onClick = onRetry) { Icon(Icons.Filled.Refresh, "Retry") }
+                    IconButton(onClick = onRetry) { Icon(AppIcons.Filled.Refresh, "Retry") }
                 }
                 DownloadState.COMPLETED -> Unit
             }
             if (removing) {
                 CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
             } else {
-                IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Remove") }
+                IconButton(onClick = onDelete) { Icon(AppIcons.Filled.Delete, "Remove") }
             }
         }
     }

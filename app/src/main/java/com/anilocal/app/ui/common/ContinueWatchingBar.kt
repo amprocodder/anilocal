@@ -1,5 +1,6 @@
 package com.anilocal.app.ui.common
 
+import com.anilocal.app.ui.icons.AppIcons
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,9 +9,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -75,12 +73,12 @@ fun ContinueWatchingBar(
                     )
                 }
                 Icon(
-                    Icons.Filled.PlayArrow,
+                    AppIcons.Filled.PlayArrow,
                     contentDescription = "Resume",
                     tint = MaterialTheme.colorScheme.primary,
                 )
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Filled.Close, contentDescription = "Hide resume bar")
+                    Icon(AppIcons.Filled.Close, contentDescription = "Hide resume bar")
                 }
             }
             item.fraction?.let { f ->

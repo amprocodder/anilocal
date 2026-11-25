@@ -1,7 +1,7 @@
 package com.anilocal.app.ui.player
 
+import com.anilocal.app.ui.icons.AppIcons
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.BorderStroke
 import android.app.Activity
@@ -47,23 +47,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
-import androidx.compose.material.icons.filled.AspectRatio
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ClosedCaption
-import androidx.compose.material.icons.filled.Forward10
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Replay10
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -467,7 +450,7 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                     modifier = Modifier.padding(horizontal = if (fullscreen) 14.dp else 8.dp, vertical = if (fullscreen) 10.dp else 8.dp),
                 ) {
                     Icon(
-                        if (flash.forward) Icons.Filled.Forward10 else Icons.Filled.Replay10,
+                        if (flash.forward) AppIcons.Filled.Forward10 else AppIcons.Filled.Replay10,
                         null, tint = Color.White, modifier = Modifier.size(if (fullscreen) 26.dp else 22.dp),
                     )
                     if (fullscreen) Text("10s", color = Color.White, style = MaterialTheme.typography.labelLarge)
@@ -497,7 +480,7 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                     },
                 ) {
                     Icon(
-                        Icons.Filled.Lock, "Unlock controls",
+                        AppIcons.Filled.Lock, "Unlock controls",
                         tint = Color.White,
                         modifier = Modifier.padding(14.dp).size(24.dp),
                     )
@@ -537,7 +520,7 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                 ) {
                     if (fullscreen) {
                         Icon(
-                            Icons.Outlined.ErrorOutline, null,
+                            AppIcons.Outlined.ErrorOutline, null,
                             tint = MaterialTheme.colorScheme.tertiary,
                             modifier = Modifier.size(32.dp),
                         )
@@ -707,7 +690,7 @@ private fun EpisodeSheetRow(episode: Episode, current: Boolean, onClick: () -> U
         )
         if (current) {
             Icon(
-                Icons.Filled.PlayArrow, "Playing",
+                AppIcons.Filled.PlayArrow, "Playing",
                 tint = MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.size(18.dp),
             )
@@ -790,7 +773,7 @@ private fun PlayerControls(
                     .padding(horizontal = 4.dp, vertical = if (fullscreen) 8.dp else 0.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ControlIcon(Icons.Filled.KeyboardArrowDown, "Back", onBack, iconSize = if (fullscreen) 32.dp else 28.dp)
+                ControlIcon(AppIcons.Filled.KeyboardArrowDown, "Back", onBack, iconSize = if (fullscreen) 32.dp else 28.dp)
                 Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
                     // The watch page shows the title and episode right under the video.
                     if (fullscreen) {
@@ -810,9 +793,9 @@ private fun PlayerControls(
                         )
                     }
                 }
-                if (fullscreen) ControlIcon(Icons.Filled.LockOpen, "Lock controls", onLock, iconSize = toolIcon)
+                if (fullscreen) ControlIcon(AppIcons.Filled.LockOpen, "Lock controls", onLock, iconSize = toolIcon)
                 Box {
-                    ControlIcon(Icons.Filled.Speed, "Playback speed", { onSpeedMenuOpenChange(true) }, iconSize = toolIcon)
+                    ControlIcon(AppIcons.Filled.Speed, "Playback speed", { onSpeedMenuOpenChange(true) }, iconSize = toolIcon)
                     DropdownMenu(
                         expanded = speedMenuOpen,
                         onDismissRequest = { onSpeedMenuOpenChange(false) },
@@ -821,34 +804,34 @@ private fun PlayerControls(
                             DropdownMenuItem(
                                 text = { Text(speedLabel(s)) },
                                 onClick = { onSelectSpeed(s); onSpeedMenuOpenChange(false) },
-                                leadingIcon = { if (s == speed) Icon(Icons.Filled.Check, null) },
+                                leadingIcon = { if (s == speed) Icon(AppIcons.Filled.Check, null) },
                             )
                         }
                     }
                 }
                 if (textTracks.isNotEmpty()) {
                     Box {
-                        ControlIcon(Icons.Filled.ClosedCaption, "Subtitles", { onCcMenuOpenChange(true) }, iconSize = toolIcon)
+                        ControlIcon(AppIcons.Filled.ClosedCaption, "Subtitles", { onCcMenuOpenChange(true) }, iconSize = toolIcon)
                         DropdownMenu(expanded = ccMenuOpen, onDismissRequest = { onCcMenuOpenChange(false) }) {
                             DropdownMenuItem(
                                 text = { Text("Off") },
                                 onClick = { onDisableText(); onCcMenuOpenChange(false) },
-                                leadingIcon = { if (textDisabled) Icon(Icons.Filled.Check, null) },
+                                leadingIcon = { if (textDisabled) Icon(AppIcons.Filled.Check, null) },
                             )
                             textTracks.forEachIndexed { i, t ->
                                 DropdownMenuItem(
                                     text = { Text(t.label) },
                                     onClick = { onSelectText(i); onCcMenuOpenChange(false) },
-                                    leadingIcon = { if (!textDisabled && t.selected) Icon(Icons.Filled.Check, null) },
+                                    leadingIcon = { if (!textDisabled && t.selected) Icon(AppIcons.Filled.Check, null) },
                                 )
                             }
                         }
                     }
                 }
                 if (hasEpisodeList && fullscreen) {
-                    ControlIcon(Icons.AutoMirrored.Filled.PlaylistPlay, "Episodes", onOpenEpisodes, iconSize = toolIcon)
+                    ControlIcon(AppIcons.AutoMirrored.Filled.PlaylistPlay, "Episodes", onOpenEpisodes, iconSize = toolIcon)
                 }
-                ControlIcon(Icons.Filled.AspectRatio, "Resize mode", onCycleResize, iconSize = toolIcon)
+                ControlIcon(AppIcons.Filled.AspectRatio, "Resize mode", onCycleResize, iconSize = toolIcon)
             }
 
             // Center: previous · rewind 10s · play/pause · forward 10s · next, each on a soft dark
@@ -860,10 +843,10 @@ private fun PlayerControls(
             ) {
                 val side = if (fullscreen) 52.dp else 40.dp
                 val sideIcon = if (fullscreen) 32.dp else 24.dp
-                CenterButton(Icons.Filled.SkipPrevious, "Previous episode", onPrev, side, sideIcon, enabled = hasPrev)
-                CenterButton(Icons.Filled.Replay10, "Rewind 10s", onRewind, side, sideIcon)
+                CenterButton(AppIcons.Filled.SkipPrevious, "Previous episode", onPrev, side, sideIcon, enabled = hasPrev)
+                CenterButton(AppIcons.Filled.Replay10, "Rewind 10s", onRewind, side, sideIcon)
                 CenterButton(
-                    if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    if (isPlaying) AppIcons.Filled.Pause else AppIcons.Filled.PlayArrow,
                     if (isPlaying) "Pause" else "Play",
                     onPlayPause,
                     size = if (fullscreen) 72.dp else 52.dp,
@@ -871,8 +854,8 @@ private fun PlayerControls(
                     showIcon = !isBuffering,
                     enabled = !isBuffering,
                 )
-                CenterButton(Icons.Filled.Forward10, "Forward 10s", onForward, side, sideIcon)
-                CenterButton(Icons.Filled.SkipNext, "Next episode", onNext, side, sideIcon, enabled = hasNext)
+                CenterButton(AppIcons.Filled.Forward10, "Forward 10s", onForward, side, sideIcon)
+                CenterButton(AppIcons.Filled.SkipNext, "Next episode", onNext, side, sideIcon, enabled = hasNext)
             }
 
             // Bottom: "position / duration" left and the fullscreen toggle right, over a full-width
@@ -899,7 +882,7 @@ private fun PlayerControls(
                         modifier = Modifier.weight(1f),
                     )
                     ControlIcon(
-                        if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                        if (fullscreen) AppIcons.Filled.FullscreenExit else AppIcons.Filled.Fullscreen,
                         if (fullscreen) "Exit fullscreen" else "Fullscreen",
                         onToggleFullscreen,
                         iconSize = if (fullscreen) 28.dp else 24.dp,

@@ -1,5 +1,6 @@
 package com.anilocal.app.ui.player
 
+import com.anilocal.app.ui.icons.AppIcons
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -27,9 +28,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Equalizer
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -275,7 +273,7 @@ private fun WatchHeader(c: WatchContent, backdrop: Boolean = true) {
                     Spacer(Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            Icons.Filled.Equalizer, null,
+                            AppIcons.Filled.Equalizer, null,
                             tint = MaterialTheme.colorScheme.tertiary,
                             modifier = Modifier.size(16.dp),
                         )
@@ -360,7 +358,7 @@ private fun UpNextCard(next: Episode, fallbackArt: String?, onClick: () -> Unit)
                     .background(MaterialTheme.colorScheme.primary, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(26.dp))
+                Icon(AppIcons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(26.dp))
             }
         }
     }
@@ -527,7 +525,7 @@ private fun EpisodeThumb(episode: Episode, fallbackArt: String?, current: Boolea
         when {
             current -> {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)))
-                Icon(Icons.Filled.Equalizer, null, tint = Color.White, modifier = Modifier.size(26.dp))
+                Icon(AppIcons.Filled.Equalizer, null, tint = Color.White, modifier = Modifier.size(26.dp))
             }
             thumb == null -> Text(
                 "${episode.number}",

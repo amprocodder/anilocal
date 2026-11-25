@@ -1,5 +1,6 @@
 package com.anilocal.app.ui.home
 
+import com.anilocal.app.ui.icons.AppIcons
 import com.anilocal.app.ui.common.episodeBadge
 import com.anilocal.app.ui.common.StatusBarScrim
 import com.anilocal.app.ui.common.scrolledPast
@@ -32,11 +33,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DownloadDone
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -257,7 +253,7 @@ private fun HomeTopBar(onExplore: () -> Unit, modifier: Modifier = Modifier) {
             modifier = Modifier.weight(1f),
         )
         IconButton(onClick = onExplore) {
-            Icon(Icons.Filled.Search, "Search", tint = Color.White)
+            Icon(AppIcons.Filled.Search, "Search", tint = Color.White)
         }
     }
 }
@@ -382,7 +378,7 @@ private fun HeroCarousel(
                     ),
                     contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp),
                 ) {
-                    Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
+                    Icon(AppIcons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Watch now", fontWeight = FontWeight.Bold)
                 }
@@ -475,7 +471,7 @@ private fun ContinueCard(
                     .background(Color.Black.copy(alpha = 0.45f)),
             ) {
                 Icon(
-                    Icons.Filled.PlayArrow, "Resume",
+                    AppIcons.Filled.PlayArrow, "Resume",
                     tint = Color.White,
                     modifier = Modifier.padding(6.dp).size(22.dp),
                 )
@@ -489,7 +485,7 @@ private fun ContinueCard(
                     .clickable { onRemove() },
             ) {
                 Icon(
-                    Icons.Filled.Close, "Remove from Continue Watching",
+                    AppIcons.Filled.Close, "Remove from Continue Watching",
                     tint = Color.White,
                     modifier = Modifier.padding(4.dp).size(12.dp),
                 )
@@ -503,7 +499,7 @@ private fun ContinueCard(
                         .background(MaterialTheme.colorScheme.primary),
                 ) {
                     Icon(
-                        Icons.Filled.DownloadDone, "Downloaded",
+                        AppIcons.Filled.DownloadDone, "Downloaded",
                         tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.padding(3.dp).size(12.dp),
                     )

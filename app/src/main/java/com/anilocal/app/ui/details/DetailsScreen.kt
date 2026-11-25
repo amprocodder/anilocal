@@ -1,5 +1,6 @@
 package com.anilocal.app.ui.details
 
+import com.anilocal.app.ui.icons.AppIcons
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.graphicsLayer
@@ -45,13 +46,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.BookmarkAdded
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.DownloadDone
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -439,7 +433,7 @@ fun DetailsScreen(
                             modifier = Modifier.weight(1f).height(46.dp),
                         ) {
                             if (released) {
-                                Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
+                                Icon(AppIcons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
                                 Text("  Watch", fontWeight = FontWeight.Bold)
                             } else {
                                 Text("Not released yet", fontWeight = FontWeight.Bold)
@@ -471,7 +465,7 @@ fun DetailsScreen(
                             modifier = Modifier.size(46.dp),
                         ) {
                             Icon(
-                                if (inList) Icons.Filled.BookmarkAdded else Icons.Outlined.BookmarkAdd,
+                                if (inList) AppIcons.Filled.BookmarkAdded else AppIcons.Outlined.BookmarkAdd,
                                 when {
                                     saved -> "Remove from My List"
                                     onMalList -> "In My List (from MAL)"
@@ -647,7 +641,7 @@ fun DetailsScreen(
         ) {
             IconButton(onClick = onBack) {
                 Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack, "Back",
+                    AppIcons.AutoMirrored.Filled.ArrowBack, "Back",
                     tint = if (barAlpha > 0.5f) MaterialTheme.colorScheme.onSurface else Color.White,
                 )
             }
@@ -724,12 +718,12 @@ private fun SeasonDownloadButton(
                 )
             }
             allInDownloads -> Icon(
-                Icons.Filled.DownloadDone,
+                AppIcons.Filled.DownloadDone,
                 "Season downloaded",
                 tint = MaterialTheme.colorScheme.tertiary,
             )
             else -> Icon(
-                Icons.Filled.Download,
+                AppIcons.Filled.Download,
                 "Download season",
                 tint = MaterialTheme.colorScheme.onSurface,
             )
@@ -950,7 +944,7 @@ private fun EpisodeCard(
             }
             if (downloaded) {
                 Icon(
-                    Icons.Filled.DownloadDone,
+                    AppIcons.Filled.DownloadDone,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier
@@ -997,8 +991,8 @@ private fun EpisodeCard(
                 val tint = MaterialTheme.colorScheme.onSurfaceVariant
                 when {
                     busy -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 1.5.dp, color = tint)
-                    queued -> Icon(Icons.Filled.DownloadDone, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.tertiary)
-                    else -> Icon(Icons.Filled.Download, null, Modifier.size(18.dp), tint = tint)
+                    queued -> Icon(AppIcons.Filled.DownloadDone, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.tertiary)
+                    else -> Icon(AppIcons.Filled.Download, null, Modifier.size(18.dp), tint = tint)
                 }
             }
         }

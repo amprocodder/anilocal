@@ -1,21 +1,16 @@
 package com.anilocal.app.ui.navigation
 
+import com.anilocal.app.ui.icons.AppIcons
 import android.net.Uri
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.VideoLibrary
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /** Top-level tabs — the AniLab-style bottom menu. */
 enum class TopTab(val route: String, val label: String, val icon: ImageVector) {
-    Home("home", "Home", Icons.Outlined.Home),
-    Explore("explore", "Explore", Icons.Outlined.Explore),
-    Library("library", "My List", Icons.Outlined.VideoLibrary),
-    Downloads("downloads", "Downloads", Icons.Outlined.Download),
-    Settings("settings", "Settings", Icons.Outlined.Settings),
+    Home("home", "Home", AppIcons.Outlined.Home),
+    Explore("explore", "Explore", AppIcons.Outlined.Explore),
+    Library("library", "My List", AppIcons.Outlined.VideoLibrary),
+    Downloads("downloads", "Downloads", AppIcons.Outlined.Download),
+    Settings("settings", "Settings", AppIcons.Outlined.Settings),
 }
 
 object Routes {

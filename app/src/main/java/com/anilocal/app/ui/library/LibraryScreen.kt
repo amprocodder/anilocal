@@ -1,10 +1,7 @@
 package com.anilocal.app.ui.library
 
+import com.anilocal.app.ui.icons.AppIcons
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.material.icons.outlined.Inbox
-import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material.icons.outlined.SearchOff
-import androidx.compose.material.icons.Icons
 import com.anilocal.app.ui.common.EmptyState
 import com.anilocal.app.ui.common.ScreenHeader
 import android.widget.Toast
@@ -186,17 +183,17 @@ fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel
                 // Only when the query filtered out a non-empty list — a genuinely empty
                 // list/category falls through to its actionable onboarding hint instead.
                 gridItems.isEmpty() && query.isNotBlank() && hasEntries ->
-                    Empty(Icons.Outlined.SearchOff, "No matches", "Nothing in your list matches “${query.trim()}”.")
+                    Empty(AppIcons.Outlined.SearchOff, "No matches", "Nothing in your list matches “${query.trim()}”.")
 
                 gridItems.isEmpty() && filter == null ->
                     Empty(
-                        Icons.Outlined.BookmarkBorder,
+                        AppIcons.Outlined.BookmarkBorder,
                         "Your list is empty",
                         "Save titles from their detail page, or sync your MyAnimeList list in Settings.",
                     )
 
                 gridItems.isEmpty() ->
-                    Empty(Icons.Outlined.Inbox, "Nothing here yet", "Sync your list from Settings → MyAnimeList Sync.")
+                    Empty(AppIcons.Outlined.Inbox, "Nothing here yet", "Sync your list from Settings → MyAnimeList Sync.")
 
                 else -> Grid {
                     items(gridItems, key = { it.id }, contentType = { "poster" }) { summary ->
