@@ -10,9 +10,10 @@ import com.anilocal.app.data.cache.JsonCache
 import com.anilocal.app.data.download.DownloadHeaderStore
 import com.anilocal.app.data.download.DownloadModule
 import com.anilocal.app.data.download.DownloadRepositoryImpl
-import com.anilocal.app.data.local.DatabaseModule
-import com.anilocal.app.data.local.RoomLibraryRepository
-import com.anilocal.app.data.local.RoomProgressRepository
+import com.anilocal.app.data.local.AppDatabase
+import com.anilocal.app.data.local.CacheDatabase
+import com.anilocal.app.data.local.LibraryRepositoryImpl
+import com.anilocal.app.data.local.ProgressRepositoryImpl
 import com.anilocal.app.data.metadata.anilist.AniListApi
 import com.anilocal.app.data.metadata.anilist.AniListCatalogRepository
 import com.anilocal.app.data.metadata.anilist.CachedCatalogRepository
@@ -77,12 +78,12 @@ class DataGraph(context: Context) {
     private val jsonHttp by lazy { JsonHttp(okHttp) }
 
     // ---- storage ----
-    private val database by lazy { DatabaseModule.database(app) }
-    private val cacheDatabase by lazy { DatabaseModule.cacheDatabase(app) }
-    private val jsonCache by lazy { JsonCache(cacheDatabase.cacheDao(), appScope) }
+    private val database by lazy { AppDatabase(app) }
+    private val cacheDatabase by lazy { CacheDatabase(app) }
+    private val jsonCache by lazy { JsonCache(cacheDatabase.cacheDao, appScope) }
     val settings: SettingsRepository by lazy { SettingsRepositoryImpl(app, appScope) }
-    val library: LibraryRepository by lazy { RoomLibraryRepository(database.libraryDao()) }
-    val progress: ProgressRepository by lazy { RoomProgressRepository(database.progressDao()) }
+    val library: LibraryRepository by lazy { LibraryRepositoryImpl(database.libraryDao) }
+    val progress: ProgressRepository by lazy { ProgressRepositoryImpl(database.progressDao) }
 
     // ---- catalog & metadata ----
     // Cache-first: the decorator serves the cache DB and delegates to the raw AniList client, so
@@ -91,7 +92,7 @@ class DataGraph(context: Context) {
         CachedCatalogRepository(AniListCatalogRepository(AniListApi(jsonHttp)), jsonCache, appScope)
     }
     val skip: SkipRepository by lazy { AniSkipRepository(AniSkipApi(jsonHttp), jsonCache) }
-    val mal: MalRepository by lazy { MalRepositoryImpl(MalApi(jsonHttp), database.malDao(), settings) }
+    val mal: MalRepository by lazy { MalRepositoryImpl(MalApi(jsonHttp), database.malDao, settings) }
 
     // ---- stream sources ----
     // The app ships NO built-in sources (the set is empty); the registry merges in the user's
@@ -110,14 +111,14 @@ class DataGraph(context: Context) {
     private val mediaDatabase by lazy { DownloadModule.databaseProvider(app) }
     /** The downloads' byte store; the player reads it back (read-only) for offline playback. */
     val mediaCache: Cache by lazy { DownloadModule.downloadCache(downloadDir, mediaDatabase) }
-    private val downloadHeaders by lazy { DownloadHeaderStore(database.downloadDao()) }
+    private val downloadHeaders by lazy { DownloadHeaderStore(database.downloadDao) }
     internal val downloadManager: DownloadManager by lazy {
         DownloadModule.downloadManager(app, mediaDatabase, mediaCache, DownloadModule.downloadDataSourceFactory(downloadHeaders))
     }
     internal val downloadNotifications: DownloadNotificationHelper by lazy { DownloadModule.notificationHelper(app) }
     val downloads: DownloadRepository by lazy {
         DownloadRepositoryImpl(
-            app, downloadManager, downloadHeaders, database.downloadDao(), okHttp, streams, catalog, settings, downloadDir,
+            app, downloadManager, downloadHeaders, database.downloadDao, okHttp, streams, catalog, settings, downloadDir,
         )
     }
 }

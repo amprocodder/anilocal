@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-class RoomLibraryRepository(
+class LibraryRepositoryImpl(
     private val dao: LibraryDao,
 ) : LibraryRepository {
 
@@ -29,7 +29,7 @@ class RoomLibraryRepository(
         dao.countById(id).map { it > 0 }.distinctUntilChanged()
 }
 
-class RoomProgressRepository(
+class ProgressRepositoryImpl(
     private val dao: ProgressDao,
 ) : ProgressRepository {
 

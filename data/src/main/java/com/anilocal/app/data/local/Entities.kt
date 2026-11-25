@@ -1,19 +1,16 @@
 package com.anilocal.app.data.local
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
-
-@Entity(tableName = "library")
+/** A row of `library`. */
 data class LibraryEntity(
-    @PrimaryKey val id: String,
+    val id: String,
     val title: String,
     val posterUrl: String?,
     val idMal: Int?,
 )
 
-@Entity(tableName = "downloads")
+/** A row of `downloads`. */
 data class DownloadEntity(
-    @PrimaryKey val id: String,           // "<animeId>-ep<n>"
+    val id: String,           // "<animeId>-ep<n>"
     val animeId: String,
     val episodeNumber: Int,
     val title: String,
@@ -32,9 +29,9 @@ data class DownloadEntity(
     val headersJson: String? = null,
 )
 
-@Entity(tableName = "mal_list")
+/** A row of `mal_list`. */
 data class MalEntryEntity(
-    @PrimaryKey val malId: Int,
+    val malId: Int,
     val title: String,
     val posterUrl: String?,
     val status: String,                   // MAL api status string
@@ -43,9 +40,9 @@ data class MalEntryEntity(
     val totalEpisodes: Int?,
 )
 
-@Entity(tableName = "watch_progress")
+/** A row of `watch_progress`. */
 data class WatchProgressEntity(
-    @PrimaryKey val animeId: String,
+    val animeId: String,
     val title: String,
     val posterUrl: String?,
     val idMal: Int?,

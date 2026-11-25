@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.serialization)
 }
 
@@ -29,9 +28,6 @@ dependencies {
 
 
 
-    implementation(libs.room.runtime)
-    implementation(libs.room.ktx)
-    ksp(libs.room.compiler)
 
     // HTTP + JSON: the same OkHttp and kotlinx.serialization the extension host already ships
     // (extensions link against them), so the data layer adds no library of its own for either.
