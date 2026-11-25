@@ -61,6 +61,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.util.Locale
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -652,8 +653,9 @@ class PlayerViewModel(
         val subMimes = coroutineScope { subtitles.map { sub -> async { resolveSubtitleMime(sub.url, dataSource) } }.awaitAll() }
         val subFactory = SingleSampleMediaSource.Factory(dataSource)
             .setTreatLoadErrorsAsEndOfStream(true)
+        val defaultTrack = defaultSubtitleIndex(subtitles)
         val subSources = subtitles.mapIndexed { index, sub ->
-            val flags = if (index == 0) {
+            val flags = if (index == defaultTrack) {
                 C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_AUTOSELECT
             } else {
                 C.SELECTION_FLAG_AUTOSELECT
@@ -670,6 +672,31 @@ class PlayerViewModel(
 
         return if (subSources.isEmpty()) videoSource
             else MergingMediaSource(*(listOf(videoSource) + subSources).toTypedArray())
+    }
+
+    /**
+     * Which sidecar shows by default: the first track in the device's language, else English, else the
+     * first listed. Sources order tracks arbitrarily (one lists Arabic first), and label them loosely —
+     * "English", "eng", "en", "Portuguese (Brazil)" — so a language matches its English or native
+     * name, or its 2/3-letter code, as a whole word of the track's language or label.
+     */
+    private fun defaultSubtitleIndex(subtitles: List<Subtitle>): Int {
+        if (subtitles.size < 2) return 0
+        for (locale in listOf(Locale.getDefault(), Locale.ENGLISH).distinctBy { it.language }) {
+            val names = listOfNotNull(
+                locale.language,
+                runCatching { locale.isO3Language }.getOrNull(),
+                locale.getDisplayLanguage(Locale.ENGLISH),
+                locale.getDisplayLanguage(locale),
+            ).map { it.lowercase() }.filter { it.isNotBlank() }.distinct()
+            val patterns = names.map { Regex("(^|[^\\p{L}])" + Regex.escape(it) + "($|[^\\p{L}])") }
+            val index = subtitles.indexOfFirst { sub ->
+                val text = "${sub.language} ${sub.label}".lowercase()
+                patterns.any { it.containsMatchIn(text) }
+            }
+            if (index >= 0) return index
+        }
+        return 0
     }
 
     // Resolve the next episode's stream in the background so the advance/Next transition isn't stalled
