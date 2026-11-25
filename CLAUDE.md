@@ -118,8 +118,8 @@ Four Gradle modules with a strict, one-way dependency direction:
 
 - **`:domain`** — pure Kotlin (`kotlin("jvm")`, **no Android dependency**). Models, repository
   *interfaces*, and the `AnimeSource` seam. `import android.*` here will not compile — that is the
-  enforced boundary, not a convention. Keep it that way. The repository interfaces (each bound in
-  `:data`'s `AppModule`): `CatalogRepository`, `StreamRepository`, `SkipRepository`, `LibraryRepository`,
+  enforced boundary, not a convention. Keep it that way. The repository interfaces (each built in
+  `:data`'s `DataGraph`): `CatalogRepository`, `StreamRepository`, `SkipRepository`, `LibraryRepository`,
   `ProgressRepository` (all in `repo/Repositories.kt`), then **one file each** —
   `DownloadRepository` (`repo/DownloadRepository.kt`), `MalRepository` (`repo/MalRepository.kt`),
   `SettingsRepository` (`repo/SettingsRepository.kt`), and `ExtensionRepository` (`repo/ExtensionRepository.kt`
@@ -129,7 +129,7 @@ Four Gradle modules with a strict, one-way dependency direction:
   extension's settings so `:app` can render/persist them without touching `androidx.preference`/`eu.kanade.*`.
 - **`:data`** — Android library. *All* repository implementations live here: AniList/MAL APIs,
   AniSkip, Room, DataStore, the Media3 download stack, the source registry, the
-  extension-repo browse/install impls, and the Hilt wiring (`di/AppModule`). Depends on `:domain` and
+  extension-repo browse/install impls, and the object graph (`DataGraph`). Depends on `:domain` and
   `:extensions`.
 - **`:extensions`** — Android library that makes AniLocal a host for Aniyomi extensions. Vendors the
   **real** Aniyomi anime source-api (`eu.kanade.tachiyomi.animesource.*` + a trimmed `network` package,
@@ -155,32 +155,34 @@ Four Gradle modules with a strict, one-way dependency direction:
   always on** (solves the JS challenge in a headless `android.webkit` WebView, re-supplies `cf_clearance`;
   degrades silently if no WebView).
 - **`:app`** — Compose UI, navigation, ViewModels, the Media3 player UI.
-  **References only domain interfaces** — it must not import `com.anilocal.app.data.*` (an injected
-  impl reaching into the UI would break the seam). Inject domain repository interfaces instead.
+  **References only domain interfaces** — it must not import `com.anilocal.app.data.*` (an
+  implementation reaching into the UI would break the seam). The one exception is the composition root:
+  `AniLocalApp.kt` builds the `DataGraph` and `AppGraph.kt` re-exposes it as domain interfaces; every
+  screen and ViewModel gets its dependencies from `AppGraph`.
 
 Dependencies are managed centrally in the version catalog `gradle/libs.versions.toml`; module
 `build.gradle.kts` files stay thin and reference `libs.*`.
 
-## Where everything is wired: `data/.../di/AppModule.kt`
+## Where everything is wired: `data/.../DataGraph.kt`
 
-A single Hilt `@Module` `@Binds` every domain interface to its `:data` impl. This is the swap point
-for the whole app. The most important binding:
+There is **no DI framework**. `DataGraph` (`:data`, package `com.anilocal.app.data`) builds every
+repository, client and database itself — each a `by lazy` property, so it's created once, on first use,
+in dependency order — and exposes them as domain interfaces (plus the few framework objects the app
+needs: the Media3 `mediaCache`, `okHttp`, `appScope`). This is the swap point for the whole app: to
+change which impl backs an interface, change its line here. The most important wiring:
 
 ```kotlin
-// Built-in sources are a multibound Set the registry merges with extensions — NOT bound singly.
-// The app ships NONE, so the set is empty; @Multibinds keeps it injectable with zero contributions.
-@Multibinds abstract fun animeSources(): Set<@JvmSuppressWildcards AnimeSource>
-@Binds @Singleton abstract fun bindSourceRegistry(impl: SourceRegistryImpl): SourceRegistry
+// The app ships NO built-in sources: the registry merges an empty set with installed extensions.
+val sources: SourceRegistry by lazy { SourceRegistryImpl(app, appScope, builtIns = emptySet()) }
 ```
 
-Streams are **no longer one compile-time binding** (the old `bindAnimeSource` is gone). Built-in
-`AnimeSource`s would be contributed via `@Binds @IntoSet` (the app currently ships none, so the set is
-empty — `@Multibinds` declares it); `SourceRegistryImpl` (in `:data`) merges that set with the
+Streams are **not one compile-time binding**. Built-in `AnimeSource`s would be passed in that
+`builtIns` set (the app currently ships none); `SourceRegistryImpl` (in `:data`) merges that set with the
 extensions `AnimeExtensionLoader` discovers and exposes a reactive `sources: StateFlow`.
 `SourceStreamRepository` injects the `SourceRegistry` + `SettingsRepository` and routes resolution to
 the **user-selected** source (`selectedSourceId` in DataStore, chosen in the Settings-tab picker),
-falling back to the first available source. **To add a built-in source, add one `@Binds @IntoSet`
-line** — selection, routing, and the picker are automatic. The `AnimeSource` contract is **five required suspend methods** —
+falling back to the first available source. **To add a built-in source, add it to `builtIns` in
+`DataGraph`** — selection, routing, and the picker are automatic. The `AnimeSource` contract is **five required suspend methods** —
 `popular`/`search`/`detail` (catalog-shaped) *and* `servers`/`resolve` (stream-shaped) — **plus a
 `val info: SourceInfo` property** (`info.id` keys the registry; `info.isExternal` tags extensions in
 the picker; `info.configurable` flags sources with settings) **and two more suspend methods with default
@@ -206,15 +208,14 @@ match above a faster unverified one. It exposes
 subtitles**, so captions on lower renditions aren't lost to the height sort → online playback) and
 `resolveStreams` (all variants → the download quality picker).
 
-The single `@Binds` module is **`AppModule` (in `:data`, package `com.anilocal.app.di`)**, which
-`@Binds` every domain interface → `:data` impl. `:data` additionally has three `@Provides` `object`
-modules under `com.anilocal.app.data.*`: `NetworkModule` (the one shared `OkHttpClient`),
-`DatabaseModule` (Room), and `DownloadModule` (the Media3 cache/manager stack). The four APIs
-(AniList/AniSkip/MAL/extension-repo) are `@Inject` classes over `JsonHttp`. Adding a new repo/source
-impl → add a `@Binds` in `AppModule`. **`:app` has no DI module and no build-time keys** (no module
-generates a `BuildConfig`). If a future data-layer impl needs an `:app` build-time key, add a small
-`@Provides @Named(...)` Hilt module in `:app` to surface it (the now-removed `AppConfigModule` did this
-for the old MAL client id).
+`DataGraph` builds the infrastructure through three small factory objects under
+`com.anilocal.app.data.*`: `NetworkModule` (the one shared `OkHttpClient`), `DatabaseModule` (Room), and
+`DownloadModule` (the Media3 cache/manager stack). The four APIs (AniList/AniSkip/MAL/extension-repo)
+are plain classes over `JsonHttp`. Adding a new repo/source impl → a constructor call + property in
+`DataGraph` (and, if the UI needs it, a getter in `AppGraph`). In `:app`, **`AniLocalApp`** is the
+composition root (it implements `DataGraphHolder`) and **`AppGraph`** is what the UI sees; ViewModels
+are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which scopes them like
+`viewModel()`. **No module generates a `BuildConfig`** and there are no build-time keys.
 
 ## Key cross-cutting patterns
 
@@ -265,9 +266,9 @@ for the old MAL client id).
   downloads, so streaming must never write into it (Media3 writes through by default, and with tokenized
   URLs every re-watch wrote another full copy that nothing ever deleted) — and **never add a
   `CacheEvictor`**: it can't tell downloaded spans from streamed ones and would silently delete offline
-  episodes. The cost is that rewinding into already-watched video re-fetches it. There are **two** `DefaultHttpDataSource.Factory` singletons: the unqualified one is the player's
-  (per-stream headers set by `PlayerViewModel`), `@Named("downloadHttp")` is the `DownloadManager`'s —
-  they must stay separate or playback headers clobber a running download's Referer (403s). Download
+  episodes. The cost is that rewinding into already-watched video re-fetches it. The player builds its own `DefaultHttpDataSource.Factory` **per stream** (`PlayerViewModel.playbackDataSource`)
+  and the `DownloadManager` has its own (`DownloadModule.downloadDataSourceFactory`) — they must stay
+  separate or playback headers clobber a running download's Referer (403s). Download
   headers ride a `ResolvingDataSource` that consults `DownloadHeaderStore` **per request**: enqueue/
   resume point the store at the download's headers (persisted in `DownloadEntity.headersJson`), and
   on a cold process — including a headless scheduler/boot service restart, where no ViewModel ever
@@ -284,15 +285,16 @@ for the old MAL client id).
   resolve legs (and Android installs no default `CookieHandler`); instead `AniyomiSourceAdapter` copies
   the jar's cookies for the stream host (e.g. a solved `cf_clearance`) into `VideoStream.headers` — host-
   scoped, and a source's own `Cookie` header wins. Don't "fix" this by moving playback onto
-  `OkHttpDataSource`: that needs a Hilt→Injekt bridge, and Injekt is only seeded lazily when the
+  `OkHttpDataSource`: that needs the graph→Injekt bridge, and Injekt is only seeded lazily when the
   extension loader first runs.
 
 - **The download service crosses the module/manifest boundary.** `AniLocalDownloadService` (code in
   `:data`) plus its permissions (`FOREGROUND_SERVICE*`, `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`)
   and the `PlatformScheduler` JobService are declared in **`:app`'s `AndroidManifest.xml`** — `:data`'s
   manifest is empty by design, so edit `:app`'s manifest for any download-service change. The framework
-  instantiates the service, so it can't constructor-inject; it pulls its deps through a Hilt `@EntryPoint`
-  (`DownloadEntryPoint`) — add new service deps there + `DownloadModule`, not to a constructor.
+  instantiates the service, so it can't take constructor arguments; it reads them from the graph via
+  `(applicationContext as DataGraphHolder).dataGraph` — add new service deps to `DataGraph` (as
+  `internal` properties), not to a constructor.
 
 - **Player has a dual online/offline path** (`app/.../player/PlayerViewModel.kt`): on load it first
   checks `downloads.getOffline(...)`. Offline → skip markers and subtitles come from the cached Room
@@ -459,17 +461,25 @@ for the old MAL client id).
 
 ## Conventions
 
-- Navigation is a single Compose `NavHost` in `MainActivity.kt`; routes live in
-  `app/.../ui/navigation/Destinations.kt` (`TopTab` enum = bottom nav = Home/Explore/Library/Downloads/Settings — the Settings tab is `MoreScreen`/`MoreViewModel` in code;
-  `Routes` = the non-tab routes: `detail`, `player`, `extensions` (Browse extensions → install via the
-  system installer), and `source/{sourceId}/preferences` (per-source settings, shown when
-  `SourceInfo.configurable`)). The bottom `NavigationBar` shows only when the current route is a `TopTab`
-  route, so the non-tab routes have none; adding a tab = a new `TopTab` entry **plus** a
-  `composable(tab.route)` in `MainActivity`'s `NavHost`.
-- ViewModels are `@HiltViewModel`, obtained via `hiltViewModel()`, and inject only domain interfaces/models
-  (plus framework types — `SavedStateHandle`, `@ApplicationContext Context`, the Hilt-provided Media3
-  `CacheDataSource.Factory`; `PlayerViewModel` also takes a `DefaultHttpDataSource.Factory` for per-stream
-  request headers and a `@Named("appScope")` `CoroutineScope` to persist final position after
+- Navigation is **hand-written** (`app/.../ui/navigation/`, no navigation library):
+  - `Route` (`Routes.kt`) — typed `@Serializable` destinations: the five tab roots (`TopTab` enum = bottom
+    nav = Home/Explore/Library/Downloads/Settings — the Settings tab is `MoreScreen`/`MoreViewModel` in
+    code), `Detail(animeId)`, `Player(animeId, episode, startMs)`, `Extensions`, `SourcePreferences(sourceId)`.
+    Screens and ViewModels take these arguments directly (no `SavedStateHandle` args).
+  - `Navigator` — **one back stack per tab**; switching tabs keeps each tab's screens, Back pops (then from
+    another tab's root returns Home, then leaves the app), re-selecting the current tab pops to its root.
+    `update(id, route)` changes an entry's route without rebuilding it (the player mirrors auto-advance's
+    episode into its route so a restore reopens the right episode).
+  - `NavDisplay` + `AppNavigation` (activity-scoped ViewModel) — each entry gets its own `ViewModelStore` and
+    `rememberSaveable` state, disposed only once it's off every stack and off screen; the stacks survive
+    config changes and process death (saved as JSON). Predictive back seeks the pop animation
+    (`enableOnBackInvokedCallback` is on); the player cuts in/out with no transition (its SurfaceView
+    can't fade with Compose). A screen's own `BackHandler` (the player's) wins over the navigator's.
+  - The bottom bar shows only at a tab's root. Adding a tab = a `TopTab` entry + a `Route` + a branch in
+    `MainActivity`'s `when (route)`; adding a screen = a `Route` + a branch.
+- ViewModels are plain classes built with `appViewModel { graph -> … }` and take only domain
+  interfaces/models and route arguments (plus framework types — the application `Context`, the Media3
+  `mediaCache` the player reads downloads from, and `appScope` to persist final position after
   `viewModelScope` is cancelled) — never `:data` types. Most are **co-located in their screen file**
   (`DetailsViewModel`/`HomeViewModel`/`LibraryViewModel`/`ExploreViewModel`/`DownloadsViewModel`/
   `ExtensionsViewModel`/`SourcePreferencesViewModel`, each in its `*Screen.kt`); only `AppViewModel`

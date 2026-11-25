@@ -51,7 +51,9 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   streams for AniList-browsed titles. **Browse extensions** (Settings → Browse extensions) is where you add
   extension repos (`index.min.json`) and install sources in-app; **Install recommended sources**
   in Settings is an explicit one-tap opt-in for a small community-recommended set.
-- Hilt DI, Compose + Material3, Coil images; HTTP and JSON via OkHttp 5 + kotlinx.serialization (the
+- Compose + Material3, Coil images; no DI framework (a hand-written object graph) and hand-written
+  navigation (typed routes, a back stack per tab, predictive back); HTTP and JSON via OkHttp 5 +
+  kotlinx.serialization (the
   libraries extensions already need), with a small hand-written JSON client instead of Retrofit/Moshi.
 
 ## Extension sources & posture
@@ -84,7 +86,7 @@ The dependency direction is compile-enforced (not just convention):
   interfaces, the `AnimeSource` seam. `import android.*` here won't compile — that's the boundary.
 - **`:data`** — Android library. All repository implementations: AniList, AniSkip, Room,
   DataStore, Media3 downloads, the source registry, extension-repo
-  browse/install, and the Hilt wiring (`di/AppModule`). Depends on `:domain` + `:extensions`.
+  browse/install, and the object graph (`DataGraph`). Depends on `:domain` + `:extensions`.
 - **`:extensions`** — Android library hosting Aniyomi extensions: the vendored Aniyomi source-api
   (see `extensions/VENDORING.md`), the `AniyomiSourceAdapter`, the Injekt runtime, and the
   `AnimeExtensionLoader` (+ child-first classloader). Depends on `:domain`.
