@@ -352,11 +352,13 @@ for the old MAL client id).
   or in recovery), and seek-to-next on a single item jumps to the end and auto-advances. A toggle key
   (`PLAY_PAUSE`/`HEADSETHOOK`) is intercepted in the session callback and calls `togglePlay()`, because
   Media3 reads an IDLE player as paused, so the button could never pause a loading episode.
-  A hardware keyboard's **Space bar** (e.g. a tablet keyboard cover) is not a media key, so the
-  session never sees it. `PlayerScreen` installs `MainActivity.keyInterceptor` (consulted in
-  `dispatchKeyEvent`, *before* focus routing) to call `togglePlay()` on an unmodified Space. A Compose
-  key modifier would miss it whenever nothing is focused, and if an arrow key had focused an overlay
-  button, Space would press that button (Back included).
+  A hardware keyboard's (e.g. a tablet keyboard cover's) Space and arrows aren't media keys, so the
+  session never sees them (its media keys, if any, already reach the session). `PlayerScreen`
+  installs `MainActivity.keyInterceptor` (consulted in `dispatchKeyEvent`, *before* focus routing):
+  an unmodified **Space** calls `togglePlay()`, and **Left/Right** seek 10s with the double-tap's
+  flash (holding one repeats). A Compose key modifier would miss them whenever nothing is focused,
+  focus routing would spend the arrows moving between overlay buttons, and Space would then press
+  the focused button (Back included).
   Every player (`createPlayer`) also **handles audio focus** (`USAGE_MEDIA`/`CONTENT_TYPE_MOVIE`: playing
   pauses another app's music; another app taking focus pauses this one) and **pauses when headphones
   disconnect** (`setHandleAudioBecomingNoisy`). Both turn `playWhenReady` off, which the player listener
