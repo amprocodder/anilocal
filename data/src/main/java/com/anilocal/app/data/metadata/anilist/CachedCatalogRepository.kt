@@ -15,9 +15,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
-import javax.inject.Named
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Cache-first decorator over [AniListCatalogRepository] — the piece that decouples browsing from
@@ -31,11 +28,10 @@ import javax.inject.Singleton
  * id map never expires (ids are immutable) — that one also makes MAL-only Library rows openable
  * offline once resolved.
  */
-@Singleton
-class CachedCatalogRepository @Inject constructor(
+class CachedCatalogRepository(
     private val upstream: AniListCatalogRepository,
     private val cache: JsonCache,
-    @Named("appScope") private val appScope: CoroutineScope,
+    private val appScope: CoroutineScope,
 ) : CatalogRepository {
 
     private val homeRequests = Mutex()

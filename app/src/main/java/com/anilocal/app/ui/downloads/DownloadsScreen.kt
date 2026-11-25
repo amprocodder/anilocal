@@ -42,7 +42,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import com.anilocal.app.appViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -52,7 +52,6 @@ import com.anilocal.app.domain.model.DownloadProgress
 import com.anilocal.app.domain.model.DownloadState
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.ui.common.SearchField
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
@@ -67,8 +66,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
-import javax.inject.Named
 
 /** All of one title's downloads, shown as a collapsible season folder. */
 data class SeasonFolder(
@@ -83,12 +80,11 @@ data class SeasonFolder(
     }
 }
 
-@HiltViewModel
-class DownloadsViewModel @Inject constructor(
+class DownloadsViewModel(
     private val downloads: DownloadRepository,
     // Removals run here, not on viewModelScope: leaving the tab mid-way must not cancel a season
     // delete half-done (file cleanup + Room rows would go inconsistent).
-    @Named("appScope") private val appScope: CoroutineScope,
+    private val appScope: CoroutineScope,
 ) : ViewModel() {
     /** Case-insensitive title filter over the season folders. */
     val query = MutableStateFlow("")
@@ -235,7 +231,7 @@ class DownloadsViewModel @Inject constructor(
 @Composable
 fun DownloadsScreen(
     onPlay: (animeId: String, episodeNumber: Int) -> Unit,
-    vm: DownloadsViewModel = hiltViewModel(),
+    vm: DownloadsViewModel = appViewModel { DownloadsViewModel(it.downloads, it.appScope) },
 ) {
     val folders by vm.folders.collectAsStateWithLifecycle()
     val collapsed by vm.collapsed.collectAsStateWithLifecycle()

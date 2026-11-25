@@ -9,9 +9,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.serialization.KSerializer
-import javax.inject.Inject
-import javax.inject.Named
-import javax.inject.Singleton
 
 /** A cached value plus how old it is — lets callers apply their own freshness policy. */
 data class Aged<T>(val value: T, val ageMs: Long)
@@ -29,10 +26,9 @@ data class Aged<T>(val value: T, val ageMs: Long)
  * Every DB touch is failure-isolated (a cache hiccup must never take down the network path), and
  * a JSON row that no longer parses (model shape changed) just reads as a miss.
  */
-@Singleton
-class JsonCache @Inject constructor(
+class JsonCache(
     private val dao: CacheDao,
-    @Named("appScope") private val appScope: CoroutineScope,
+    private val appScope: CoroutineScope,
 ) {
 
     init {

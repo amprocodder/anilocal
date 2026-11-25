@@ -27,9 +27,6 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.CopyOnWriteArrayList
-import javax.inject.Inject
-import javax.inject.Named
-import javax.inject.Singleton
 
 /** One source's resolved streams plus whether its title match was [confident] (a strong match
  *  against AniList's names for the title) or only the site's unverified top hit. The auto-selector
@@ -49,12 +46,11 @@ data class SourceResolution(val streams: List<VideoStream>, val confident: Boole
  * come from real resolutions (including manual-mode ones via [record]), so Auto starts warm and
  * needs no backend or curation.
  */
-@Singleton
-class AutoSourceSelector @Inject constructor(
+class AutoSourceSelector(
     private val registry: SourceRegistry,
     private val cache: JsonCache,
     private val settings: SettingsRepository,
-    @Named("appScope") private val appScope: CoroutineScope,
+    private val appScope: CoroutineScope,
 ) {
     /** Serializes read-modify-write of the per-source scoreboard rows. */
     private val statsMutex = Mutex()

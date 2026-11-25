@@ -11,11 +11,8 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
-class RoomLibraryRepository @Inject constructor(
+class RoomLibraryRepository(
     private val dao: LibraryDao,
 ) : LibraryRepository {
 
@@ -32,8 +29,7 @@ class RoomLibraryRepository @Inject constructor(
         dao.countById(id).map { it > 0 }.distinctUntilChanged()
 }
 
-@Singleton
-class RoomProgressRepository @Inject constructor(
+class RoomProgressRepository(
     private val dao: ProgressDao,
 ) : ProgressRepository {
 

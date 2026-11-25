@@ -13,7 +13,6 @@ import com.anilocal.app.domain.source.AnimeSource
 import com.anilocal.app.domain.source.SourceInfo
 import com.anilocal.app.domain.source.SourceRegistry
 import com.anilocal.app.domain.source.Sources
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
@@ -22,10 +21,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
-@HiltViewModel
-class MoreViewModel @Inject constructor(
+class MoreViewModel(
     private val settings: SettingsRepository,
     private val mal: MalRepository,
     private val sourceRegistry: SourceRegistry,

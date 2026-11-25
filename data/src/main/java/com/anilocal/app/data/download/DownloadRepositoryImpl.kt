@@ -31,7 +31,6 @@ import com.anilocal.app.data.remote.JsonCodec
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -56,14 +55,10 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
-import javax.inject.Named
-import javax.inject.Singleton
 
 @OptIn(UnstableApi::class)
-@Singleton
-class DownloadRepositoryImpl @Inject constructor(
-    @ApplicationContext private val context: Context,
+class DownloadRepositoryImpl(
+    private val context: Context,
     private val downloadManager: DownloadManager,
     // Per-request headers for the download stack: the DownloadManager's data-source chain resolves
     // every manifest/segment request through this store (see DownloadModule), so header-gated
@@ -78,7 +73,7 @@ class DownloadRepositoryImpl @Inject constructor(
     private val streams: StreamRepository,
     private val catalog: CatalogRepository,
     settings: SettingsRepository,
-    @Named("downloadDir") private val downloadDir: File,
+    private val downloadDir: File,
 ) : DownloadRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

@@ -3,8 +3,6 @@ package com.anilocal.app.data.skip
 import com.anilocal.app.data.remote.JsonHttp
 import kotlinx.serialization.Serializable
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * AniSkip v2 — crowd-sourced opening/ending timestamps keyed by MAL id. No API key.
@@ -13,8 +11,7 @@ import javax.inject.Singleton
  * no type matched (thrown as an `HttpException` with code 404). Each result carries the
  * episodeLength it was submitted on (its cut).
  */
-@Singleton
-class AniSkipApi @Inject constructor(private val http: JsonHttp) {
+class AniSkipApi(private val http: JsonHttp) {
     suspend fun skipTimes(malId: Int, episode: Int, types: List<String>, episodeLength: Long): AniSkipResponse {
         val url = BASE.newBuilder()
             .addPathSegments("v2/skip-times")

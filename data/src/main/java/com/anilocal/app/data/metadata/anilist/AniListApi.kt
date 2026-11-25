@@ -7,15 +7,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * AniList's public GraphQL endpoint: POST `{query, variables}`, typed response. No API key. The
  * queries are raw strings (see [AniListCatalogRepository]); no GraphQL client or codegen needed.
  */
-@Singleton
-class AniListApi @Inject constructor(private val http: JsonHttp) {
+class AniListApi(private val http: JsonHttp) {
     suspend fun query(query: String, variables: JsonObject): GraphResponse = http.post(
         ENDPOINT,
         buildJsonObject {

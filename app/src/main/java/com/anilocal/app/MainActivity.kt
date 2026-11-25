@@ -26,7 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.hilt.navigation.compose.hiltViewModel
+import com.anilocal.app.appViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -47,9 +47,7 @@ import com.anilocal.app.ui.navigation.TopTab
 import com.anilocal.app.ui.player.PlayerScreen
 import com.anilocal.app.ui.source.SourcePreferencesScreen
 import com.anilocal.app.ui.theme.AniLocalTheme
-import dagger.hilt.android.AndroidEntryPoint
 
-@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     /**
      * Set by the screen on display to see hardware keys before focus routing does (the player's
@@ -73,7 +71,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AppRoot() {
-    val appVm: AppViewModel = hiltViewModel()
+    val appVm: AppViewModel = appViewModel { AppViewModel(it.mal, it.progress) }
     LaunchedEffect(Unit) { appVm.onAppOpen() }   // throttled MAL sync on app open
     val resumeItem by appVm.resumeBar.collectAsStateWithLifecycle()
     val nav = rememberNavController()

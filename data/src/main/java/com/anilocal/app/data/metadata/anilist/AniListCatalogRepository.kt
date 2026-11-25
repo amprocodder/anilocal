@@ -12,11 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
-class AniListCatalogRepository @Inject constructor(
+class AniListCatalogRepository(
     private val api: AniListApi,
 ) : CatalogRepository {
 

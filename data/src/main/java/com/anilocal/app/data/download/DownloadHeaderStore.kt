@@ -6,8 +6,6 @@ import com.anilocal.app.data.remote.JsonCodec
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * The request headers the download stack fetches with, keyed by the request URL's HOST. Consulted
@@ -22,8 +20,7 @@ import javax.inject.Singleton
  * to a host we've never seen (e.g. an HLS CDN segment on a different host than the manifest) falls
  * back to the most-recently-set headers, preserving the old single-value behavior for that case.
  */
-@Singleton
-class DownloadHeaderStore @Inject constructor(
+class DownloadHeaderStore(
     private val dao: DownloadDao,
 ) {
     private val adapter = JsonCodec(MapSerializer(String.serializer(), String.serializer()))

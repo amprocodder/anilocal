@@ -9,7 +9,6 @@ import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.data.source.AutoSourceSelector
 import com.anilocal.app.domain.source.SourceRegistry
 import com.anilocal.app.extensions.loader.AnimeExtensionLoader
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -18,8 +17,6 @@ import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Lists extensions from each configured repo's `index.min.json` (none by default — user-added)
@@ -28,9 +25,8 @@ import javax.inject.Singleton
  * set of repos is surfaced as a failure so the UI can retry automatically instead of showing an
  * indistinguishable empty catalog.
  */
-@Singleton
-class ExtensionRepositoryImpl @Inject constructor(
-    @ApplicationContext private val context: Context,
+class ExtensionRepositoryImpl(
+    private val context: Context,
     private val api: ExtensionRepoApi,
     private val okHttp: OkHttpClient,
     private val settings: SettingsRepository,

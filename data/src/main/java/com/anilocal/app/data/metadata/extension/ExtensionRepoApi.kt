@@ -4,12 +4,9 @@ import com.anilocal.app.data.remote.JsonHttp
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /** Fetches an Aniyomi-style extension repo index (a top-level JSON array) and its `repo.json`. */
-@Singleton
-class ExtensionRepoApi @Inject constructor(private val http: JsonHttp) {
+class ExtensionRepoApi(private val http: JsonHttp) {
     suspend fun index(url: String): List<RepoEntryDto> = http.get(url.toHttpUrl(), ENTRIES)
 
     /** A repo's `repo.json` — its `meta.signingKeyFingerprint` is the trust anchor for auto-install. */

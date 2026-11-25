@@ -57,7 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import com.anilocal.app.appViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -76,7 +76,6 @@ import com.anilocal.app.ui.common.CatalogFeedback
 import com.anilocal.app.ui.common.PosterCard
 import com.anilocal.app.ui.common.SectionHeader
 import com.anilocal.app.ui.common.scoreLabel
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -85,7 +84,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 data class HomeRow(
     val title: String,
@@ -100,8 +98,7 @@ private const val HERO_COUNT = 6
 private val HeroTopScrim =
     Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent))
 
-@HiltViewModel
-class HomeViewModel @Inject constructor(
+class HomeViewModel(
     private val catalog: CatalogRepository,
     private val progress: ProgressRepository,
     downloads: DownloadRepository,
@@ -175,7 +172,7 @@ fun HomeScreen(
     onOpen: (String) -> Unit,
     onResume: (animeId: String, episodeNumber: Int, positionMs: Long) -> Unit,
     onExplore: () -> Unit,
-    vm: HomeViewModel = hiltViewModel(),
+    vm: HomeViewModel = appViewModel { HomeViewModel(it.catalog, it.progress, it.downloads) },
 ) {
     val rows by vm.rows.collectAsStateWithLifecycle()
     val hero by vm.hero.collectAsStateWithLifecycle()

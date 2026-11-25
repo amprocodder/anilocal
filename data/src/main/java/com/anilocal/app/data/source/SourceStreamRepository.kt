@@ -20,9 +20,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import kotlin.coroutines.coroutineContext
-import javax.inject.Inject
-import javax.inject.Named
-import javax.inject.Singleton
 
 /**
  * Bridges catalog metadata (AniList) to playable streams via the user's selected [AnimeSource]:
@@ -44,7 +41,6 @@ import javax.inject.Singleton
  * that first hit played season 1's episodes under season 2. Likewise an episode the matched entry
  * doesn't have fails rather than playing a different one.
  */
-@Singleton
 class SourceStreamRepository internal constructor(
     private val registry: SourceRegistry,
     private val settings: SettingsRepository,
@@ -54,13 +50,13 @@ class SourceStreamRepository internal constructor(
     appScope: CoroutineScope,
 ) : StreamRepository {
 
-    @Inject constructor(
+    constructor(
         registry: SourceRegistry,
         settings: SettingsRepository,
         cache: JsonCache,
         selector: AutoSourceSelector,
         client: OkHttpClient,
-        @Named("appScope") appScope: CoroutineScope,
+        appScope: CoroutineScope,
     ) : this(registry, settings, cache, selector, HttpStreamSpeedProbe(client), appScope)
 
     private val recovery = FreshStreamRecovery(registry, speedProbe, appScope) { block ->

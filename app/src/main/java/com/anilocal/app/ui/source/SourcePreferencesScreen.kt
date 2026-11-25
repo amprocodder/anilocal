@@ -35,7 +35,8 @@ import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import com.anilocal.app.appViewModel
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,11 +49,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Per-source settings screen for a [SourcePreference]-exposing extension (ConfigurableAnimeSource).
@@ -60,8 +59,7 @@ import javax.inject.Inject
  * (which writes the source's own SharedPreferences, picked up on its next request), then re-reads so
  * the screen reflects the new value. Degrades to "no settings" if the source has none or can't be read.
  */
-@HiltViewModel
-class SourcePreferencesViewModel @Inject constructor(
+class SourcePreferencesViewModel(
     savedState: SavedStateHandle,
     registry: SourceRegistry,
 ) : ViewModel() {
@@ -156,7 +154,7 @@ class SourcePreferencesViewModel @Inject constructor(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SourcePreferencesScreen(onBack: () -> Unit, vm: SourcePreferencesViewModel = hiltViewModel()) {
+fun SourcePreferencesScreen(onBack: () -> Unit, vm: SourcePreferencesViewModel = appViewModel { SourcePreferencesViewModel(createSavedStateHandle(), it.sources) }) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()

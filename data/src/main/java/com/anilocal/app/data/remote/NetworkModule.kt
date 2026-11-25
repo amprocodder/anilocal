@@ -2,11 +2,6 @@ package com.anilocal.app.data.remote
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
-import dagger.Module
-import dagger.Provides
-import dagger.hilt.InstallIn
-import dagger.hilt.android.qualifiers.ApplicationContext
-import dagger.hilt.components.SingletonComponent
 import okhttp3.Cache
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -14,18 +9,14 @@ import okhttp3.Response
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
-import javax.inject.Singleton
 
 /**
- * The one shared [OkHttpClient]. The app's own APIs (AniList, AniSkip, MAL, extension repos) are
- * small classes over [JsonHttp], each injected directly — there is no REST framework.
+ * Builds the one shared [OkHttpClient] (see DataGraph). The app's own APIs (AniList, AniSkip, MAL,
+ * extension repos) are small classes over [JsonHttp] — there is no REST framework.
  */
-@Module
-@InstallIn(SingletonComponent::class)
-object NetworkModule {
+internal object NetworkModule {
 
-    @Provides @Singleton
-    fun okHttp(@ApplicationContext context: Context): OkHttpClient = OkHttpClient.Builder()
+    fun okHttp(context: Context): OkHttpClient = OkHttpClient.Builder()
         // Explicit budget per attempt. No callTimeout: the extension-APK download streams a large
         // body through this client, and per-read timeouts already catch stalls without capping a
         // legitimately slow transfer.

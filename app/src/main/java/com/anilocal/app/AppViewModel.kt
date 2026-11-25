@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.anilocal.app.domain.model.ContinueWatching
 import com.anilocal.app.domain.repo.MalRepository
 import com.anilocal.app.domain.repo.ProgressRepository
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -14,11 +13,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /** Activity-scoped VM for app-wide side effects (throttled MAL sync) and the resume bar. */
-@HiltViewModel
-class AppViewModel @Inject constructor(
+class AppViewModel(
     private val mal: MalRepository,
     progress: ProgressRepository,
 ) : ViewModel() {

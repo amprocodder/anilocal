@@ -28,7 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import com.anilocal.app.appViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -39,14 +39,11 @@ import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.ui.common.CatalogFeedback
 import com.anilocal.app.ui.common.PosterCard
 import com.anilocal.app.ui.common.SearchField
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
-import javax.inject.Inject
 
-@HiltViewModel
-class ExploreViewModel @Inject constructor(
+class ExploreViewModel(
     private val catalog: CatalogRepository,
     downloads: DownloadRepository,
 ) : ViewModel() {
@@ -69,7 +66,7 @@ class ExploreViewModel @Inject constructor(
 }
 
 @Composable
-fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = hiltViewModel()) {
+fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = appViewModel { ExploreViewModel(it.catalog, it.downloads) }) {
     val query by vm.query.collectAsStateWithLifecycle()
     val genre by vm.genre.collectAsStateWithLifecycle()
     val sort by vm.sort.collectAsStateWithLifecycle()

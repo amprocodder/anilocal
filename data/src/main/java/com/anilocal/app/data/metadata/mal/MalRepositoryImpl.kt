@@ -16,10 +16,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
 class MalRepositoryImpl internal constructor(
     private val api: MalApi,
     private val dao: MalDao,
@@ -27,7 +24,7 @@ class MalRepositoryImpl internal constructor(
     private val nowMillis: () -> Long,
     private val dispatcher: CoroutineDispatcher,
 ) : MalRepository {
-    @Inject constructor(api: MalApi, dao: MalDao, settings: SettingsRepository) :
+    constructor(api: MalApi, dao: MalDao, settings: SettingsRepository) :
         this(api, dao, settings, System::currentTimeMillis, Dispatchers.IO)
 
     // Startup, Library, and the manual Sync action can request the same list together.

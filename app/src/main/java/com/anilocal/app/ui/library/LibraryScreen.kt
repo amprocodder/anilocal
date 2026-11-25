@@ -34,7 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import com.anilocal.app.appViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -46,7 +46,6 @@ import com.anilocal.app.domain.repo.LibraryRepository
 import com.anilocal.app.domain.repo.MalRepository
 import com.anilocal.app.ui.common.PosterCard
 import com.anilocal.app.ui.common.SearchField
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -61,11 +60,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import com.anilocal.app.ui.common.loadOrNull
-import javax.inject.Inject
 
 @OptIn(ExperimentalCoroutinesApi::class)
-@HiltViewModel
-class LibraryViewModel @Inject constructor(
+class LibraryViewModel(
     library: LibraryRepository,
     downloads: DownloadRepository,
     private val mal: MalRepository,
@@ -131,7 +128,7 @@ class LibraryViewModel @Inject constructor(
 }
 
 @Composable
-fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = hiltViewModel()) {
+fun LibraryScreen(onOpen: (String) -> Unit, vm: LibraryViewModel = appViewModel { LibraryViewModel(it.library, it.downloads, it.mal, it.catalog) }) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val filter by vm.filter.collectAsStateWithLifecycle()

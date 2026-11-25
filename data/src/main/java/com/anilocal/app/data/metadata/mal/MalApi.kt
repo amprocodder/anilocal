@@ -5,8 +5,6 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Reads a user's **PUBLIC** MyAnimeList list with **no API key and no OAuth**, via the same
@@ -16,8 +14,7 @@ import javax.inject.Singleton
  * (MAL serves ~300 entries per page). Per-entry `status` is numeric — see [MalLoadEntry].
  * Requires the user's list privacy to be set to Public on MAL.
  */
-@Singleton
-class MalApi @Inject constructor(private val http: JsonHttp) {
+class MalApi(private val http: JsonHttp) {
     suspend fun animeList(username: String, offset: Int = 0, status: Int = 7): List<MalLoadEntry> {
         val url = BASE.newBuilder()
             .addPathSegment("animelist")

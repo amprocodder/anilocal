@@ -4,7 +4,6 @@ import android.content.Context
 import com.anilocal.app.domain.source.AnimeSource
 import com.anilocal.app.domain.source.SourceRegistry
 import com.anilocal.app.extensions.loader.AnimeExtensionLoader
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,9 +11,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicLong
-import javax.inject.Inject
-import javax.inject.Named
-import javax.inject.Singleton
 
 /**
  * Backs [SourceRegistry] with the in-app built-in sources (Hilt `@IntoSet`) merged with the user's
@@ -23,10 +19,9 @@ import javax.inject.Singleton
  * built-ins immediately and gains extensions when the scan completes. Built-ins sort before
  * extensions, then by name; ids are de-duplicated (built-in wins) for a stable list.
  */
-@Singleton
-class SourceRegistryImpl @Inject constructor(
-    @ApplicationContext private val context: Context,
-    @Named("appScope") private val scope: CoroutineScope,
+class SourceRegistryImpl(
+    private val context: Context,
+    private val scope: CoroutineScope,
     builtIns: Set<@JvmSuppressWildcards AnimeSource>,
 ) : SourceRegistry {
 

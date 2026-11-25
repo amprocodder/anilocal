@@ -78,7 +78,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.hilt.navigation.compose.hiltViewModel
+import com.anilocal.app.appViewModel
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -116,7 +117,7 @@ private val ResizeModes = resizeModes()
 
 @OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
+fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = appViewModel { PlayerViewModel(it.appContext, createSavedStateHandle(), it.mediaCache, it.catalog, it.streams, it.skip, it.progress, it.downloads, it.appScope, it.settings) }) {
     val currentPlayer by vm.player.collectAsStateWithLifecycle()
     val recoveryState by vm.recoveryState.collectAsStateWithLifecycle()
     val position by vm.position.collectAsStateWithLifecycle()

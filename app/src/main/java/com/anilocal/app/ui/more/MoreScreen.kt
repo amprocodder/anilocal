@@ -64,7 +64,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.hilt.navigation.compose.hiltViewModel
+import com.anilocal.app.appViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
@@ -79,7 +79,7 @@ import kotlin.math.roundToInt
 fun MoreScreen(
     onBrowseExtensions: () -> Unit,
     onConfigureSource: (String) -> Unit,
-    vm: MoreViewModel = hiltViewModel(),
+    vm: MoreViewModel = appViewModel { MoreViewModel(it.settings, it.mal, it.sources, it.extensions) },
 ) {
     val switchColors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary)
     val context = LocalContext.current

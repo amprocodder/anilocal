@@ -52,8 +52,6 @@ import com.anilocal.app.domain.repo.ProgressRepository
 import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.repo.SkipRepository
 import com.anilocal.app.domain.repo.StreamRepository
-import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -76,17 +74,14 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.coroutineContext
 import java.util.concurrent.atomic.AtomicInteger
-import javax.inject.Inject
-import javax.inject.Named
 
 /** A selectable subtitle (text) track surfaced to the UI — no Media3 types cross into Compose. */
 data class PlayerTextTrack(val label: String, val selected: Boolean)
 
 // ExperimentalApi: the legacy render-time subtitle decoding (see createPlayer) is marked experimental.
 @OptIn(UnstableApi::class, ExperimentalApi::class)
-@HiltViewModel
-class PlayerViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
+class PlayerViewModel(
+    private val context: Context,
     private val savedState: SavedStateHandle,
     private val cache: Cache,
     private val catalog: CatalogRepository,
@@ -95,7 +90,7 @@ class PlayerViewModel @Inject constructor(
     private val progress: ProgressRepository,
     private val downloads: DownloadRepository,
     // App-lifetime scope so the final save survives viewModelScope being cancelled on teardown.
-    @Named("appScope") private val appScope: CoroutineScope,
+    private val appScope: CoroutineScope,
     settings: SettingsRepository,
 ) : ViewModel() {
 

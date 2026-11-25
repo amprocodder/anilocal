@@ -16,8 +16,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.coroutines.resumeWithException
 
 /** A non-2xx response; [code] is the HTTP status, for callers that treat one as an answer (AniSkip's 404). */
@@ -45,8 +43,7 @@ suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
  * few lines on top of this, so no REST framework is needed. Bodies are decoded straight from the
  * response stream with the app-wide [AppJson] and a compile-time serializer.
  */
-@Singleton
-class JsonHttp @Inject constructor(private val client: OkHttpClient) {
+class JsonHttp(private val client: OkHttpClient) {
 
     suspend fun <T> get(
         url: HttpUrl,

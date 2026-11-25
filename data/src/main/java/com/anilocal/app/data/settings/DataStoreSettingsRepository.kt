@@ -14,23 +14,19 @@ import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.source.Sources
 import com.anilocal.app.data.metadata.extension.RecommendedSources
 import com.anilocal.app.extensions.loader.AnimeExtensionLoader
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
-import javax.inject.Inject
-import javax.inject.Singleton
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
-@Singleton
 class DataStoreSettingsRepository internal constructor(
     private val store: DataStore<Preferences>,
     /** True when this install predates the blank-by-default repo list and already has private
      *  extensions — those installs relied on the old implicit yuzono default and keep it. */
     private val hasLegacyExtensions: () -> Boolean = { false },
 ) : SettingsRepository {
-    @Inject constructor(@ApplicationContext context: Context) : this(
+    constructor(context: Context) : this(
         context.dataStore,
         {
             AnimeExtensionLoader.privateDir(context)

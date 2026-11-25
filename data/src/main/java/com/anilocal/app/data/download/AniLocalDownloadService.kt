@@ -9,11 +9,8 @@ import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadService
 import androidx.media3.exoplayer.scheduler.PlatformScheduler
 import androidx.media3.exoplayer.scheduler.Scheduler
+import com.anilocal.app.data.DataGraphHolder
 import com.anilocal.app.data.R
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.android.EntryPointAccessors
-import dagger.hilt.components.SingletonComponent
 
 /** Unique JobScheduler id for resuming downloads in the background / after reboot. */
 private const val DOWNLOAD_JOB_ID = 1
@@ -21,7 +18,7 @@ private const val STOP_REASON_SERVICE_TIMEOUT = 2
 
 /**
  * Foreground service that runs Media3 downloads + shows the progress notification.
- * Instantiated by the framework, so its dependencies are pulled via a Hilt EntryPoint.
+ * Instantiated by the framework, so it reaches the data graph through the Application.
  */
 @OptIn(UnstableApi::class)
 class AniLocalDownloadService : DownloadService(
@@ -31,14 +28,12 @@ class AniLocalDownloadService : DownloadService(
     R.string.download_channel_name,
     0,
 ) {
-    private val entryPoint by lazy(LazyThreadSafetyMode.NONE) {
-        EntryPointAccessors.fromApplication(applicationContext, DownloadEntryPoint::class.java)
-    }
+    private val graph by lazy(LazyThreadSafetyMode.NONE) { (applicationContext as DataGraphHolder).dataGraph }
 
-    override fun getDownloadManager(): DownloadManager = entryPoint.downloadManager()
+    override fun getDownloadManager(): DownloadManager = graph.downloadManager
 
     override fun onTimeout(startId: Int, fgsType: Int) {
-        val manager = entryPoint.downloadManager()
+        val manager = graph.downloadManager
         // Android 15's data-sync budget expires while backgrounded. Persist a resumable pause
         // instead of leaving transfers queued with no Resume control after the service stops.
         manager.currentDownloads.filter {
@@ -59,7 +54,7 @@ class AniLocalDownloadService : DownloadService(
     override fun getForegroundNotification(
         downloads: MutableList<Download>,
         notMetRequirementFlags: Int,
-    ): Notification = entryPoint.downloadNotificationHelper().buildProgressNotification(
+    ): Notification = graph.downloadNotifications.buildProgressNotification(
         this,
         android.R.drawable.stat_sys_download,
         null,
@@ -67,12 +62,4 @@ class AniLocalDownloadService : DownloadService(
         downloads,
         notMetRequirementFlags,
     )
-}
-
-@OptIn(UnstableApi::class)
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface DownloadEntryPoint {
-    fun downloadManager(): DownloadManager
-    fun downloadNotificationHelper(): androidx.media3.exoplayer.offline.DownloadNotificationHelper
 }

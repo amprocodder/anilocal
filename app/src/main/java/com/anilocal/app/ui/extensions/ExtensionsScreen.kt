@@ -53,7 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import com.anilocal.app.appViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -69,7 +69,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -79,7 +78,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
-import javax.inject.Inject
 
 /** Repo root from user input, or null if it isn't an http(s) URL. Strips index/meta file names. */
 internal fun normalizeRepoUrl(input: String): String? {
@@ -91,8 +89,7 @@ internal fun normalizeRepoUrl(input: String): String? {
     return url.takeIf { ok }
 }
 
-@HiltViewModel
-class ExtensionsViewModel @Inject constructor(
+class ExtensionsViewModel(
     private val extensions: ExtensionRepository,
     private val settings: SettingsRepository,
     registry: SourceRegistry,
@@ -304,7 +301,7 @@ class ExtensionsViewModel @Inject constructor(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = hiltViewModel()) {
+fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = appViewModel { ExtensionsViewModel(it.extensions, it.settings, it.sources) }) {
     val available by vm.available.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()

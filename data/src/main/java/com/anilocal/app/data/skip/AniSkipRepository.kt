@@ -8,8 +8,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import com.anilocal.app.data.remote.HttpException
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * AniSkip skip windows — the FALLBACK. The player prefers the source's own per-stream timestamps
@@ -22,8 +20,7 @@ import javax.inject.Singleton
  * episode after episode. Here each type is settled on its own: the same-cut answer if it has a
  * plausible window of that type, else the any-cut (length 0) top-voted one.
  */
-@Singleton
-class AniSkipRepository @Inject constructor(
+class AniSkipRepository(
     private val api: AniSkipApi,
     private val cache: JsonCache,
 ) : SkipRepository {
