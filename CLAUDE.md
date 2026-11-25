@@ -304,7 +304,11 @@ for the old MAL client id).
   merge can only add windows, never clobber shown ones. `playableMarkers` clamps an OUTRO that runs past
   the file's end (instead of dropping it) and drops anything else outside the media. When a title has
   **no MAL id**, `AniSkipRepository` returns **no markers** — never fabricated ones (a Skip button
-  jumping to made-up times is worse than none). Auto-skip fires at most once per marker.
+  jumping to made-up times is worse than none). Auto-skip fires at most once per marker. An OUTRO
+  that runs to (within `END_THRESHOLD_MS` of) the file's end **is** the episode's end: skipping it
+  (button or auto-skip, `skipPast`) seeks to the end and calls `endEpisode()` at once — the advance
+  `STATE_ENDED` runs — instead of waiting for Media3 to fetch and decode the last segment just to reach
+  end-of-stream, which nothing watches for a stall (that wait was the outro-skip hang).
   **How AniSkip answers** (`aniskip-api` source): per requested type independently, the top-voted
   submission whose `episodeLength` is within **±20s** of ours (any length for `0`), each tagged with its
   own `episodeLength`; HTTP 404 when no type matched. So a length-matched answer often holds only an OP
@@ -319,11 +323,13 @@ for the old MAL client id).
   fresh ExoPlayer — a downloaded next ep plays from cache), gated on the `autoPlayNext` setting and
   `hasEpisode()`; an `advancing` guard fires it exactly once, and with no next episode it
   `progress.remove()`s the title from Continue Watching. **Pre-cache next episode**
-  (`precacheNextEpisode`, default on, only with `autoPlayNext`) makes that switch instant: in the last
+  (`precacheNextEpisode`, default on, only with `autoPlayNext`) makes that switch instant. Its timing is
+  measured to where the content ends (`contentEndMs`: the start of such an end-reaching outro, else the
+  file's end), so an outro skip finds the standby already buffering. In the last
   2 min `maybePrecacheNext` re-resolves the next episode's link (the READY-time `prefetchNext` is a
   whole episode old by then, and tokenized links expire), builds its media into a hidden, paused
   **standby** ExoPlayer (its `PlayerOwner` holds an inactive generation, so its callbacks are ignored),
-  and lets it buffer only once the current episode is fully buffered — or in the last 20 s if the
+  and lets it buffer only once the current episode is buffered to that point — or in the last 20 s if the
   current one isn't stalled — so the two never compete for bandwidth; `StandbyLoadControl` caps it at
   15 s. `playEpisode` then `takeStandby`s and `promote`s it (re-binds the owner, lifts the cap, swaps
   `_player`) instead of loading: ~20–40 ms from `STATE_ENDED` to the next episode's first frame. Any
