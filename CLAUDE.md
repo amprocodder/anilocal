@@ -352,6 +352,11 @@ for the old MAL client id).
   or in recovery), and seek-to-next on a single item jumps to the end and auto-advances. A toggle key
   (`PLAY_PAUSE`/`HEADSETHOOK`) is intercepted in the session callback and calls `togglePlay()`, because
   Media3 reads an IDLE player as paused, so the button could never pause a loading episode.
+  Every player (`createPlayer`) also **handles audio focus** (`USAGE_MEDIA`/`CONTENT_TYPE_MOVIE`: playing
+  pauses another app's music; another app taking focus pauses this one) and **pauses when headphones
+  disconnect** (`setHandleAudioBecomingNoisy`). Both turn `playWhenReady` off, which the player listener
+  mirrors into the play intent. A call is a *transient* loss: playback is held while still READY (so the
+  recovery watchdog ignores it) and resumes on its own.
 
 - **Optional features no-op when unconfigured.** TMDB artwork is gated on build-time
   config that defaults to blank; **MAL sync needs no config at all** (username only). Build-time keys flow
