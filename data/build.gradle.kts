@@ -26,7 +26,6 @@ dependencies {
     // so the vendored eu.kanade.* types never leak onto :app's classpath — the seam stays intact.
     implementation(project(":extensions"))
 
-    implementation(libs.androidx.core.ktx)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
