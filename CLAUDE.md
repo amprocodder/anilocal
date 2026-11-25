@@ -39,7 +39,7 @@ gradle :data:testDebugUnitTest     # Android-library unit tests
 
 **No test suite is committed** and CI only lints and assembles: CI (`.github/workflows/android.yml`)
 runs on every push — it checks the commit messages, runs `:domain:check` plus lint on the Android
-modules, assembles `:app:assembleDebug` and `:app:assembleBenchmark`, and uploads both APKs (artifacts
+modules, assembles `:app:assembleDebug` and `:app:assembleBenchmark` (R8-optimized), and uploads both APKs (artifacts
 `anilocal-debug-apk` and `anilocal-optimized-apk`) for sideloading — it provisions Gradle 9.9.2 via `gradle/actions/setup-gradle`, **not** a committed wrapper,
 so don't "fix" CI by adding one. The pure-JVM `:domain` module is the fast, dependency-free place to add
 unit tests.
@@ -143,7 +143,12 @@ Four Gradle modules with a strict, one-way dependency direction:
   of OkHttp, okio, jsoup, kotlinx.serialization, coroutines, RxJava 1, Injekt, androidx.preference and
   QuickJS (`app.cash.quickjs`, the JS engine shared extractors like StreamWish deobfuscate with), so each
   must stay **at or above** what extensions are built against — a missing/older class surfaces only as
-  a silent "nothing found". The vendored `parseAs` uses Kotlin context *parameters*
+  a silent "nothing found". **Release and benchmark builds run R8** (`-dontobfuscate`, no resource
+  shrinking), so the same set is the host's ABI under shrinking: `extensions/consumer-rules.pro` keeps
+  the vendored `eu.kanade.*`/`tachiyomi.*` API strictly and those libraries' public API (Aniyomi's own
+  list), plus the generic signature of Injekt's `FullTypeReference` subclasses (host registrations key
+  on it). A library extensions call that isn't listed there is stripped from optimized builds only —
+  debug still works — so add any new one to that file. The vendored `parseAs` uses Kotlin context *parameters*
   (`context(json: Json)`, as upstream does; same compiled signature as the old context receivers).
   `AniyomiSourceAdapter.resolve()` tries the ext-lib-14 `getVideoList(episode)` path **first**, falling
   back to the lib-16 `getHosterList → getVideoList(hoster)` pipeline — classic-first avoids an
