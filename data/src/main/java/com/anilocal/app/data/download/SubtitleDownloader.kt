@@ -80,8 +80,8 @@ internal class SubtitleDownloader(client: OkHttpClient, private val directory: F
             // Cancel the transport; the callback owns closing the response after its read ends.
         }
         call.enqueue(object : Callback {
-            override fun onFailure(call: Call, error: IOException) {
-                if (continuation.isActive) continuation.resumeWithException(error)
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(e)
             }
 
             override fun onResponse(call: Call, response: Response) {
@@ -92,7 +92,7 @@ internal class SubtitleDownloader(client: OkHttpClient, private val directory: F
                     response.use {
                         if (!continuation.isActive) return
                         if (!response.isSuccessful) throw IOException("Subtitle HTTP ${response.code}")
-                        val body = response.body ?: throw IOException("Empty subtitle response")
+                        val body = response.body
                         if (body.contentLength() > MAX_BYTES) throw IOException("Subtitle is too large")
                         if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Cannot create subtitle directory")
                         val extension = sub.url.substringBefore('?').substringBefore('#')
@@ -117,7 +117,7 @@ internal class SubtitleDownloader(client: OkHttpClient, private val directory: F
                         if (!temporary!!.renameTo(file)) throw IOException("Cannot save subtitle")
                         saved = file
                         delivered = true
-                        continuation.resume(file) { file.delete() }
+                        continuation.resume(file) { _, delivered, _ -> delivered.delete() }
                     }
                 } catch (error: Exception) {
                     if (continuation.isActive) continuation.resumeWithException(error)

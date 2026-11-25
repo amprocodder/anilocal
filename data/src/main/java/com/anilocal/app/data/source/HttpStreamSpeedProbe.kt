@@ -127,7 +127,7 @@ internal class HttpStreamSpeedProbe(client: OkHttpClient) : StreamSpeedProbe {
                     response.use {
                         if (!continuation.isActive) return
                         if (!response.isSuccessful) throw IOException("Media probe HTTP ${response.code}")
-                        val body = response.body ?: throw IOException("Empty media response")
+                        val body = response.body
                         val output = ByteArrayOutputStream(minOf(maxBytes, 16_384))
                         val buffer = ByteArray(8_192)
                         body.byteStream().use { input ->
