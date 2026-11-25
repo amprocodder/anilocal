@@ -35,6 +35,7 @@ import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.SingleSampleMediaSource
 import androidx.media3.exoplayer.text.TextOutput
 import androidx.media3.exoplayer.text.TextRenderer
+import androidx.media3.session.MediaSession
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.Episode
@@ -72,6 +73,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.coroutineContext
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Named
 
@@ -117,6 +119,15 @@ class PlayerViewModel @Inject constructor(
     private val _player = MutableStateFlow(createPlayer(playbackDataSource(emptyMap(), offline = false)))
     val player: StateFlow<ExoPlayer> = _player.asStateFlow()
     private val currentPlayer: ExoPlayer get() = _player.value
+
+    // The system media session, so Bluetooth headset/earbud buttons (and a car, a watch, the
+    // Assistant) can play and pause. It follows every player swap (swapPlayer); see SessionPlayer
+    // for what it may do. The id only has to be unique while an outgoing player screen's view
+    // model is still being torn down.
+    private val mediaSession = MediaSession.Builder(context, SessionPlayer(currentPlayer, ::setPlaying))
+        .setId("player-${sessionIds.incrementAndGet()}")
+        .setCallback(mediaButtonCallback(::togglePlay))
+        .build()
 
     private val _markers = MutableStateFlow<List<SkipMarker>>(emptyList())
     val markers: StateFlow<List<SkipMarker>> = _markers
@@ -574,8 +585,7 @@ class PlayerViewModel @Inject constructor(
         textGroups = emptyList()
         _textTracks.value = emptyList()
         currentUri = uri
-        _player.value = replacement
-        previous.release()
+        swapPlayer(replacement)
         session.attach()
         replacement.setMediaSource(media, session.positionMs)
         replacement.playWhenReady = session.playWhenReady
@@ -583,6 +593,14 @@ class PlayerViewModel @Inject constructor(
         // recovery watchdog retry this replacement when the user's intent is to keep playing.
         recovery.onReplacementPrepared(replacement.playWhenReady)
         replacement.prepare()
+    }
+
+    // Put [replacement] on screen and behind the media session, then release the outgoing player.
+    private fun swapPlayer(replacement: ExoPlayer) {
+        val previous = currentPlayer
+        _player.value = replacement
+        mediaSession.player = SessionPlayer(replacement, ::setPlaying)
+        previous.release()
     }
 
     // The outgoing player's track parameters minus its text override (that names the old media's
@@ -830,8 +848,7 @@ class PlayerViewModel @Inject constructor(
         currentUri = warm.uri
         prefetched = null   // this episode's link, now consumed
         warm.owner.generation = generation
-        _player.value = player
-        previous.release()
+        swapPlayer(player)
         session.attach()
         warm.prepare()
         player.playWhenReady = session.playWhenReady
@@ -1038,15 +1055,19 @@ class PlayerViewModel @Inject constructor(
 
     // ---- Overlay control surface --------------------------------------------------------------
 
-    fun togglePlay() {
-        if (!session.playWhenReady && currentPlayer.playbackState == Player.STATE_ENDED) {
+    fun togglePlay() = setPlaying(!session.playWhenReady)
+
+    // The one way play intent changes on request — the overlay's button and the media session
+    // (headset buttons) both land here, so an ended episode replays from the start either way.
+    private fun setPlaying(play: Boolean) {
+        if (play && !session.playWhenReady && currentPlayer.playbackState == Player.STATE_ENDED) {
             session.seek(0L)
             currentPlayer.seekTo(0L)
             _position.value = 0L
         }
-        session.playWhenReady = !session.playWhenReady
-        _playWhenReady.value = session.playWhenReady
-        currentPlayer.playWhenReady = session.playWhenReady
+        session.playWhenReady = play
+        _playWhenReady.value = play
+        currentPlayer.playWhenReady = play
     }
 
     fun seekBack() = seekTo(session.positionMs - 10_000L)
@@ -1143,6 +1164,7 @@ class PlayerViewModel @Inject constructor(
         // Only persist if the current media matches episodeNumber (not mid-switch) — the outgoing
         // episode was already saved at the top of playEpisode().
         if (s != null && episodeLoaded) appScope.launch { persist(s, episode, pos, dur) }
+        mediaSession.release()
         currentPlayer.release()
     }
 
@@ -1202,6 +1224,7 @@ class PlayerViewModel @Inject constructor(
         // Enough to ride out a cold CDN connection's slow start; more buys nothing once promoted.
         const val STANDBY_BUFFER_US = 15_000_000L
         const val INACTIVE_GENERATION = -1
+        val sessionIds = AtomicInteger()
 
         // Duplicated from :data's DownloadModule rather than shared: :app must not import
         // com.anilocal.app.data.*, and a user-agent string is not domain logic.
