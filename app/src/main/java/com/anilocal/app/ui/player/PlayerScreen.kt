@@ -121,12 +121,15 @@ private val DiscColor = Color.Black.copy(alpha = 0.35f)
  */
 private class SeekFlash(val forward: Boolean)
 
+// Built in an opted-in function: lint no longer accepts @OptIn on a property for its initializer.
 @OptIn(UnstableApi::class)
-private val ResizeModes = listOf(
+private fun resizeModes() = listOf(
     AspectRatioFrameLayout.RESIZE_MODE_FIT to "Fit",
     AspectRatioFrameLayout.RESIZE_MODE_ZOOM to "Zoom",
     AspectRatioFrameLayout.RESIZE_MODE_FILL to "Stretch",
 )
+
+private val ResizeModes = resizeModes()
 
 @OptIn(UnstableApi::class)
 @Composable

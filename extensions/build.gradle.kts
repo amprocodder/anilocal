@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
 }
 
@@ -11,7 +10,7 @@ plugins {
 // Hilt-free — Injekt is the DI mechanism inside the vendored source classes, separate from Hilt.
 android {
     namespace = "com.anilocal.app.extensions"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 24
@@ -19,11 +18,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions {
-        jvmTarget = "17"
-        // OkHttpExtensions.parseAs uses Kotlin context receivers (`context(Json)`), as upstream does.
-        freeCompilerArgs += "-Xcontext-receivers"
     }
 }
 
