@@ -1,6 +1,8 @@
 package com.anilocal.app
 
+import android.annotation.SuppressLint
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -49,11 +51,24 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    /**
+     * Set by the screen on display to see hardware keys before focus routing does (the player's
+     * Space bar = play/pause, which has to win over whatever button keyboard navigation focused).
+     * Returns true to consume the event.
+     */
+    var keyInterceptor: ((KeyEvent) -> Boolean)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent { AniLocalTheme { AppRoot() } }
     }
+
+    // androidx.core's ComponentActivity tags its override of this framework method library-internal;
+    // overriding and calling Activity.dispatchKeyEvent is ordinary, so lint's RestrictedApi is wrong.
+    @SuppressLint("RestrictedApi")
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        keyInterceptor?.invoke(event) == true || super.dispatchKeyEvent(event)
 }
 
 @Composable

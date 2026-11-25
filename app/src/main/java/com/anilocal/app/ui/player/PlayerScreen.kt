@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import android.os.Build
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
@@ -101,6 +102,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
+import com.anilocal.app.MainActivity
 import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.SkipMarker
 import kotlinx.coroutines.delay
@@ -231,6 +233,28 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
                 }
             }
         }
+    }
+
+    // A keyboard's Space bar (a tablet keyboard cover) toggles play like the overlay's button —
+    // Media3's session only hears media keys. Hooked at the activity, ahead of focus routing: an
+    // arrow key can move focus onto an overlay button, and Space would then press that one (Back
+    // included). Plain Space only, so modifier shortcuts (Shift/Ctrl+Space language switching) pass.
+    // Pausing brings the controls up to show where it stopped; any press restarts their auto-hide.
+    DisposableEffect(activity) {
+        val host = activity as? MainActivity ?: return@DisposableEffect onDispose {}
+        val onKey: (KeyEvent) -> Boolean = onKey@{ event ->
+            if (event.keyCode != KeyEvent.KEYCODE_SPACE || !event.hasNoModifiers()) return@onKey false
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                vm.togglePlay()
+                if (!locked) {
+                    if (!vm.playWhenReady.value) controlsVisible = true
+                    interactionTick++
+                }
+            }
+            true
+        }
+        host.keyInterceptor = onKey
+        onDispose { if (host.keyInterceptor === onKey) host.keyInterceptor = null }
     }
 
     LaunchedEffect(resizeLabel) { if (resizeLabel != null) { delay(900); resizeLabel = null } }
