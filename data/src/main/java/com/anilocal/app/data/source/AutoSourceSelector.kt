@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.joinAll
@@ -59,6 +60,16 @@ class AutoSourceSelector(
      *  lib-14 sources call OkHttp synchronously and bypass its dispatcher, and the CF WebView solves
      *  one challenge at a time, so the host must police fan-out itself. */
     private val probeGate = Semaphore(MAX_CONCURRENT_PROBES)
+
+    /**
+     * Where probes actually run: detached from the caller (a child of appScope) and awaited under
+     * the deadline. A vendored lib-14 source blocks its thread in OkHttp/Rx and ignores cancellation,
+     * and the Cloudflare interceptor can sit 30 s on its WebView latch, so a withTimeout wrapped
+     * around the call itself only fires once that blocking work returns — PIN_TIMEOUT_MS and
+     * CANDIDATE_TIMEOUT_MS were blown straight through. Awaiting a detached job makes every deadline
+     * real; an abandoned probe drains in the background and its result is dropped.
+     */
+    private val probeScope = CoroutineScope(appScope.coroutineContext + SupervisorJob(appScope.coroutineContext[Job]))
 
     /** A per-title (per AniList id) pin: which source last won, when, and whether it won with a
      *  confident match (a weak win means no source matched confidently when it was raced). */
@@ -179,8 +190,9 @@ class AutoSourceSelector(
         timeoutMs: Long,
     ): SourceResolution? {
         val start = SystemClock.elapsedRealtime()
+        val work = probeScope.async(Dispatchers.IO) { probe(source) }
         return try {
-            val r = withTimeout(timeoutMs) { probe(source) }
+            val r = withTimeout(timeoutMs) { work.await() }
             record(source.info.id, SystemClock.elapsedRealtime() - start, success = true)
             r
         } catch (_: TimeoutCancellationException) {
@@ -193,6 +205,8 @@ class AutoSourceSelector(
         } catch (_: Exception) {
             record(source.info.id, SystemClock.elapsedRealtime() - start, success = false)
             null
+        } finally {
+            work.cancel()   // no-op once it finished; otherwise abandons it to drain
         }
     }
 
