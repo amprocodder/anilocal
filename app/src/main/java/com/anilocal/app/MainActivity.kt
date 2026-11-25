@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AppRoot() {
-    val appVm: AppViewModel = appViewModel { AppViewModel(it.mal, it.progress) }
+    val appVm: AppViewModel = appViewModel { AppViewModel(it.mal, it.progress, it.catalog, it.streams, it.downloads) }
     LaunchedEffect(Unit) { appVm.onAppOpen() }   // throttled MAL sync on app open
     val resumeItem by appVm.resumeBar.collectAsStateWithLifecycle()
     val nav: AppNavigation = appViewModel { AppNavigation(createSavedStateHandle()) }

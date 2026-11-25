@@ -52,6 +52,13 @@ interface StreamRepository {
     /** All available quality variants (highest first) — used by the download quality picker. */
     suspend fun resolveStreams(anime: AnimeDetail, episodeNumber: Int): List<VideoStream>
 
+    /**
+     * Start resolving [episodeNumber] in the background because the user is likely to play it next
+     * (a title they're partway through). A [resolveStream] for the same episode shortly after is
+     * served from this result instead of resolving again. Fire-and-forget; failures are ignored.
+     */
+    fun prefetch(anime: AnimeDetail, episodeNumber: Int)
+
     /** Re-resolve live sources and measure media speed, bypassing saved source pins and matches. */
     suspend fun recoverStream(
         anime: AnimeDetail,

@@ -1,6 +1,10 @@
 package com.anilocal.app.data.source
 
 import kotlinx.serialization.Serializable
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Deferred
 import com.anilocal.app.domain.source.NoSourceInstalledException
 import android.os.SystemClock
 import com.anilocal.app.data.cache.JsonCache
@@ -160,8 +164,45 @@ class SourceStreamRepository internal constructor(
 
     // The union merge above already puts every known subtitle on every variant, so the best
     // variant is complete as-is.
-    override suspend fun resolveStream(anime: AnimeDetail, episodeNumber: Int): VideoStream =
-        resolveStreams(anime, episodeNumber).first()
+    override suspend fun resolveStream(anime: AnimeDetail, episodeNumber: Int): VideoStream {
+        val pre = prefetches.remove(prefetchKey(anime.id, episodeNumber))
+        if (pre != null && !pre.isStale()) {
+            try {
+                return pre.result.await()
+            } catch (ce: CancellationException) {
+                currentCoroutineContext().ensureActive()   // the caller was cancelled: propagate
+            } catch (_: Exception) {
+                // The prefetch failed; resolve live below (it may have been a transient error).
+            }
+        }
+        return resolveStreams(anime, episodeNumber).first()
+    }
+
+    // Pre-resolved streams for the episode the user is likely to play next (see prefetch). Links are
+    // tokenized and expire, so one is only trusted for PREFETCH_TTL_MS after it was started.
+    private class Prefetch(val result: Deferred<VideoStream>, val startedAt: Long) {
+        fun isStale() = SystemClock.elapsedRealtime() - startedAt > PREFETCH_TTL_MS
+    }
+    private val prefetches = ConcurrentHashMap<String, Prefetch>()
+    private val prefetchScope = appScope
+
+    private fun prefetchKey(animeId: String, episode: Int) = "$animeId:$episode"
+
+    override fun prefetch(anime: AnimeDetail, episodeNumber: Int) {
+        val key = prefetchKey(anime.id, episodeNumber)
+        prefetches.entries.removeAll { (_, p) -> p.isStale().also { stale -> if (stale) p.result.cancel() } }
+        if (prefetches.containsKey(key)) return
+        // At most a couple at a time — the latest asks are the likely ones.
+        while (prefetches.size >= MAX_PREFETCHES) {
+            prefetches.entries.minByOrNull { it.value.startedAt }?.let { oldest ->
+                prefetches.remove(oldest.key)?.result?.cancel()
+            } ?: break
+        }
+        prefetches[key] = Prefetch(
+            prefetchScope.async(Dispatchers.IO) { resolveStreams(anime, episodeNumber).first() },
+            SystemClock.elapsedRealtime(),
+        )
+    }
 
     override suspend fun recoverStream(
         anime: AnimeDetail,
@@ -187,6 +228,8 @@ class SourceStreamRepository internal constructor(
     private companion object {
         val MATCH = SourceMatch.serializer()
         const val MATCH_TTL_MS = 4L * 60 * 60 * 1000   // episode lists grow weekly; 4h keeps them current
+        const val PREFETCH_TTL_MS = 4L * 60 * 1000   // tokenized links outlive this comfortably
+        const val MAX_PREFETCHES = 2
         const val REGISTRY_WAIT_MS = 3_000L            // tolerate the cold-start async extension scan
     }
 }

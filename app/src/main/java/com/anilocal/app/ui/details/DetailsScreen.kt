@@ -78,6 +78,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.annotation.VisibleForTesting
 import com.anilocal.app.appViewModel
+import kotlinx.coroutines.flow.filterNotNull
+import com.anilocal.app.domain.repo.ProgressRepository
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -145,6 +147,7 @@ class DetailsViewModel(
     private val downloads: DownloadRepository,
     private val settings: SettingsRepository,
     mal: MalRepository,
+    progress: ProgressRepository,
     // Season downloads keep queuing after the user leaves the screen (viewModelScope would cancel).
     private val appScope: CoroutineScope,
 ) : ViewModel() {
@@ -156,6 +159,18 @@ class DetailsViewModel(
     val detail = loader.value
     val loadState = loader.state
     fun retry() = loader.refresh()
+
+    init {
+        // A title the user is partway through: the episode they'll most likely play next is the one
+        // they were watching, so start resolving it now — Play is then near-instant. Skipped when it's
+        // downloaded (that plays from disk anyway).
+        viewModelScope.launch {
+            val resume = progress.continueWatching.first().firstOrNull { it.anime.id == animeId } ?: return@launch
+            if (downloads.getOffline(animeId, resume.episodeNumber) != null) return@launch
+            val d = detail.filterNotNull().first()
+            if (d.episodes.any { it.number == resume.episodeNumber }) streams.prefetch(d, resume.episodeNumber)
+        }
+    }
 
     val saved: StateFlow<Boolean> =
         library.isSaved(animeId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -339,7 +354,7 @@ fun DetailsScreen(
     onPlay: (animeId: String, episodeNumber: Int) -> Unit,
     onOpenDetail: (animeId: String) -> Unit,
     onBack: () -> Unit,
-    vm: DetailsViewModel = appViewModel { DetailsViewModel(animeId, it.catalog, it.library, it.streams, it.skip, it.downloads, it.settings, it.mal, it.appScope) },
+    vm: DetailsViewModel = appViewModel { DetailsViewModel(animeId, it.catalog, it.library, it.streams, it.skip, it.downloads, it.settings, it.mal, it.progress, it.appScope) },
 ) {
     val detail by vm.detail.collectAsStateWithLifecycle()
     val loadState by vm.loadState.collectAsStateWithLifecycle()
