@@ -51,7 +51,8 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   streams for AniList-browsed titles. **Browse extensions** (Settings → Browse extensions) is where you add
   extension repos (`index.min.json`) and install sources in-app; **Install recommended sources**
   in Settings is an explicit one-tap opt-in for a small community-recommended set.
-- Hilt DI, Compose + Material3, Coil images, OkHttp 5/Retrofit/Moshi.
+- Hilt DI, Compose + Material3, Coil images; HTTP and JSON via OkHttp 5 + kotlinx.serialization (the
+  libraries extensions already need), with a small hand-written JSON client instead of Retrofit/Moshi.
 
 ## Extension sources & posture
 - **No backend, no ads, no signature spoofing.** AniList stays the only browse layer; extensions

@@ -208,9 +208,9 @@ subtitles**, so captions on lower renditions aren't lost to the height sort → 
 
 The single `@Binds` module is **`AppModule` (in `:data`, package `com.anilocal.app.di`)**, which
 `@Binds` every domain interface → `:data` impl. `:data` additionally has three `@Provides` `object`
-modules under `com.anilocal.app.data.*`: `NetworkModule` (Retrofit/Moshi/OkHttp + the four APIs —
-AniList/AniSkip/MAL/extension-repo), `DatabaseModule` (Room), and `DownloadModule` (the Media3
-cache/manager stack). Adding a new repo/source
+modules under `com.anilocal.app.data.*`: `NetworkModule` (the one shared `OkHttpClient`),
+`DatabaseModule` (Room), and `DownloadModule` (the Media3 cache/manager stack). The four APIs
+(AniList/AniSkip/MAL/extension-repo) are `@Inject` classes over `JsonHttp`. Adding a new repo/source
 impl → add a `@Binds` in `AppModule`. **`:app` has no DI module and no build-time keys** (no module
 generates a `BuildConfig`). If a future data-layer impl needs an `:app` build-time key, add a small
 `@Provides @Named(...)` Hilt module in `:app` to surface it (the now-removed `AppConfigModule` did this
@@ -232,7 +232,7 @@ for the old MAL client id).
   Downloads-screen Retry button calls `retry()` — never `resume()`, which is a no-op for FAILED.
   **Gotchas:** download state persists as an Int code,
   and the DAO hard-codes `state = 1` to mean COMPLETED — a magic number duplicated from private companion
-  consts, easy to break; subtitles and skip markers are stored as Moshi **JSON columns** on `DownloadEntity`
+  consts, easy to break; subtitles, skip markers and headers are stored as **JSON columns** on `DownloadEntity`
   (not separate tables); offline subtitle files are pulled into `<downloadDir>/subs/` with their URLs
   rewritten to `file://` and **deleted manually in `remove()`**. There are **two Room databases**
   (`DatabaseModule.kt`): `anilocal.db` (version 5, `exportSchema = false`) holds user data and **every
@@ -482,7 +482,16 @@ for the old MAL client id).
   spinners or error dialogs** for load/error states. The one deliberate exception is the player's
   transient center rebuffer spinner (playback stall feedback, not a load state). Match that pattern
   rather than adding loading/error UI that clashes with it.
-- Networking: Retrofit + Moshi + OkHttp, wired in `data/.../remote/NetworkModule.kt` — one shared
+- Networking: OkHttp + kotlinx.serialization — the two libraries the extension host already ships, so the
+  data layer adds no HTTP/JSON library of its own (no Retrofit, no Moshi, no kotlin-reflect). `JsonHttp`
+  (`data/.../remote/`) is the hand-written JSON-over-HTTP client: `Call.await()` (suspends; cancelling
+  the coroutine cancels the call), `HttpException(code)` for non-2xx, and streaming decode via okio.
+  Every JSON model is `@Serializable` (domain models included — `:domain` applies the serialization
+  plugin and stays pure Kotlin) and is (de)serialized with compile-time serializers through the one
+  **`AppJson`** config. `AppJson` deliberately reads/writes **exactly what the old Moshi setup did**
+  (every field written incl. defaults, nulls omitted, unknown keys ignored, lenient for MAL's
+  numbers-as-strings) — the JSON cache and the downloads table's JSON columns hold rows written by
+  older builds, so don't change those flags without a migration. `NetworkModule` holds one shared
   client with explicit timeouts, a 20 MB HTTP cache, and a bounded `RetryInterceptor` (ONE retry with
   backoff on IO errors, or one honored short `Retry-After` on 429 — AniList rate-limits at 90 req/min;
   Explore additionally debounces typed queries 300 ms).
