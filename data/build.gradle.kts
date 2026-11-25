@@ -39,7 +39,6 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.retrofit.moshi)
     implementation(libs.okhttp)
-    implementation(libs.okhttp.logging)
     implementation(libs.moshi.kotlin)
 
     // Media3 download + cache stack (DownloadManager, SimpleCache, CacheDataSource, scheduler).

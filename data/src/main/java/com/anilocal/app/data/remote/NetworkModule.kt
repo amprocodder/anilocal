@@ -1,6 +1,7 @@
 package com.anilocal.app.data.remote
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import com.anilocal.app.data.metadata.anilist.AniListApi
 import com.anilocal.app.data.metadata.mal.MalApi
 import com.anilocal.app.data.metadata.extension.ExtensionRepoApi
@@ -16,7 +17,6 @@ import okhttp3.Cache
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
-import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import java.io.File
@@ -43,7 +43,12 @@ object NetworkModule {
         // app-level JsonCache is what carries the catalog offline).
         .cache(Cache(File(context.cacheDir, "http_cache"), 20L * 1024 * 1024))
         .addInterceptor(RetryInterceptor())
-        .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC })
+        .apply {
+            // Request lines name tokenized URLs: log them only in debuggable builds.
+            if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+                addInterceptor(DebugHttpLogger())
+            }
+        }
         .build()
 
     /**
