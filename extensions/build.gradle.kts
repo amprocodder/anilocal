@@ -40,4 +40,8 @@ dependencies {
     // Some extensions (keiyoushi.utils-based, e.g. AnimePahe) resolve a ProtoBuf singleton via Injekt.
     implementation(libs.kotlinx.serialization.protobuf)
     implementation(libs.androidx.preference)
+    // The JavaScript engine Aniyomi provides to extensions. Shared extractors (e.g. StreamWish via the
+    // synchrony deobfuscator) and several sources evaluate obfuscated player JS with it; without it
+    // they fail with NoClassDefFoundError, which the adapter turns into "nothing found".
+    implementation(libs.quickjs.android)
 }
