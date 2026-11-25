@@ -9,6 +9,7 @@ import androidx.annotation.OptIn
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -333,6 +334,14 @@ class PlayerViewModel @Inject constructor(
                 out.add(TextRenderer(output, outputLooper).apply { experimentalSetLegacyDecodingEnabled(true) })
             }
         }).setSeekBackIncrementMs(10_000L).setSeekForwardIncrementMs(10_000L)
+            // Take audio focus like any video app: starting an episode pauses another app's music.
+            // A call only holds playback (still READY, so recovery leaves it alone) and resumes it
+            // after; another app taking over, or headphones being unplugged or disconnected (no
+            // blaring from the speaker), pauses by turning playWhenReady off, which
+            // onPlayWhenReadyChanged mirrors into the session's play intent.
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), /* handleAudioFocus= */ true)
+            .setHandleAudioBecomingNoisy(true)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource).experimentalParseSubtitlesDuringExtraction(false))
             .apply { if (loadControl != null) setLoadControl(loadControl) }
             .build()
