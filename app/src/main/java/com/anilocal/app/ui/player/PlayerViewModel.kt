@@ -18,6 +18,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.util.ExperimentalApi
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -81,7 +82,8 @@ import javax.inject.Named
 /** A selectable subtitle (text) track surfaced to the UI — no Media3 types cross into Compose. */
 data class PlayerTextTrack(val label: String, val selected: Boolean)
 
-@OptIn(UnstableApi::class)
+// ExperimentalApi: the legacy render-time subtitle decoding (see createPlayer) is marked experimental.
+@OptIn(UnstableApi::class, ExperimentalApi::class)
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
