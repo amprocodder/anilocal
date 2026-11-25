@@ -332,15 +332,8 @@ class PlayerViewModel @Inject constructor(
                 if (!active()) return
                 if (state == Player.STATE_READY) {
                     onReady(replacement)
-                } else if (state == Player.STATE_ENDED && episodeLoaded && !advancing && !loading) {
-                    advancing = true
-                    loadJob?.cancel()
-                    loadJob = viewModelScope.launch {
-                        try { advanceToNextOrFinish() }
-                        catch (cancelled: CancellationException) { throw cancelled }
-                        catch (error: Exception) { _error.value = error.message ?: "Couldn't advance episode" }
-                        finally { advancing = false }
-                    }
+                } else if (state == Player.STATE_ENDED) {
+                    endEpisode()
                 }
             }
 
@@ -690,7 +683,8 @@ class PlayerViewModel @Inject constructor(
         if (advancing || !episodeLoaded) return
         val next = episodeNumber + 1
         val durationMs = session.durationMs
-        val remainingMs = durationMs - session.positionMs
+        // Measured to where the content ends, so an outro skip finds the standby ready.
+        val remainingMs = contentEndMs() - session.positionMs
         // No _hasNext gate: a session started on a download doesn't know the episode count yet.
         // buildStandby asks hasEpisode(), the same check the advance makes.
         val wanted = precacheEnabled && autoPlayNextEnabled && session.prepared &&
@@ -765,17 +759,26 @@ class PlayerViewModel @Inject constructor(
             resolvedAtMs = resolvedAtMs).also { standby = it }
     }
 
-    // Start the standby's download once this episode is fully buffered (Media3 buffers ~50s ahead,
-    // so roughly the last 50s), or in the final seconds anyway — but not while this episode is
-    // stalled for data (e.g. just after an outro skip): it needs the bandwidth first. Local media
-    // on either side needs no network, so it can start at once.
+    // Start the standby's download once this episode is buffered to where its content ends (Media3
+    // buffers ~50s ahead, so roughly the last 50s), or in the final seconds anyway — but not while
+    // this episode is stalled for data (e.g. just after skipping an outro that a preview follows):
+    // it needs the bandwidth first. Local media on either side needs no network, so it can start
+    // at once.
     private fun standbyMayLoad(): Boolean {
         if (_offline.value || standby?.offline != null) return true
-        val durationMs = session.durationMs
-        if (durationMs <= 0) return true
-        if (currentPlayer.bufferedPosition >= durationMs - BUFFERED_SLACK_MS) return true
-        return durationMs - session.positionMs <= STANDBY_FORCE_MS &&
+        val endMs = contentEndMs()
+        if (endMs <= 0) return true
+        if (currentPlayer.bufferedPosition >= endMs - BUFFERED_SLACK_MS) return true
+        return endMs - session.positionMs <= STANDBY_FORCE_MS &&
             currentPlayer.playbackState == Player.STATE_READY
+    }
+
+    // Where this episode's content ends: the start of an outro that runs to the end of the file
+    // (skipping it finishes the episode — see skipPast), else the file's end.
+    private fun contentEndMs(): Long {
+        val durationMs = session.durationMs
+        return _markers.value.firstOrNull { it.endsEpisode(durationMs, END_THRESHOLD_MS) }?.startMs
+            ?: durationMs
     }
 
     // Claim the standby for [number], releasing any other.
@@ -836,6 +839,20 @@ class PlayerViewModel @Inject constructor(
         if (!player.currentTracks.isEmpty) rebuildTextTracks(player.currentTracks)
         if (player.playbackState == Player.STATE_READY) onReady(player)
         return true
+    }
+
+    // Leave a finished episode — at STATE_ENDED, or straight from an outro skip that reaches the end.
+    // Serialized by [advancing] like every episode switch, so whichever comes first wins.
+    private fun endEpisode() {
+        if (!episodeLoaded || advancing || loading) return
+        advancing = true
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            try { advanceToNextOrFinish() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { _error.value = error.message ?: "Couldn't advance episode" }
+            finally { advancing = false }
+        }
     }
 
     // Advance to the next episode within this screen when the current one ends, or end
@@ -923,7 +940,22 @@ class PlayerViewModel @Inject constructor(
     private fun maybeAutoSkip(pos: Long) {
         if (!autoSkipEnabled) return
         val active = _markers.value.firstOrNull { pos in it.startMs until it.endMs } ?: return
-        if (autoSkipped.add(active.startMs)) seekTo(active.endMs)
+        if (autoSkipped.add(active.startMs)) skipPast(active)
+    }
+
+    // Jump past [marker]. An outro that runs to the end of the file finishes the episode now
+    // instead of waiting on Media3: a seek onto the last frame has it fetch and decode the final
+    // segment just to reach end-of-stream, and nothing watches for a stall there, so skipping the
+    // credits froze on their first frame until STATE_ENDED finally came (if it did). The seek still
+    // goes out, so the playhead — and the position the switch saves — is the end, as before.
+    private fun skipPast(marker: SkipMarker) {
+        val durationMs = session.durationMs
+        if (marker.endsEpisode(durationMs, END_THRESHOLD_MS)) {
+            seekTo(durationMs)
+            endEpisode()
+        } else {
+            seekTo(marker.endMs)
+        }
     }
 
     // Settle this episode's skip windows once, after a RELIABLE (>0) duration is known (so AniSkip's
@@ -1089,7 +1121,7 @@ class PlayerViewModel @Inject constructor(
     /** Manual Skip-Intro/Outro button — jump past the active window. */
     fun seekPast(marker: SkipMarker) {
         autoSkipped.add(marker.startMs)
-        seekTo(marker.endMs)
+        skipPast(marker)
     }
 
     fun retryPlayback() = recovery.retry()

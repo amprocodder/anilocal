@@ -20,3 +20,10 @@ internal fun playableMarkers(markers: List<SkipMarker>, durationMs: Long): List<
             else marker
         clamped.takeIf { it.startMs >= 0L && it.endMs > it.startMs && it.endMs <= durationMs }
     }
+
+/**
+ * An OUTRO that runs to (or within [tailMs] of) the end of a [durationMs]-long file: skipping it
+ * finishes the episode rather than landing anywhere worth watching.
+ */
+internal fun SkipMarker.endsEpisode(durationMs: Long, tailMs: Long): Boolean =
+    type == SkipMarker.Type.OUTRO && durationMs > 0L && endMs >= durationMs - tailMs
