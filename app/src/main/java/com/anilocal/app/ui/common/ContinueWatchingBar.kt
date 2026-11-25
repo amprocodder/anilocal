@@ -22,7 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import com.anilocal.app.ui.image.RemoteImage
 import com.anilocal.app.domain.model.ContinueWatching
 
 /**
@@ -49,8 +49,8 @@ fun ContinueWatchingBar(
                     .clickable { onResume() }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
-                AsyncImage(
-                    model = item.anime.posterUrl,
+                RemoteImage(
+                    url = item.anime.posterUrl,
                     contentDescription = item.anime.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier

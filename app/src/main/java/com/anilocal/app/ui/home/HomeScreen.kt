@@ -64,7 +64,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
-import coil.compose.AsyncImage
+import com.anilocal.app.ui.image.RemoteImage
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.ContinueWatching
 import com.anilocal.app.domain.model.HomeCatalog
@@ -291,8 +291,8 @@ private fun HeroCarousel(
         val wide = maxWidth / maxHeight > 1.6f
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val item = items[page]
-            AsyncImage(
-                model = if (wide) item.bannerUrl ?: item.posterHdUrl ?: item.posterUrl
+            RemoteImage(
+                url = if (wide) item.bannerUrl ?: item.posterHdUrl ?: item.posterUrl
                 else item.posterHdUrl ?: item.posterUrl,
                 contentDescription = item.title,
                 contentScale = ContentScale.Crop,
@@ -454,8 +454,8 @@ private fun ContinueCard(
                 .clip(RoundedCornerShape(8.dp))
                 .clickable { onClick() },
         ) {
-            AsyncImage(
-                model = item.anime.posterUrl,
+            RemoteImage(
+                url = item.anime.posterUrl,
                 contentDescription = item.anime.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

@@ -52,7 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.anilocal.app.ui.image.RemoteImage
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.ui.common.SectionHeader
@@ -197,8 +197,8 @@ internal fun AmbientBackdrop(art: String?, modifier: Modifier = Modifier) {
     if (art == null) return
     val bg = MaterialTheme.colorScheme.background
     Box(modifier) {
-        AsyncImage(
-            model = art,
+        RemoteImage(
+            url = art,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             alpha = 0.32f,
@@ -224,8 +224,8 @@ private fun WatchHeader(c: WatchContent, backdrop: Boolean = true) {
     val name = c.current?.title?.takeIf { it.isNotBlank() && it != "Episode ${c.currentEpisode}" }
     Box(Modifier.fillMaxWidth()) {
         if (backdrop && c.art != null) {
-            AsyncImage(
-                model = c.art,
+            RemoteImage(
+                url = c.art,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 alpha = 0.35f,
@@ -243,8 +243,8 @@ private fun WatchHeader(c: WatchContent, backdrop: Boolean = true) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (info?.posterUrl != null) {
-                    AsyncImage(
-                        model = info.posterUrl,
+                    RemoteImage(
+                        url = info.posterUrl,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
@@ -507,15 +507,15 @@ private fun EpisodeThumb(episode: Episode, fallbackArt: String?, current: Boolea
         contentAlignment = Alignment.Center,
     ) {
         if (thumb != null) {
-            AsyncImage(
-                model = thumb,
+            RemoteImage(
+                url = thumb,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
         } else if (fallbackArt != null) {
-            AsyncImage(
-                model = fallbackArt,
+            RemoteImage(
+                url = fallbackArt,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 alpha = 0.18f,

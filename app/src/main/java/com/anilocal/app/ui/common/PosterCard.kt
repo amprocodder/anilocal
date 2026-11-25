@@ -31,7 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.anilocal.app.ui.image.RemoteImage
 import com.anilocal.app.domain.model.AnimeSummary
 
 @Composable
@@ -47,8 +47,8 @@ fun PosterCard(
 ) {
     Column(modifier = modifier.width(130.dp).clickable { onClick() }) {
         Box {
-            AsyncImage(
-                model = item.posterUrl,
+            RemoteImage(
+                url = item.posterUrl,
                 contentDescription = item.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier

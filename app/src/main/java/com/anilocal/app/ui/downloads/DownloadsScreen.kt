@@ -46,7 +46,7 @@ import com.anilocal.app.appViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import coil.compose.AsyncImage
+import com.anilocal.app.ui.image.RemoteImage
 import com.anilocal.app.domain.model.DownloadItem
 import com.anilocal.app.domain.model.DownloadProgress
 import com.anilocal.app.domain.model.DownloadState
@@ -362,8 +362,8 @@ private fun SeasonHeader(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AsyncImage(
-                model = folder.posterUrl,
+            RemoteImage(
+                url = folder.posterUrl,
                 contentDescription = null,   // the header row's Text already announces the title
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.width(44.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(6.dp)),

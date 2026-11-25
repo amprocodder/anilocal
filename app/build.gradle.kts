@@ -73,7 +73,8 @@ dependencies {
     implementation(libs.compose.material3)
 
 
-    implementation(libs.coil.compose)
+    // The image loader (ui/image) fetches through the shared OkHttp client.
+    implementation(libs.okhttp)
 
     // The player engine. Its UI — video surface, captions, controls, media session — is the app's own.
     implementation(libs.media3.exoplayer)

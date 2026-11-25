@@ -83,7 +83,7 @@ import com.anilocal.app.domain.repo.ProgressRepository
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import coil.compose.AsyncImage
+import com.anilocal.app.ui.image.RemoteImage
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.DownloadQuality
@@ -754,15 +754,15 @@ private fun DetailHero(d: AnimeDetail) {
             // blurred, dimmed copy that fills the rest — sharp art, still edge to edge.
             val nativeWidth = with(LocalDensity.current) { BANNER_NATIVE_WIDTH_PX.toDp() }
             if (d.bannerUrl != null && maxWidth > nativeWidth) {
-                AsyncImage(
-                    model = art,
+                RemoteImage(
+                    url = art,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize().blur(32.dp),
                 )
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)))
-                AsyncImage(
-                    model = art,
+                RemoteImage(
+                    url = art,
                     contentDescription = d.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -784,8 +784,8 @@ private fun DetailHero(d: AnimeDetail) {
                         },
                 )
             } else {
-                AsyncImage(
-                    model = art,
+                RemoteImage(
+                    url = art,
                     contentDescription = d.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -800,8 +800,8 @@ private fun DetailHero(d: AnimeDetail) {
             )
         }
         Row(Modifier.align(Alignment.BottomStart).padding(horizontal = 16.dp)) {
-            AsyncImage(
-                model = d.posterUrl,
+            RemoteImage(
+                url = d.posterUrl,
                 contentDescription = null,   // the banner already carries d.title
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -924,8 +924,8 @@ private fun EpisodeCard(
         ) {
             // No per-episode art: a midnight gradient tile over a faint wash of the series art, led
             // by the number (the same full-strength banner on every card read as a wall of clones).
-            AsyncImage(
-                model = thumb ?: fallbackArt,
+            RemoteImage(
+                url = thumb ?: fallbackArt,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 alpha = if (thumb == null) 0.18f else 1f,
