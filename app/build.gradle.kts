@@ -71,8 +71,8 @@ dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
-    implementation(libs.compose.material3)
-
+    // The design system is the app's own (ui/theme + ui/kit) on Compose Foundation — no Material.
+    implementation(libs.compose.foundation)
 
     // The image loader (ui/image) fetches through the shared OkHttp client.
     implementation(libs.okhttp)

@@ -10,8 +10,8 @@ import com.anilocal.app.ui.common.EmptyState
 import com.anilocal.app.ui.common.SectionHeader
 import com.anilocal.app.ui.common.SearchField
 import androidx.compose.runtime.remember
-import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Box
@@ -28,25 +28,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -78,6 +64,18 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import com.anilocal.app.ui.kit.TextInput
+import com.anilocal.app.ui.kit.TopBar
+import com.anilocal.app.ui.kit.Button
+import com.anilocal.app.ui.kit.CircularProgressIndicator
+import com.anilocal.app.ui.kit.FilterChip
+import com.anilocal.app.ui.kit.Icon
+import com.anilocal.app.ui.kit.IconButton
+import com.anilocal.app.ui.kit.Surface
+import com.anilocal.app.ui.kit.Text
+import com.anilocal.app.ui.kit.TextButton
+import com.anilocal.app.ui.kit.TonalButton
+import com.anilocal.app.ui.theme.AppTheme
 
 /** Repo root from user input, or null if it isn't an http(s) URL. Strips index/meta file names. */
 internal fun normalizeRepoUrl(input: String): String? {
@@ -299,7 +297,6 @@ class ExtensionsViewModel(
 
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = appViewModel { ExtensionsViewModel(it.extensions, it.settings, it.sources) }) {
     val available by vm.available.collectAsStateWithLifecycle()
@@ -323,35 +320,23 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = appViewModel 
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Extensions") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(AppIcons.AutoMirrored.Filled.ArrowBack, "Back")
-                    }
-                },
-                actions = { TextButton(onClick = vm::load, enabled = !loading) { Text("Reload") } },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
-            )
-        },
-    ) { padding ->
+    Column(Modifier.fillMaxSize()) {
+        TopBar("Extensions", onBack = onBack) {
+            TextButton(onClick = vm::load, enabled = !loading) { Text("Reload") }
+        }
         // Cap the column on tablets: 2900px-wide rows with the button at the far edge are hard to scan.
-        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+        Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.TopCenter) {
         Column(Modifier.fillMaxHeight().widthIn(max = 840.dp).fillMaxWidth()) {
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                color = AppTheme.colors.primaryContainer.copy(alpha = 0.3f),
+                border = BorderStroke(1.dp, AppTheme.colors.primary.copy(alpha = 0.3f)),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
                 Row(Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
                     Icon(
                         AppIcons.Outlined.VerifiedUser, null,
-                        tint = MaterialTheme.colorScheme.tertiary,
+                        tint = AppTheme.colors.tertiary,
                         modifier = Modifier.size(20.dp),
                     )
                     Text(
@@ -359,8 +344,8 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = appViewModel 
                             "installed in-app (signing cert verified against the repo when it publishes one). " +
                             "AniList still provides browsing; the selected source only resolves streams. " +
                             "Pick one — or “Auto (best source)” — in Settings → Streaming source.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = AppTheme.type.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant,
                         modifier = Modifier.padding(start = 12.dp),
                     )
                 }
@@ -368,8 +353,8 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = appViewModel 
             status?.let {
                 Text(
                     it,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    style = AppTheme.type.bodyMedium,
+                    color = AppTheme.colors.primary,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
@@ -440,8 +425,8 @@ fun ExtensionsScreen(onBack: () -> Unit, vm: ExtensionsViewModel = appViewModel 
                         item(key = "no-match", contentType = "hint") {
                             Text(
                                 "No extensions match.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = AppTheme.type.bodyMedium,
+                                color = AppTheme.colors.onSurfaceVariant,
                                 modifier = Modifier.padding(vertical = 8.dp),
                             )
                         }
@@ -484,8 +469,8 @@ private fun ExtensionRow(
 ) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = AppTheme.colors.surfaceContainer,
+        border = BorderStroke(1.dp, AppTheme.colors.outlineVariant),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
@@ -497,7 +482,7 @@ private fun ExtensionRow(
                     .size(44.dp)
                     .background(
                         Brush.linearGradient(
-                            listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer),
+                            listOf(AppTheme.colors.primary, AppTheme.colors.primaryContainer),
                         ),
                         RoundedCornerShape(12.dp),
                     ),
@@ -505,13 +490,13 @@ private fun ExtensionRow(
             ) {
                 Text(
                     entry.name.removePrefix("Aniyomi: ").trim().take(1).uppercase(),
-                    style = MaterialTheme.typography.titleMedium,
+                    style = AppTheme.type.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                 )
             }
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(entry.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                Text(entry.name, style = AppTheme.type.bodyLarge, fontWeight = FontWeight.SemiBold)
                 val meta = listOfNotNull(
                     entry.lang.ifBlank { null },
                     entry.versionName.ifBlank { null }?.let { "v$it" },
@@ -520,15 +505,15 @@ private fun ExtensionRow(
                 if (meta.isNotEmpty()) {
                     Text(
                         meta,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = AppTheme.type.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant,
                     )
                 }
                 if (entry.sourceNames.isNotEmpty()) {
                     Text(
                         entry.sourceNames.joinToString(", "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = AppTheme.type.labelSmall,
+                        color = AppTheme.colors.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -555,40 +540,40 @@ private fun RepoSection(
 ) {
     Surface(
         shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = AppTheme.colors.surfaceContainer,
+        border = BorderStroke(1.dp, AppTheme.colors.outlineVariant),
     ) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier
                         .size(38.dp)
-                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(11.dp)),
+                        .background(AppTheme.colors.primaryContainer, RoundedCornerShape(11.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(AppIcons.Outlined.Inventory2, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(20.dp))
+                    Icon(AppIcons.Outlined.Inventory2, null, tint = AppTheme.colors.tertiary, modifier = Modifier.size(20.dp))
                 }
                 Column(Modifier.padding(start = 12.dp)) {
-                    Text("Repositories", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Repositories", style = AppTheme.type.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
                         if (repos.isEmpty()) "Paste an index.min.json URL to add one"
                         else "${repos.size} repo${if (repos.size == 1) "" else "s"} added",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = AppTheme.type.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant,
                     )
                 }
             }
             repos.forEach { url ->
-                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                Surface(shape = RoundedCornerShape(12.dp), color = AppTheme.colors.surfaceContainerHigh) {
                     Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             AppIcons.Outlined.Link, null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = AppTheme.colors.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
                         )
                         Text(
                             url,
-                            style = MaterialTheme.typography.bodySmall,
+                            style = AppTheme.type.bodySmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f).padding(start = 10.dp),
@@ -599,19 +584,19 @@ private fun RepoSection(
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    shape = RoundedCornerShape(12.dp),
+            // Bottom-aligned: the field's label sits above it, and Add lines up with the box itself.
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextInput(
                     value = input,
                     onValueChange = onInputChange,
-                    label = { Text("Repo URL") },
-                    placeholder = { Text("https://…/index.min.json") },
+                    label = "Repo URL",
+                    placeholder = "https://…/index.min.json",
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { onAdd() }),
                     modifier = Modifier.weight(1f),
                 )
-                Button(onClick = onAdd, enabled = input.isNotBlank(), shape = RoundedCornerShape(100.dp)) {
+                Button(onClick = onAdd, enabled = input.isNotBlank()) {
                     Text("Add")
                 }
             }
@@ -630,15 +615,15 @@ private fun ExtensionAction(
     when {
         busy -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
         // Privately installed → the app can remove it in place.
-        removable -> OutlinedButton(onClick = onUninstall, shape = RoundedCornerShape(100.dp)) {
+        removable -> TonalButton(onClick = onUninstall) {
             Text("Uninstall")
         }
         // System-installed (sideloaded by the user) → present, but not ours to uninstall.
         installed -> Text(
             "Installed",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = AppTheme.type.labelLarge,
+            color = AppTheme.colors.onSurfaceVariant,
         )
-        else -> Button(onClick = onInstall, shape = RoundedCornerShape(100.dp)) { Text("Install") }
+        else -> Button(onClick = onInstall) { Text("Install") }
     }
 }

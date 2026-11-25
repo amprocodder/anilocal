@@ -1,25 +1,23 @@
 package com.anilocal.app.ui.common
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.unit.sp
+import com.anilocal.app.ui.icons.AppIcons
+import com.anilocal.app.ui.kit.Icon
+import com.anilocal.app.ui.kit.Text
+import com.anilocal.app.ui.kit.TextButton
+import com.anilocal.app.ui.theme.AppTheme
 
-/** 9anime-style section header: tertiary accent bar, bold title, optional "View all ›" link. */
+/** Section header: the row's title and, when there's more, a "View all" link in the accent. */
 @Composable
 fun SectionHeader(
     title: String,
@@ -33,25 +31,17 @@ fun SectionHeader(
             .fillMaxWidth()
             .padding(horizontal = horizontalPadding),
     ) {
-        Box(
-            Modifier
-                .size(width = 3.dp, height = 16.dp)
-                .background(MaterialTheme.colorScheme.tertiary, RoundedCornerShape(2.dp)),
-        )
-        Spacer(Modifier.width(8.dp))
         Text(
             text = title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
+            style = AppTheme.type.titleMedium,
             modifier = Modifier.weight(1f),
         )
         if (onSeeAll != null) {
-            Text(
-                text = "View all ›",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.clickable { onSeeAll() },
-            )
+            // A real touch target (the label alone was ~20dp tall), with the accent kept for things you can press.
+            TextButton(onClick = onSeeAll, modifier = Modifier.height(36.dp)) {
+                Text("View all", fontSize = 13.sp)
+                Icon(AppIcons.Filled.ChevronRight, null, Modifier.size(16.dp))
+            }
         }
     }
 }

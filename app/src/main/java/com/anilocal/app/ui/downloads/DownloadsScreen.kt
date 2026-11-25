@@ -19,15 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,6 +57,15 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.anilocal.app.ui.kit.AlertDialog
+import com.anilocal.app.ui.kit.CircularProgressIndicator
+import com.anilocal.app.ui.kit.Icon
+import com.anilocal.app.ui.kit.IconButton
+import com.anilocal.app.ui.kit.LinearProgressIndicator
+import com.anilocal.app.ui.kit.Surface
+import com.anilocal.app.ui.kit.Text
+import com.anilocal.app.ui.kit.TextButton
+import com.anilocal.app.ui.theme.AppTheme
 
 /** All of one title's downloads, shown as a collapsible season folder. */
 data class SeasonFolder(
@@ -265,7 +265,7 @@ fun DownloadsScreen(
     ) {
         ScreenHeader("Downloads", horizontalPadding = 0.dp)
         operationStatus?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text(it, style = AppTheme.type.bodySmall, color = AppTheme.colors.error)
         }
         SearchField(value = query, onValueChange = vm::setQuery, placeholder = "Search downloads…")
         if (folders.isEmpty()) {
@@ -332,7 +332,7 @@ fun DownloadsScreen(
                 TextButton(onClick = {
                     vm.removeSeason(folder.animeId)
                     pendingDelete = null
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Delete", color = AppTheme.colors.error) }
             },
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } },
         )
@@ -350,7 +350,7 @@ private fun SeasonHeader(
 ) {
     Surface(
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = AppTheme.colors.surfaceContainer,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
@@ -371,7 +371,7 @@ private fun SeasonHeader(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     folder.title,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = AppTheme.type.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -383,8 +383,8 @@ private fun SeasonHeader(
                         if (folder.completed > 0) append(" · ${folder.completed} downloaded")
                         if (folder.active > 0) append(" · ${folder.active} downloading")
                     },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = AppTheme.type.bodySmall,
+                    color = AppTheme.colors.onSurfaceVariant,
                 )
                 // A thin aggregate bar while anything in the folder is still coming down —
                 // averaged over the episodes actually moving (paused/failed ones would pin it).
@@ -403,7 +403,7 @@ private fun SeasonHeader(
             Icon(
                 if (expanded) AppIcons.Filled.ExpandLess else AppIcons.Filled.ExpandMore,
                 if (expanded) "Collapse" else "Expand",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = AppTheme.colors.onSurfaceVariant,
             )
         }
     }
@@ -424,7 +424,7 @@ private fun EpisodeRow(
 ) {
     Surface(
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = AppTheme.colors.surfaceContainer,
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
     ) {
         Row(
@@ -435,7 +435,7 @@ private fun EpisodeRow(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     "Episode ${item.episodeNumber}" + (item.quality?.let { " · $it" } ?: ""),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = AppTheme.type.bodyMedium,
                 )
                 when (item.state) {
                     DownloadState.DOWNLOADING -> {
@@ -448,20 +448,20 @@ private fun EpisodeRow(
                             live?.bytesPerSecond?.takeIf { it > 0 }?.let { append(" · ${formatSpeed(it)}") }
                             live?.etaSeconds?.let { append(" · ${formatEta(it)} left") }
                         }
-                        Text(detail, style = MaterialTheme.typography.labelSmall)
+                        Text(detail, style = AppTheme.type.labelSmall)
                     }
-                    DownloadState.QUEUED -> Text("Waiting for network…", style = MaterialTheme.typography.labelSmall)
+                    DownloadState.QUEUED -> Text("Waiting for network…", style = AppTheme.type.labelSmall)
                     DownloadState.PAUSED -> {
                         ProgressBar(item.progress)
-                        Text("Paused (${item.progress}%)", style = MaterialTheme.typography.labelSmall)
+                        Text("Paused (${item.progress}%)", style = AppTheme.type.labelSmall)
                     }
                     DownloadState.COMPLETED -> Text("Downloaded — tap to play offline",
-                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        style = AppTheme.type.labelSmall, color = AppTheme.colors.primary)
                     DownloadState.FAILED -> Text(
                         if (retrying) "Retrying…" else "Failed",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (retrying) MaterialTheme.colorScheme.onSurfaceVariant
-                        else MaterialTheme.colorScheme.error,
+                        style = AppTheme.type.labelSmall,
+                        color = if (retrying) AppTheme.colors.onSurfaceVariant
+                        else AppTheme.colors.error,
                     )
                 }
             }
@@ -494,8 +494,8 @@ private fun ProgressBar(progress: Int) {
     LinearProgressIndicator(
         progress = { progress / 100f },
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.primary,
-        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        color = AppTheme.colors.primary,
+        trackColor = AppTheme.colors.surfaceContainerHighest,
     )
 }
 

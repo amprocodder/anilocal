@@ -8,11 +8,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import com.anilocal.app.ui.theme.AppTheme
 
 /**
  * A solid band behind the status bar, faded in once scrolled content would otherwise run under the
@@ -26,7 +26,7 @@ fun StatusBarScrim(visible: Boolean, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .windowInsetsTopHeight(WindowInsets.statusBars)
             .graphicsLayer { this.alpha = alpha }
-            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.94f)),
+            .background(AppTheme.colors.background.copy(alpha = 0.94f)),
     )
 }
 

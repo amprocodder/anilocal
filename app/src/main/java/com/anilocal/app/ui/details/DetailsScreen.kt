@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.platform.LocalContext
 import com.anilocal.app.domain.repo.MalRepository
@@ -46,19 +45,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -123,6 +109,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
+import com.anilocal.app.ui.kit.AlertDialog
+import com.anilocal.app.ui.kit.Button
+import com.anilocal.app.ui.kit.CircularProgressIndicator
+import com.anilocal.app.ui.kit.FilterChip
+import com.anilocal.app.ui.kit.Icon
+import com.anilocal.app.ui.kit.IconButton
+import com.anilocal.app.ui.kit.RadioButton
+import com.anilocal.app.ui.kit.Surface
+import com.anilocal.app.ui.kit.Text
+import com.anilocal.app.ui.kit.TextButton
+import com.anilocal.app.ui.kit.TonalIconButton
+import com.anilocal.app.ui.theme.AppTheme
 
 /** A download awaiting a quality choice (when more than one variant is available). */
 data class PendingDownload(
@@ -418,12 +416,12 @@ fun DetailsScreen(
                                 Surface(
                                     shape = RoundedCornerShape(100.dp),
                                     color = Color.Transparent,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    border = BorderStroke(1.dp, AppTheme.colors.outlineVariant),
                                 ) {
                                     Text(
                                         genre,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = AppTheme.type.labelSmall,
+                                        color = AppTheme.colors.onSurfaceVariant,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                     )
                                 }
@@ -453,23 +451,18 @@ fun DetailsScreen(
                                 }
                             },
                             enabled = released,
-                            shape = RoundedCornerShape(100.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                            ),
-                            modifier = Modifier.weight(1f).height(46.dp),
+                            modifier = Modifier.weight(1f).height(44.dp),
                         ) {
                             if (released) {
                                 Icon(AppIcons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(8.dp))
                                 Text(
-                                    if (resumeAt != null) "  Resume E${resumeAt.episodeNumber} · ${clockTime(resumeAt.positionMs)}"
-                                    else "  Watch",
-                                    fontWeight = FontWeight.Bold,
+                                    if (resumeAt != null) "Resume E${resumeAt.episodeNumber} · ${clockTime(resumeAt.positionMs)}"
+                                    else "Watch",
                                     maxLines = 1,
                                 )
                             } else {
-                                Text("Not released yet", fontWeight = FontWeight.Bold)
+                                Text("Not released yet")
                             }
                         }
                         if (released) {
@@ -484,7 +477,7 @@ fun DetailsScreen(
                         // managed on MyAnimeList, so the tap explains that instead of adding a
                         // duplicate local entry the user then can't visibly remove.
                         val inList = saved || onMalList
-                        FilledTonalIconButton(
+                        TonalIconButton(
                             onClick = {
                                 if (!saved && onMalList) {
                                     Toast.makeText(context, "Already in My List from your MAL list", Toast.LENGTH_SHORT).show()
@@ -492,10 +485,7 @@ fun DetailsScreen(
                                     vm.toggleSaved()
                                 }
                             },
-                            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            ),
-                            modifier = Modifier.size(46.dp),
+                            modifier = Modifier.size(44.dp),
                         ) {
                             Icon(
                                 if (inList) AppIcons.Filled.BookmarkAdded else AppIcons.Outlined.BookmarkAdd,
@@ -504,8 +494,8 @@ fun DetailsScreen(
                                     onMalList -> "In My List (from MAL)"
                                     else -> "Add to My List"
                                 },
-                                tint = if (inList) MaterialTheme.colorScheme.tertiary
-                                else MaterialTheme.colorScheme.onSurface,
+                                tint = if (inList) AppTheme.colors.tertiary
+                                else AppTheme.colors.onSurface,
                             )
                         }
                     }
@@ -517,8 +507,8 @@ fun DetailsScreen(
                     item(key = "info") {
                         Text(
                             infoLine,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = AppTheme.type.bodySmall,
+                            color = AppTheme.colors.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 16.dp),
                         )
                     }
@@ -535,12 +525,12 @@ fun DetailsScreen(
                             SectionHeader("Episodes", Modifier.weight(1f), horizontalPadding = 0.dp)
                             Surface(
                                 shape = RoundedCornerShape(100.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                color = AppTheme.colors.surfaceContainerHighest,
                             ) {
                                 Text(
                                     "${d.episodes.size}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = AppTheme.type.labelMedium,
+                                    color = AppTheme.colors.onSurfaceVariant,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
                                 )
                             }
@@ -556,8 +546,8 @@ fun DetailsScreen(
                                     "Season queued — ${sd.failed} episode${if (sd.failed == 1) "" else "s"} failed, press to retry"
                                 else -> "Tap an episode to play, or its download icon to save it"
                             },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = AppTheme.type.bodySmall,
+                            color = AppTheme.colors.onSurfaceVariant,
                         )
                     }
                 }
@@ -649,13 +639,13 @@ fun DetailsScreen(
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .graphicsLayer { alpha = barAlpha }
-                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.96f))
+                .background(AppTheme.colors.background.copy(alpha = 0.96f))
                 .statusBarsPadding()
                 .height(56.dp),
         ) {
             Text(
                 d?.title.orEmpty(),
-                style = MaterialTheme.typography.titleMedium,
+                style = AppTheme.type.titleMedium,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -675,7 +665,7 @@ fun DetailsScreen(
             IconButton(onClick = onBack) {
                 Icon(
                     AppIcons.AutoMirrored.Filled.ArrowBack, "Back",
-                    tint = if (barAlpha > 0.5f) MaterialTheme.colorScheme.onSurface else Color.White,
+                    tint = if (barAlpha > 0.5f) AppTheme.colors.onSurface else Color.White,
                 )
             }
         }
@@ -724,12 +714,9 @@ private fun SeasonDownloadButton(
     onCancel: () -> Unit,
 ) {
     val queuing = state != null && !state.finished
-    FilledTonalIconButton(
+    TonalIconButton(
         onClick = if (queuing) onCancel else onDownload,
-        colors = IconButtonDefaults.filledTonalIconButtonColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
-        modifier = Modifier.size(46.dp).testTag("download-season"),
+        modifier = Modifier.size(44.dp).testTag("download-season"),
     ) {
         when {
             queuing -> {
@@ -738,11 +725,11 @@ private fun SeasonDownloadButton(
                 Text(
                     when {
                         s.total == 0 -> "…"
-                        // Three-digit seasons don't fit in a 46dp circle — fall back to percent.
+                        // Three-digit seasons don't fit in a 44dp circle — fall back to percent.
                         s.total > 99 -> "${done * 100 / s.total}%"
                         else -> "$done/${s.total}"
                     },
-                    style = MaterialTheme.typography.labelSmall,
+                    style = AppTheme.type.labelSmall,
                     maxLines = 1,
                     softWrap = false,
                     modifier = Modifier.semantics {
@@ -753,12 +740,12 @@ private fun SeasonDownloadButton(
             allInDownloads -> Icon(
                 AppIcons.Filled.DownloadDone,
                 "Season downloaded",
-                tint = MaterialTheme.colorScheme.tertiary,
+                tint = AppTheme.colors.tertiary,
             )
             else -> Icon(
                 AppIcons.Filled.Download,
                 "Download season",
-                tint = MaterialTheme.colorScheme.onSurface,
+                tint = AppTheme.colors.onSurface,
             )
         }
     }
@@ -768,7 +755,7 @@ private fun SeasonDownloadButton(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DetailHero(d: AnimeDetail) {
-    val bg = MaterialTheme.colorScheme.background
+    val bg = AppTheme.colors.background
     Box(Modifier.fillMaxWidth().height(252.dp)) {
         BoxWithConstraints(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(210.dp)) {
             val art = d.bannerUrl ?: d.posterHdUrl ?: d.posterUrl
@@ -838,7 +825,7 @@ private fun DetailHero(d: AnimeDetail) {
                 Column {
                     Text(
                         d.title,
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = AppTheme.type.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -847,8 +834,8 @@ private fun DetailHero(d: AnimeDetail) {
                     d.romajiTitle?.let {
                         Text(
                             it,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = AppTheme.type.labelSmall,
+                            color = AppTheme.colors.onSurfaceVariant,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -873,14 +860,14 @@ private fun DetailHero(d: AnimeDetail) {
 internal fun MetaPill(text: String, tinted: Boolean = false) {
     Surface(
         shape = RoundedCornerShape(4.dp),
-        color = if (tinted) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceContainerHighest,
-        contentColor = if (tinted) MaterialTheme.colorScheme.onPrimaryContainer
-        else MaterialTheme.colorScheme.onSurfaceVariant,
+        color = if (tinted) AppTheme.colors.primaryContainer
+        else AppTheme.colors.surfaceContainerHighest,
+        contentColor = if (tinted) AppTheme.colors.onPrimaryContainer
+        else AppTheme.colors.onSurfaceVariant,
     ) {
         Text(
             text,
-            style = MaterialTheme.typography.labelSmall,
+            style = AppTheme.type.labelSmall,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
         )
     }
@@ -891,8 +878,8 @@ internal fun ExpandableSynopsis(synopsis: String) {
     var expanded by remember { mutableStateOf(false) }
     Text(
         synopsis,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = AppTheme.type.bodyMedium,
+        color = AppTheme.colors.onSurfaceVariant,
         maxLines = if (expanded) Int.MAX_VALUE else 4,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
@@ -941,7 +928,7 @@ private fun EpisodeCard(
                 .clip(RoundedCornerShape(10.dp))
                 .background(
                     Brush.linearGradient(
-                        listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.surfaceContainerHighest),
+                        listOf(AppTheme.colors.primaryContainer, AppTheme.colors.surfaceContainerHighest),
                     ),
                 ),
         ) {
@@ -957,15 +944,15 @@ private fun EpisodeCard(
             if (thumb == null) {
                 Text(
                     "${episode.number}",
-                    style = MaterialTheme.typography.headlineMedium,
+                    style = AppTheme.type.headlineMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = AppTheme.colors.onPrimaryContainer,
                     modifier = Modifier.align(Alignment.Center),
                 )
             } else {
                 Text(
                     "${episode.number}",
-                    style = MaterialTheme.typography.labelMedium,
+                    style = AppTheme.type.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     modifier = Modifier
@@ -979,11 +966,11 @@ private fun EpisodeCard(
                 Icon(
                     AppIcons.Filled.DownloadDone,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimary,
+                    tint = AppTheme.colors.onPrimary,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        .background(AppTheme.colors.primary, CircleShape)
                         .padding(3.dp)
                         .size(14.dp),
                 )
@@ -993,15 +980,15 @@ private fun EpisodeCard(
             Column(Modifier.weight(1f)) {
                 Text(
                     "Episode ${episode.number}",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    style = AppTheme.type.labelLarge,
+                    color = AppTheme.colors.onSurface,
                     maxLines = 1,
                 )
                 if (name != null) {
                     Text(
                         name,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = AppTheme.type.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -1021,10 +1008,10 @@ private fun EpisodeCard(
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                val tint = MaterialTheme.colorScheme.onSurfaceVariant
+                val tint = AppTheme.colors.onSurfaceVariant
                 when {
                     busy -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 1.5.dp, color = tint)
-                    queued -> Icon(AppIcons.Filled.DownloadDone, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.tertiary)
+                    queued -> Icon(AppIcons.Filled.DownloadDone, null, Modifier.size(18.dp), tint = AppTheme.colors.tertiary)
                     else -> Icon(AppIcons.Filled.Download, null, Modifier.size(18.dp), tint = tint)
                 }
             }

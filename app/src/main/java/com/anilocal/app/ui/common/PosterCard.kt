@@ -12,14 +12,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LocalTextStyle
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.anilocal.app.ui.kit.PressIndication
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
@@ -33,6 +34,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.anilocal.app.ui.image.RemoteImage
 import com.anilocal.app.domain.model.AnimeSummary
+import com.anilocal.app.ui.kit.Icon
+import com.anilocal.app.ui.kit.LinearProgressIndicator
+import com.anilocal.app.ui.kit.LocalTextStyle
+import com.anilocal.app.ui.kit.Text
+import com.anilocal.app.ui.theme.AppTheme
 
 @Composable
 fun PosterCard(
@@ -45,7 +51,7 @@ fun PosterCard(
     rank: Int? = null,
     badge: String? = null,
 ) {
-    Column(modifier = modifier.width(130.dp).clickable { onClick() }) {
+    Column(modifier = modifier.width(130.dp).clickable(interactionSource = null, indication = PressIndication.Card) { onClick() }) {
         Box {
             RemoteImage(
                 url = item.posterUrl,
@@ -56,47 +62,26 @@ fun PosterCard(
                     .aspectRatio(2f / 3f)
                     .clip(RoundedCornerShape(6.dp)),
             )
-            if (progress != null) {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .padding(horizontal = 6.dp)
-                        .padding(bottom = 6.dp)
-                        .clip(RoundedCornerShape(2.dp)),
-                )
-            }
-            // Score tick, flush in the top-left corner; the remove chip owns that corner when present.
+            // Score, top-left on dark glass with an amber star; the remove chip owns that corner when present.
             val score = item.averageScore
             if (score != null && onRemove == null) {
-                Text(
-                    text = scoreLabel(score),
-                    color = Color(0xFF111111),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .background(
-                            Color.White.copy(alpha = 0.92f),
-                            RoundedCornerShape(bottomEnd = 6.dp),
-                        )
-                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                PosterBadge(
+                    buildAnnotatedString {
+                        withStyle(SpanStyle(color = StarColor)) { append("★") }
+                        append(scoreLabel(score).removePrefix("★"))
+                    },
+                    Modifier.align(Alignment.TopStart),
                 )
             }
             episodeBadge(item.format, item.episodes)?.let { label ->
-                Text(
-                    text = label,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .background(
-                            MaterialTheme.colorScheme.primary,
-                            RoundedCornerShape(topStart = 6.dp),
-                        )
-                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                PosterBadge(AnnotatedString(label), Modifier.align(Alignment.BottomEnd))
+            }
+            // Watch progress: a bright line along the poster's bottom edge.
+            if (progress != null) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    trackColor = Color.White.copy(alpha = 0.18f),
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp),
                 )
             }
             if (rank != null) {
@@ -139,18 +124,10 @@ fun PosterCard(
             }
             // Relation tick (e.g. "Sequel"), top-right; the downloaded chip owns that corner when present.
             if (badge != null && !downloaded) {
-                Text(
-                    text = badge,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .background(
-                            MaterialTheme.colorScheme.primary,
-                            RoundedCornerShape(bottomStart = 6.dp),
-                        )
-                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                PosterBadge(
+                    AnnotatedString(badge),
+                    Modifier.align(Alignment.TopEnd),
+                    color = AppTheme.colors.tertiary,
                 )
             }
             if (downloaded) {
@@ -159,13 +136,13 @@ fun PosterCard(
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
+                        .background(AppTheme.colors.primary)
                         .padding(4.dp),
                 ) {
                     Icon(
                         AppIcons.Filled.DownloadDone,
                         contentDescription = "Downloaded",
-                        tint = MaterialTheme.colorScheme.onPrimary,
+                        tint = AppTheme.colors.onPrimary,
                         modifier = Modifier.size(14.dp),
                     )
                 }
@@ -173,8 +150,11 @@ fun PosterCard(
         }
         Text(
             text = item.title,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = AppTheme.type.bodySmall,
+            fontSize = 13.sp,
+            lineHeight = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = AppTheme.colors.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 6.dp),
@@ -183,13 +163,33 @@ fun PosterCard(
         item.format?.let { format ->
             Text(
                 text = format,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                style = AppTheme.type.labelSmall,
+                color = AppTheme.colors.onSurfaceVariant.copy(alpha = 0.7f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
     }
+}
+
+private val StarColor = Color(0xFFF2C14E)
+private val GlassColor = Color(0xC70B0D11)
+
+/** A small label on dark glass, inset 6dp into a poster corner, so the art stays in front. */
+@Composable
+private fun PosterBadge(text: AnnotatedString, modifier: Modifier, color: Color = Color.White) {
+    Text(
+        text = text,
+        color = color,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
+        maxLines = 1,
+        modifier = modifier
+            .padding(6.dp)
+            .background(GlassColor, RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
 /**

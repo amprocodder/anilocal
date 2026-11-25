@@ -28,10 +28,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +54,10 @@ import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.ui.common.SectionHeader
 import com.anilocal.app.ui.common.scoreLabel
 import com.anilocal.app.ui.details.MetaPill
+import com.anilocal.app.ui.kit.Icon
+import com.anilocal.app.ui.kit.Surface
+import com.anilocal.app.ui.kit.Text
+import com.anilocal.app.ui.theme.AppTheme
 
 /**
  * What the non-fullscreen "watch page" shows beside/under the video: what's playing, the title's
@@ -86,7 +86,7 @@ internal fun WatchPanel(content: WatchContent, modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         watchInfo(content)
-        watchEpisodes(content, rowColor = { MaterialTheme.colorScheme.surfaceContainer })
+        watchEpisodes(content, rowColor = { AppTheme.colors.surfaceContainer })
         item(key = "bottom-gap") { Box(Modifier.navigationBarsPadding()) }
     }
 }
@@ -134,9 +134,9 @@ internal fun WatchEpisodesPane(content: WatchContent, modifier: Modifier = Modif
     val state = rememberLazyListState(initialFirstVisibleItemIndex = start.coerceAtLeast(0))
     // A floating, slightly translucent card so the ambient art glows through at the edges.
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.78f),
+        color = AppTheme.colors.surfaceContainerLow.copy(alpha = 0.78f),
         shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        border = BorderStroke(1.dp, AppTheme.colors.outlineVariant.copy(alpha = 0.6f)),
         modifier = modifier,
     ) {
         LazyColumn(
@@ -144,7 +144,7 @@ internal fun WatchEpisodesPane(content: WatchContent, modifier: Modifier = Modif
             contentPadding = PaddingValues(top = 16.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            watchEpisodes(content, rowColor = { MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f) })
+            watchEpisodes(content, rowColor = { AppTheme.colors.surfaceContainerHigh.copy(alpha = 0.85f) })
         }
     }
 }
@@ -175,12 +175,12 @@ private fun GenreChips(genres: List<String>) {
             Surface(
                 shape = RoundedCornerShape(100.dp),
                 color = Color.Transparent,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                border = BorderStroke(1.dp, AppTheme.colors.outline),
             ) {
                 Text(
                     genre,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = AppTheme.type.labelMedium,
+                    color = AppTheme.colors.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                 )
             }
@@ -195,7 +195,7 @@ private fun GenreChips(genres: List<String>) {
 @Composable
 internal fun AmbientBackdrop(art: String?, modifier: Modifier = Modifier) {
     if (art == null) return
-    val bg = MaterialTheme.colorScheme.background
+    val bg = AppTheme.colors.background
     Box(modifier) {
         RemoteImage(
             url = art,
@@ -220,7 +220,7 @@ internal fun AmbientBackdrop(art: String?, modifier: Modifier = Modifier) {
 @Composable
 private fun WatchHeader(c: WatchContent, backdrop: Boolean = true) {
     val info = c.info
-    val bg = MaterialTheme.colorScheme.background
+    val bg = AppTheme.colors.background
     val name = c.current?.title?.takeIf { it.isNotBlank() && it != "Episode ${c.currentEpisode}" }
     Box(Modifier.fillMaxWidth()) {
         if (backdrop && c.art != null) {
@@ -256,7 +256,7 @@ private fun WatchHeader(c: WatchContent, backdrop: Boolean = true) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         info?.title ?: c.title,
-                        style = MaterialTheme.typography.titleLarge,
+                        style = AppTheme.type.titleLarge,
                         fontWeight = FontWeight.Bold,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -264,8 +264,8 @@ private fun WatchHeader(c: WatchContent, backdrop: Boolean = true) {
                     info?.romajiTitle?.let {
                         Text(
                             it,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = AppTheme.type.labelSmall,
+                            color = AppTheme.colors.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -274,7 +274,7 @@ private fun WatchHeader(c: WatchContent, backdrop: Boolean = true) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             AppIcons.Filled.Equalizer, null,
-                            tint = MaterialTheme.colorScheme.tertiary,
+                            tint = AppTheme.colors.tertiary,
                             modifier = Modifier.size(16.dp),
                         )
                         Text(
@@ -282,8 +282,8 @@ private fun WatchHeader(c: WatchContent, backdrop: Boolean = true) {
                                 append("Episode ${c.currentEpisode}")
                                 name?.let { append(" · $it") }
                             },
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.tertiary,
+                            style = AppTheme.type.labelLarge,
+                            color = AppTheme.colors.tertiary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(start = 6.dp),
@@ -320,8 +320,8 @@ private fun UpNextCard(next: Episode, fallbackArt: String?, onClick: () -> Unit)
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = AppTheme.colors.surfaceContainerHigh,
+        border = BorderStroke(1.dp, AppTheme.colors.outlineVariant),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
@@ -332,21 +332,21 @@ private fun UpNextCard(next: Episode, fallbackArt: String?, onClick: () -> Unit)
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 Text(
                     "UP NEXT",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = AppTheme.type.labelSmall,
                     letterSpacing = 1.2.sp,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.tertiary,
+                    color = AppTheme.colors.tertiary,
                 )
                 Text(
                     "Episode ${next.number}",
-                    style = MaterialTheme.typography.titleSmall,
+                    style = AppTheme.type.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 name?.let {
                     Text(
                         it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = AppTheme.type.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -355,7 +355,7 @@ private fun UpNextCard(next: Episode, fallbackArt: String?, onClick: () -> Unit)
             Box(
                 Modifier
                     .size(44.dp)
-                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    .background(AppTheme.colors.primary, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(AppIcons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(26.dp))
@@ -380,8 +380,8 @@ private fun Synopsis(text: String) {
     ) {
         Text(
             text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = AppTheme.type.bodyMedium,
+            color = AppTheme.colors.onSurfaceVariant,
             maxLines = if (expanded) Int.MAX_VALUE else 3,
             overflow = TextOverflow.Ellipsis,
             onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow },
@@ -390,8 +390,8 @@ private fun Synopsis(text: String) {
         if (overflows || expanded) {
             Text(
                 if (expanded) "Show less" else "Show more",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.tertiary,
+                style = AppTheme.type.labelLarge,
+                color = AppTheme.colors.tertiary,
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
@@ -406,11 +406,11 @@ private fun LazyListScope.watchEpisodes(c: WatchContent, rowColor: @Composable (
             modifier = Modifier.padding(top = 4.dp, end = 16.dp),
         ) {
             SectionHeader("Episodes", Modifier.weight(1f))
-            Surface(shape = RoundedCornerShape(100.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
+            Surface(shape = RoundedCornerShape(100.dp), color = AppTheme.colors.surfaceContainerHighest) {
                 Text(
                     "${c.episodes.size}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = AppTheme.type.labelMedium,
+                    color = AppTheme.colors.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
                 )
             }
@@ -439,8 +439,8 @@ private fun WatchEpisodeRow(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
-        color = if (current) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f) else color,
-        border = if (current) BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)) else null,
+        color = if (current) AppTheme.colors.primaryContainer.copy(alpha = 0.55f) else color,
+        border = if (current) BorderStroke(1.dp, AppTheme.colors.tertiary.copy(alpha = 0.6f)) else null,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
@@ -461,17 +461,17 @@ private fun WatchEpisodeRow(
             ) {
                 Text(
                     "Episode ${episode.number}",
-                    style = MaterialTheme.typography.titleSmall,
+                    style = AppTheme.type.titleSmall,
                     fontWeight = if (current) FontWeight.Bold else FontWeight.Medium,
-                    color = if (current) MaterialTheme.colorScheme.onPrimaryContainer
-                    else MaterialTheme.colorScheme.onSurface,
+                    color = if (current) AppTheme.colors.onPrimaryContainer
+                    else AppTheme.colors.onSurface,
                     maxLines = 1,
                 )
                 if (name != null) {
                     Text(
                         name,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = AppTheme.type.bodySmall,
+                        color = AppTheme.colors.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -479,9 +479,9 @@ private fun WatchEpisodeRow(
                 if (current) {
                     Text(
                         "Now playing",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = AppTheme.type.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.tertiary,
+                        color = AppTheme.colors.tertiary,
                     )
                 }
             }
@@ -497,7 +497,7 @@ private fun WatchEpisodeRow(
 @Composable
 private fun EpisodeThumb(episode: Episode, fallbackArt: String?, current: Boolean, width: Dp) {
     val thumb = episode.thumbnailUrl
-    val scheme = MaterialTheme.colorScheme
+    val scheme = AppTheme.colors
     Box(
         Modifier
             .width(width)
@@ -529,13 +529,13 @@ private fun EpisodeThumb(episode: Episode, fallbackArt: String?, current: Boolea
             }
             thumb == null -> Text(
                 "${episode.number}",
-                style = MaterialTheme.typography.titleLarge,
+                style = AppTheme.type.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = scheme.onPrimaryContainer,
             )
             else -> Text(
                 "${episode.number}",
-                style = MaterialTheme.typography.labelSmall,
+                style = AppTheme.type.labelSmall,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 modifier = Modifier

@@ -33,19 +33,14 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.anilocal.app.R
+import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -84,6 +79,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import com.anilocal.app.ui.kit.Button
+import com.anilocal.app.ui.kit.Icon
+import com.anilocal.app.ui.kit.IconButton
+import com.anilocal.app.ui.kit.LinearProgressIndicator
+import com.anilocal.app.ui.kit.Surface
+import com.anilocal.app.ui.kit.Text
+import com.anilocal.app.ui.theme.AppTheme
 
 data class HomeRow(
     val title: String,
@@ -204,8 +206,8 @@ fun HomeScreen(
             item(key = "action-status", contentType = "status") {
                 Text(
                     message,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
+                    color = AppTheme.colors.error,
+                    style = AppTheme.type.bodySmall,
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
@@ -232,19 +234,22 @@ fun HomeScreen(
     }
 }
 
-/** Brand wordmark + search — overlaid on the hero (or standalone while nothing is loaded). */
+/** Brand mark, wordmark and search — overlaid on the hero (or standalone while nothing is loaded). */
 @Composable
 private fun HomeTopBar(onExplore: () -> Unit, modifier: Modifier = Modifier) {
     Row(
         modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // The tugboat mark (the launcher icon's glyph) in the bright accent, which reads over art.
+        Icon(ImageVector.vectorResource(R.drawable.ic_logo), null, tint = AppTheme.colors.tertiary)
+        Spacer(Modifier.width(8.dp))
         Text(
             buildAnnotatedString {
                 append("Onboard")
-                withStyle(SpanStyle(color = MaterialTheme.colorScheme.tertiary)) { append(".") }
+                withStyle(SpanStyle(color = AppTheme.colors.tertiary)) { append(".") }
             },
-            style = MaterialTheme.typography.titleLarge,
+            style = AppTheme.type.titleLarge,
             fontWeight = FontWeight.Bold,
             color = Color.White,
             modifier = Modifier.weight(1f),
@@ -312,7 +317,7 @@ private fun HeroCarousel(
 
         val page = pagerState.currentPage.coerceIn(items.indices)
         val current = items[page]
-        val bg = MaterialTheme.colorScheme.background
+        val bg = AppTheme.colors.background
         // Cinematic fade: the art melts into the page instead of ending in a hard band, and the
         // spotlight's details sit over the darkest part of the fade.
         Box(
@@ -337,14 +342,14 @@ private fun HeroCarousel(
         ) {
             Text(
                 "#${page + 1} SPOTLIGHT",
-                style = MaterialTheme.typography.labelSmall,
+                style = AppTheme.type.labelSmall,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.tertiary,
+                color = AppTheme.colors.tertiary,
                 letterSpacing = 1.4.sp,
             )
             Text(
                 current.title,
-                style = MaterialTheme.typography.headlineSmall,
+                style = AppTheme.type.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 maxLines = 2,
@@ -368,16 +373,11 @@ private fun HeroCarousel(
             ) {
                 Button(
                     onClick = { onOpen(current.id) },
-                    shape = RoundedCornerShape(100.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = Color.White,
-                    ),
-                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 10.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
                 ) {
                     Icon(AppIcons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Watch now", fontWeight = FontWeight.Bold)
+                    Text("Watch now")
                 }
                 Spacer(Modifier.weight(1f))
                 // Page dots, right-aligned beside the call to action.
@@ -389,7 +389,7 @@ private fun HeroCarousel(
                                 .size(width = if (active) 16.dp else 6.dp, height = 6.dp)
                                 .clip(RoundedCornerShape(3.dp))
                                 .background(
-                                    if (active) MaterialTheme.colorScheme.tertiary
+                                    if (active) AppTheme.colors.tertiary
                                     else Color.White.copy(alpha = 0.35f)
                                 )
                         )
@@ -406,7 +406,7 @@ private fun HeroPill(text: String) {
     Surface(shape = RoundedCornerShape(6.dp), color = Color.White.copy(alpha = 0.14f)) {
         Text(
             text,
-            style = MaterialTheme.typography.labelMedium,
+            style = AppTheme.type.labelMedium,
             color = Color.White,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
         )
@@ -493,11 +493,11 @@ private fun ContinueCard(
                         .align(Alignment.TopStart)
                         .padding(6.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
+                        .background(AppTheme.colors.primary),
                 ) {
                     Icon(
                         AppIcons.Filled.DownloadDone, "Downloaded",
-                        tint = MaterialTheme.colorScheme.onPrimary,
+                        tint = AppTheme.colors.onPrimary,
                         modifier = Modifier.padding(3.dp).size(12.dp),
                     )
                 }
@@ -505,7 +505,7 @@ private fun ContinueCard(
             item.fraction?.let { f ->
                 LinearProgressIndicator(
                     progress = { f },
-                    color = MaterialTheme.colorScheme.tertiary,
+                    color = AppTheme.colors.tertiary,
                     trackColor = Color.White.copy(alpha = 0.25f),
                     modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp),
                 )
@@ -513,15 +513,15 @@ private fun ContinueCard(
         }
         Text(
             item.anime.title,
-            style = MaterialTheme.typography.bodySmall,
+            style = AppTheme.type.bodySmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 6.dp),
         )
         Text(
             "Episode ${item.episodeNumber}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = AppTheme.type.labelSmall,
+            color = AppTheme.colors.onSurfaceVariant,
         )
     }
 }

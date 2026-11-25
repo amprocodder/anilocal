@@ -91,6 +91,20 @@ object AppIcons {
             }
         }
 
+        val ChevronRight: ImageVector by lazy {
+            icon("Filled.ChevronRight") {
+                path {
+                    moveTo(10.0f, 6.0f)
+                    lineTo(8.59f, 7.41f)
+                    lineTo(13.17f, 12.0f)
+                    lineToRelative(-4.58f, 4.59f)
+                    lineTo(10.0f, 18.0f)
+                    lineToRelative(6.0f, -6.0f)
+                    close()
+                }
+            }
+        }
+
         val Check: ImageVector by lazy {
             icon("Filled.Check") {
                 path {

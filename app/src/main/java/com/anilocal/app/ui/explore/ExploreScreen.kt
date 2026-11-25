@@ -18,10 +18,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -42,6 +38,9 @@ import com.anilocal.app.ui.common.SearchField
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import com.anilocal.app.ui.kit.FilterChip
+import com.anilocal.app.ui.kit.Text
+import com.anilocal.app.ui.theme.AppTheme
 
 class ExploreViewModel(
     private val catalog: CatalogRepository,
@@ -87,12 +86,6 @@ fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = appViewModel 
             modifier = Modifier.padding(horizontal = 16.dp),
         )
 
-        val chipColors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = MaterialTheme.colorScheme.primary,
-            selectedLabelColor = Color.White,
-        )
-        val chipShape = RoundedCornerShape(100.dp)
-
         // Filters only apply to browsing; text search ignores them, so hide them while searching
         // rather than show selections that silently do nothing.
         if (query.isBlank()) {
@@ -103,8 +96,6 @@ fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = appViewModel 
                     selected = sort == s,
                     onClick = { vm.onSort(s) },
                     label = { Text(s.label) },
-                    shape = chipShape,
-                    colors = chipColors,
                 )
             }
         }
@@ -116,8 +107,6 @@ fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = appViewModel 
                     selected = genre == null,
                     onClick = { vm.onGenre(null) },
                     label = { Text("All") },
-                    shape = chipShape,
-                    colors = chipColors,
                 )
             }
             items(AniListGenres, key = { it }) { g ->
@@ -125,8 +114,6 @@ fun ExploreScreen(onOpen: (String) -> Unit, vm: ExploreViewModel = appViewModel 
                     selected = genre == g,
                     onClick = { vm.onGenre(if (genre == g) null else g) },
                     label = { Text(g) },
-                    shape = chipShape,
-                    colors = chipColors,
                 )
             }
         }

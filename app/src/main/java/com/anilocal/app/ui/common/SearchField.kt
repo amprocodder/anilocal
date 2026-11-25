@@ -1,22 +1,18 @@
 package com.anilocal.app.ui.common
 
-import com.anilocal.app.ui.icons.AppIcons
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.anilocal.app.ui.icons.AppIcons
+import com.anilocal.app.ui.kit.Icon
+import com.anilocal.app.ui.kit.IconButton
+import com.anilocal.app.ui.kit.TextInput
 
 /**
- * The app-wide rounded search box (the Explore look): surface-container fill, borderless until
- * focused, search glyph, and a clear button once there's text.
+ * The app-wide search box: the shared text input with a search glyph, and a clear button once
+ * there's text.
  */
 @Composable
 fun SearchField(
@@ -25,26 +21,20 @@ fun SearchField(
     placeholder: String,
     modifier: Modifier = Modifier,
 ) {
-    OutlinedTextField(
+    TextInput(
         value = value,
         onValueChange = onValueChange,
-        placeholder = { Text(placeholder) },
-        leadingIcon = { Icon(AppIcons.Filled.Search, null) },
-        trailingIcon = {
-            if (value.isNotEmpty()) {
+        placeholder = placeholder,
+        leadingIcon = { Icon(AppIcons.Filled.Search, null, Modifier.size(20.dp)) },
+        trailingIcon = if (value.isNotEmpty()) {
+            {
                 IconButton(onClick = { onValueChange("") }) {
-                    Icon(AppIcons.Filled.Close, "Clear search")
+                    Icon(AppIcons.Filled.Close, "Clear search", Modifier.size(18.dp))
                 }
             }
+        } else {
+            null
         },
-        singleLine = true,
-        shape = RoundedCornerShape(10.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-            unfocusedBorderColor = Color.Transparent,
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-        ),
         modifier = modifier.fillMaxWidth(),
     )
 }

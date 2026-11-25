@@ -47,14 +47,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -85,10 +79,19 @@ import com.anilocal.app.MainActivity
 import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.SkipMarker
 import kotlinx.coroutines.delay
+import com.anilocal.app.ui.kit.CircularProgressIndicator
+import com.anilocal.app.ui.kit.DropdownMenu
+import com.anilocal.app.ui.kit.DropdownMenuItem
+import com.anilocal.app.ui.kit.Icon
+import com.anilocal.app.ui.kit.IconButton
+import com.anilocal.app.ui.kit.Surface
+import com.anilocal.app.ui.kit.Text
+import com.anilocal.app.ui.theme.AppTheme
 
 // AniLab player HUD constants (from the reference app's control skin). Hoisted so the 300ms
 // position tick doesn't rebuild them every recomposition.
 private val TimerColor = Color(0xFFBEBEBE)
+private val ClockStyle = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
 private val ScrimColor = Color.Black.copy(alpha = 0.55f)
 private val OverlayMask = Color(0x99121318)
 private val DimColor = Color.Black.copy(alpha = 0.45f)
@@ -271,7 +274,7 @@ fun PlayerScreen(
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
-            .background(if (fullscreen) Color.Black else MaterialTheme.colorScheme.background)
+            .background(if (fullscreen) Color.Black else AppTheme.colors.background)
             .then(
                 if (fullscreen) Modifier
                 else Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
@@ -415,7 +418,7 @@ fun PlayerScreen(
                         if (flash.forward) AppIcons.Filled.Forward10 else AppIcons.Filled.Replay10,
                         null, tint = Color.White, modifier = Modifier.size(if (fullscreen) 26.dp else 22.dp),
                     )
-                    if (fullscreen) Text("10s", color = Color.White, style = MaterialTheme.typography.labelLarge)
+                    if (fullscreen) Text("10s", color = Color.White, style = AppTheme.type.labelLarge)
                 }
             }
         }
@@ -468,8 +471,8 @@ fun PlayerScreen(
         error?.let { message ->
             Surface(
                 shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                color = AppTheme.colors.surfaceContainerHigh.copy(alpha = 0.94f),
+                border = BorderStroke(1.dp, AppTheme.colors.outlineVariant),
                 modifier = Modifier
                     .align(Alignment.Center)
                     .padding(if (fullscreen) 24.dp else 12.dp)
@@ -483,27 +486,27 @@ fun PlayerScreen(
                     if (fullscreen) {
                         Icon(
                             AppIcons.Outlined.ErrorOutline, null,
-                            tint = MaterialTheme.colorScheme.tertiary,
+                            tint = AppTheme.colors.tertiary,
                             modifier = Modifier.size(32.dp),
                         )
                         Text(
                             "Can't play this episode",
                             color = Color.White,
-                            style = MaterialTheme.typography.titleMedium,
+                            style = AppTheme.type.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
                     }
                     Text(
                         message,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium,
+                        color = AppTheme.colors.onSurfaceVariant,
+                        style = AppTheme.type.bodyMedium,
                         textAlign = TextAlign.Center,
                     )
                     if (recoveryState == PlaybackRecoveryState.Failed) {
                         Surface(
                             onClick = vm::retryPlayback,
                             shape = RoundedCornerShape(100.dp),
-                            color = MaterialTheme.colorScheme.primary,
+                            color = AppTheme.colors.primary,
                             modifier = Modifier.padding(top = 4.dp),
                         ) {
                             Text(
@@ -596,13 +599,13 @@ private fun EpisodePanel(
             episodes.indexOfFirst { it.number == currentEpisode }.coerceAtLeast(0),
     )
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = AppTheme.colors.surfaceContainerHigh,
         modifier = Modifier.fillMaxHeight().width(300.dp),
     ) {
         Column(Modifier.safeDrawingPadding()) {
             Text(
                 "Episodes",
-                style = MaterialTheme.typography.titleMedium,
+                style = AppTheme.type.titleMedium,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             )
             LazyColumn(state = listState) {
@@ -629,31 +632,31 @@ private fun EpisodeSheetRow(episode: Episode, current: Boolean, onClick: () -> U
     ) {
         Surface(
             shape = RoundedCornerShape(10.dp),
-            color = if (current) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.surfaceContainerHighest,
+            color = if (current) AppTheme.colors.primary
+            else AppTheme.colors.surfaceContainerHighest,
         ) {
             Box(Modifier.size(width = 44.dp, height = 32.dp), contentAlignment = Alignment.Center) {
                 Text(
                     "${episode.number}",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = if (current) MaterialTheme.colorScheme.onPrimary
-                    else MaterialTheme.colorScheme.onSurface,
+                    style = AppTheme.type.titleSmall,
+                    color = if (current) AppTheme.colors.onPrimary
+                    else AppTheme.colors.onSurface,
                 )
             }
         }
         Text(
             episode.title ?: "Episode ${episode.number}",
-            style = MaterialTheme.typography.bodyMedium,
+            style = AppTheme.type.bodyMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            color = if (current) MaterialTheme.colorScheme.tertiary
-            else MaterialTheme.colorScheme.onSurface,
+            color = if (current) AppTheme.colors.tertiary
+            else AppTheme.colors.onSurface,
             modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
         )
         if (current) {
             Icon(
                 AppIcons.Filled.PlayArrow, "Playing",
-                tint = MaterialTheme.colorScheme.tertiary,
+                tint = AppTheme.colors.tertiary,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -666,7 +669,7 @@ private fun CenterChip(text: String, modifier: Modifier = Modifier) {
         Text(
             text,
             color = Color.White,
-            style = MaterialTheme.typography.labelLarge,
+            style = AppTheme.type.labelLarge,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
         )
     }
@@ -744,14 +747,14 @@ private fun PlayerControls(
                             color = Color.White,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.titleMedium,
+                            style = AppTheme.type.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
                             "Episode $episodeNumber",
                             color = TimerColor,
                             maxLines = 1,
-                            style = MaterialTheme.typography.labelMedium,
+                            style = AppTheme.type.labelMedium,
                         )
                     }
                 }
@@ -830,19 +833,29 @@ private fun PlayerControls(
                     .padding(bottom = if (fullscreen) 8.dp else 0.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        fmtTime(position),
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(start = 4.dp),
-                    )
-                    Text(
-                        "  /  ${fmtTime(duration)}",
-                        color = TimerColor,
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.weight(1f),
-                    )
+                    // Tap the clock to switch between elapsed / total and time remaining. Tabular
+                    // figures keep it from jittering as the seconds tick.
+                    var remaining by rememberSaveable { mutableStateOf(false) }
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClickLabel = "Toggle time remaining") { remaining = !remaining }
+                            .padding(horizontal = 4.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (remaining) "−" + formatClock(duration - position) else formatClock(position),
+                            color = Color.White,
+                            style = AppTheme.type.labelLarge.merge(ClockStyle),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            if (remaining) "  left" else "  /  ${formatClock(duration)}",
+                            color = TimerColor,
+                            style = AppTheme.type.labelLarge.merge(ClockStyle),
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
                     ControlIcon(
                         if (fullscreen) AppIcons.Filled.FullscreenExit else AppIcons.Filled.Fullscreen,
                         if (fullscreen) "Exit fullscreen" else "Fullscreen",
@@ -858,7 +871,7 @@ private fun PlayerControls(
                     onScrub = onScrub,
                     onScrubFinished = onScrubFinished,
                     onScrubCancel = onScrubCancel,
-                    accent = MaterialTheme.colorScheme.primary,
+                    accent = AppTheme.colors.tertiary,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -911,15 +924,6 @@ private fun ControlIcon(
             modifier = Modifier.size(iconSize),
         )
     }
-}
-
-private fun fmtTime(ms: Long): String {
-    if (ms <= 0) return "0:00"
-    val totalSec = ms / 1000
-    val h = totalSec / 3600
-    val m = (totalSec % 3600) / 60
-    val s = totalSec % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
 private tailrec fun Context.findActivity(): Activity = when (this) {

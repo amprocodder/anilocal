@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Adaptive-icon background: deep midnight blue (brand). -->
-    <color name="ic_launcher_background">#1B2A6B</color>
+    <!-- Adaptive-icon background: the app's surface (near-black), as in the logo draft. -->
+    <color name="ic_launcher_background">#16181F</color>
 </resources>
