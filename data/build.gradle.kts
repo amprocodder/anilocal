@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -36,10 +37,11 @@ dependencies {
 
     implementation(libs.datastore.preferences)
 
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.moshi)
+    // HTTP + JSON: the same OkHttp and kotlinx.serialization the extension host already ships
+    // (extensions link against them), so the data layer adds no library of its own for either.
     implementation(libs.okhttp)
-    implementation(libs.moshi.kotlin)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.serialization.jsonOkio)
 
     // Media3 download + cache stack (DownloadManager, SimpleCache, CacheDataSource, scheduler).
     implementation(libs.media3.exoplayer)

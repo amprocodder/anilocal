@@ -1,6 +1,9 @@
 package com.anilocal.app.domain.model
 
+import kotlinx.serialization.Serializable
+
 /** An installable extension as listed in a repo's `index.min.json`. */
+@Serializable
 data class ExtensionEntry(
     val name: String,
     val pkg: String,

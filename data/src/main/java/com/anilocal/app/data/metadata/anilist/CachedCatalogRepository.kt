@@ -6,7 +6,6 @@ import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.HomeCatalog
 import com.anilocal.app.domain.model.BrowseSort
 import com.anilocal.app.domain.repo.CatalogRepository
-import com.squareup.moshi.Types
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
@@ -14,6 +13,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import javax.inject.Named
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -145,10 +146,9 @@ class CachedCatalogRepository @Inject constructor(
 
     private companion object {
         val HOME_KEYS = listOf("home:trending:1", "home:season:1", "home:airing:1", "home:alltime:1", "home:upcoming:1")
-        val SUMMARIES: java.lang.reflect.Type =
-            Types.newParameterizedType(List::class.java, AnimeSummary::class.java)
-        val DETAIL: java.lang.reflect.Type = AnimeDetail::class.java
-        val STRING: java.lang.reflect.Type = String::class.java
+        val SUMMARIES = ListSerializer(AnimeSummary.serializer())
+        val DETAIL = AnimeDetail.serializer()
+        val STRING = String.serializer()
 
         const val TTL_ROWS = 45L * 60 * 1000            // Home rows
         const val TTL_BROWSE = 3L * 60 * 60 * 1000      // Explore grid / popular

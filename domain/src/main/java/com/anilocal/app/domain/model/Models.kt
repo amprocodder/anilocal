@@ -1,6 +1,9 @@
 package com.anilocal.app.domain.model
 
+import kotlinx.serialization.Serializable
+
 /** Lightweight catalog row item. */
+@Serializable
 data class AnimeSummary(
     val id: String,
     val title: String,
@@ -31,6 +34,7 @@ data class ContinueWatching(
 }
 
 /** Full detail for the detail screen. */
+@Serializable
 data class AnimeDetail(
     val id: String,
     val title: String,
@@ -66,11 +70,13 @@ data class AnimeDetail(
  * relates. Lists come pre-sorted chronologically: prequels first, then sequels, then the rest,
  * each group ordered by release date.
  */
+@Serializable
 data class RelatedAnime(
     val relation: String,                  // prettified, e.g. "Prequel", "Sequel", "Side story"
     val anime: AnimeSummary,
 )
 
+@Serializable
 data class Episode(
     val id: String,
     val number: Int,
@@ -92,9 +98,11 @@ data class VideoStream(
     val skips: List<SkipMarker> = emptyList(),
 )
 
+@Serializable
 data class Subtitle(val url: String, val language: String, val label: String = language)
 
 /** A skip window (opening or ending), in milliseconds. */
+@Serializable
 data class SkipMarker(
     val type: Type,
     val startMs: Long,

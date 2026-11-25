@@ -2,14 +2,13 @@ package com.anilocal.app.data.cache
 
 import com.anilocal.app.data.local.CacheDao
 import com.anilocal.app.data.local.CacheEntryEntity
-import com.squareup.moshi.JsonAdapter
-import com.squareup.moshi.Moshi
+import com.anilocal.app.data.remote.AppJson
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
-import java.lang.reflect.Type
+import kotlinx.serialization.KSerializer
 import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
@@ -18,7 +17,8 @@ import javax.inject.Singleton
 data class Aged<T>(val value: T, val ageMs: Long)
 
 /**
- * Moshi-backed key → JSON cache over the disposable cache DB. This is what makes the app usable
+ * Key → JSON cache over the disposable cache DB, (de)serialized with [AppJson] and each caller's
+ * compile-time serializer. This is what makes the app usable
  * without any server reachable: repositories route reads through [cached], which serves any cached
  * hit instantly (stale-while-revalidate — see its KDoc) and only blocks on the network when the
  * cache is cold. Key namespaces in use: `home:*`/`browse:*`/`search:*`/`popular:*`/`detail:*`
@@ -32,7 +32,6 @@ data class Aged<T>(val value: T, val ageMs: Long)
 @Singleton
 class JsonCache @Inject constructor(
     private val dao: CacheDao,
-    private val moshi: Moshi,
     @Named("appScope") private val appScope: CoroutineScope,
 ) {
 
@@ -44,18 +43,18 @@ class JsonCache @Inject constructor(
         }
     }
 
-    suspend fun <T : Any> getAged(key: String, type: Type): Aged<T>? = withContext(Dispatchers.IO) { runCatching {
+    suspend fun <T : Any> getAged(key: String, serializer: KSerializer<T>): Aged<T>? = withContext(Dispatchers.IO) { runCatching {
         val row = dao.get(key) ?: return@runCatching null
-        val value = adapter<T>(type).fromJson(row.json) ?: return@runCatching null
+        val value = AppJson.decodeFromString(serializer, row.json)
         Aged(value, System.currentTimeMillis() - row.updatedAt)
     }.onFailure { if (it is CancellationException) throw it }.getOrNull() }
 
-    suspend fun <T : Any> getFresh(key: String, type: Type, maxAgeMs: Long): T? =
-        getAged<T>(key, type)?.takeIf { it.ageMs <= maxAgeMs }?.value
+    suspend fun <T : Any> getFresh(key: String, serializer: KSerializer<T>, maxAgeMs: Long): T? =
+        getAged(key, serializer)?.takeIf { it.ageMs <= maxAgeMs }?.value
 
-    suspend fun <T : Any> put(key: String, type: Type, value: T) {
+    suspend fun <T : Any> put(key: String, serializer: KSerializer<T>, value: T) {
         withContext(Dispatchers.IO) {
-            runCatching { dao.put(CacheEntryEntity(key, adapter<T>(type).toJson(value), System.currentTimeMillis())) }
+            runCatching { dao.put(CacheEntryEntity(key, AppJson.encodeToString(serializer, value), System.currentTimeMillis())) }
                 .onFailure { if (it is CancellationException) throw it }
         }
     }
@@ -65,10 +64,10 @@ class JsonCache @Inject constructor(
     }
 
     /** Every parseable value whose key starts with [keyPrefix] (e.g. "bestsrc:"). For enumerating a
-     *  whole namespace — rows that don't parse to [type] are skipped. */
-    suspend fun <T : Any> valuesUnder(keyPrefix: String, type: Type): List<T> = withContext(Dispatchers.IO) { runCatching {
+     *  whole namespace — rows that don't parse with [serializer] are skipped. */
+    suspend fun <T : Any> valuesUnder(keyPrefix: String, serializer: KSerializer<T>): List<T> = withContext(Dispatchers.IO) { runCatching {
         dao.entriesLike("$keyPrefix%").mapNotNull { row ->
-            try { adapter<T>(type).fromJson(row.json) }
+            try { AppJson.decodeFromString(serializer, row.json) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { null }
         }
@@ -93,29 +92,29 @@ class JsonCache @Inject constructor(
      */
     suspend fun <T : Any> cached(
         key: String,
-        type: Type,
+        serializer: KSerializer<T>,
         ttlMs: Long,
         preferStaleOverEmpty: Boolean = false,
         outdated: (T) -> Boolean = { false },
         fetch: suspend () -> T,
     ): T {
-        val aged = getAged<T>(key, type)
+        val aged = getAged(key, serializer)
         if (aged != null) {
-            if (aged.ageMs > ttlMs || outdated(aged.value)) refreshInBackground(key, type, preferStaleOverEmpty, fetch)
+            if (aged.ageMs > ttlMs || outdated(aged.value)) refreshInBackground(key, serializer, preferStaleOverEmpty, fetch)
             return aged.value
         }
         @Suppress("UNCHECKED_CAST")
         return coldLoads.getOrLoad(key, shouldCache = { false }) {
             // Another caller may have filled the disk cache while this request was admitted.
-            getAged<T>(key, type)?.value ?: fetch().also { fresh ->
-                if (!(preferStaleOverEmpty && fresh.isEmptyValue())) put(key, type, fresh)
+            getAged(key, serializer)?.value ?: fetch().also { fresh ->
+                if (!(preferStaleOverEmpty && fresh.isEmptyValue())) put(key, serializer, fresh)
             }
         } as T
     }
 
     private fun <T : Any> refreshInBackground(
         key: String,
-        type: Type,
+        serializer: KSerializer<T>,
         preferStaleOverEmpty: Boolean,
         fetch: suspend () -> T,
     ) {
@@ -123,7 +122,7 @@ class JsonCache @Inject constructor(
         appScope.launch {
             try {
                 val fresh = fetch()
-                if (!(preferStaleOverEmpty && fresh.isEmptyValue())) put(key, type, fresh)
+                if (!(preferStaleOverEmpty && fresh.isEmptyValue())) put(key, serializer, fresh)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -138,11 +137,6 @@ class JsonCache @Inject constructor(
     private val inFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private fun Any.isEmptyValue() = (this as? Collection<*>)?.isEmpty() == true
-
-    private fun <T> adapter(type: Type): JsonAdapter<T> {
-        @Suppress("UNCHECKED_CAST")
-        return moshi.adapter<Any>(type) as JsonAdapter<T>
-    }
 
     private companion object {
         const val MAX_AGE_MS = 30L * 24 * 60 * 60 * 1000   // sweep entries untouched for 30 days

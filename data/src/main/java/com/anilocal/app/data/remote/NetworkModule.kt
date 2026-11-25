@@ -2,12 +2,6 @@ package com.anilocal.app.data.remote
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
-import com.anilocal.app.data.metadata.anilist.AniListApi
-import com.anilocal.app.data.metadata.mal.MalApi
-import com.anilocal.app.data.metadata.extension.ExtensionRepoApi
-import com.anilocal.app.data.skip.AniSkipApi
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -17,19 +11,18 @@ import okhttp3.Cache
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
-import retrofit2.Retrofit
-import retrofit2.converter.moshi.MoshiConverterFactory
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
+/**
+ * The one shared [OkHttpClient]. The app's own APIs (AniList, AniSkip, MAL, extension repos) are
+ * small classes over [JsonHttp], each injected directly — there is no REST framework.
+ */
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
-
-    @Provides @Singleton
-    fun moshi(): Moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
 
     @Provides @Singleton
     fun okHttp(@ApplicationContext context: Context): OkHttpClient = OkHttpClient.Builder()
@@ -101,29 +94,4 @@ object NetworkModule {
             const val MAX_RETRY_AFTER_SEC = 5L
         }
     }
-
-    private fun retrofit(baseUrl: String, client: OkHttpClient, moshi: Moshi): Retrofit =
-        Retrofit.Builder()
-            .baseUrl(baseUrl)
-            .client(client)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
-            .build()
-
-    @Provides @Singleton
-    fun aniListApi(client: OkHttpClient, moshi: Moshi): AniListApi =
-        retrofit("https://graphql.anilist.co/", client, moshi).create(AniListApi::class.java)
-
-    @Provides @Singleton
-    fun aniSkipApi(client: OkHttpClient, moshi: Moshi): AniSkipApi =
-        retrofit("https://api.aniskip.com/", client, moshi).create(AniSkipApi::class.java)
-
-    // Keyless: the public list comes from MAL's own `load.json` page endpoint (not the v2 API).
-    @Provides @Singleton
-    fun malApi(client: OkHttpClient, moshi: Moshi): MalApi =
-        retrofit("https://myanimelist.net/", client, moshi).create(MalApi::class.java)
-
-    // Extension repo index.min.json — full URLs are supplied per-call via @Url, so the base is a placeholder.
-    @Provides @Singleton
-    fun extensionRepoApi(client: OkHttpClient, moshi: Moshi): ExtensionRepoApi =
-        retrofit("https://raw.githubusercontent.com/", client, moshi).create(ExtensionRepoApi::class.java)
 }

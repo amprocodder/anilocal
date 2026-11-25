@@ -1,5 +1,6 @@
 package com.anilocal.app.data.source
 
+import kotlinx.serialization.Serializable
 import com.anilocal.app.domain.source.NoSourceInstalledException
 import android.os.SystemClock
 import com.anilocal.app.data.cache.JsonCache
@@ -104,6 +105,7 @@ class SourceStreamRepository internal constructor(
 
     /** A source's entry for one AniList title, as cached: its detail (episode ids) and whether the
      *  title match was confident or only the site's unverified top hit. */
+    @Serializable
     data class SourceMatch(val detail: AnimeDetail, val confident: Boolean)
 
     /** Resolve ONE source end-to-end (the cached-match fast path + a live fallback), reporting
@@ -187,7 +189,7 @@ class SourceStreamRepository internal constructor(
     private fun matchKey(source: AnimeSource, anime: AnimeDetail) = "srcmatch:${source.info.id}:${anime.id}"
 
     private companion object {
-        val MATCH: java.lang.reflect.Type = SourceMatch::class.java
+        val MATCH = SourceMatch.serializer()
         const val MATCH_TTL_MS = 4L * 60 * 60 * 1000   // episode lists grow weekly; 4h keeps them current
         const val REGISTRY_WAIT_MS = 3_000L            // tolerate the cold-start async extension scan
     }

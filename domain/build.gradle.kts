@@ -1,5 +1,8 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    // Models the data layer caches/persists as JSON are @Serializable (compile-time generated
+    // serializers — no reflection). Pure Kotlin, so the no-Android boundary holds.
+    alias(libs.plugins.kotlin.serialization)
 }
 
 // Pure-Kotlin module: no Android dependency. Trying to import android.* here will not
@@ -16,4 +19,6 @@ kotlin {
 
 dependencies {
     implementation(libs.coroutines.core)
+    // `api`: the @Serializable models' generated serializers reference the runtime's types.
+    api(libs.kotlinx.serialization.core)
 }

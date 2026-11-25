@@ -3,9 +3,11 @@ package com.anilocal.app.data.skip
 import com.anilocal.app.data.cache.JsonCache
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.repo.SkipRepository
-import com.squareup.moshi.Types
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import com.anilocal.app.data.remote.HttpException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -68,8 +70,8 @@ class AniSkipRepository @Inject constructor(
         try {
             val resp = api.skipTimes(idMal, episodeNumber, listOf("op", "ed"), lengthSec)
             if (resp.found == true) resp.results.orEmpty().mapNotNull { it.toSubmission() } else emptyList()
-        } catch (e: retrofit2.HttpException) {
-            if (e.code() == 404) emptyList() else null
+        } catch (e: HttpException) {
+            if (e.code == 404) emptyList() else null
         } catch (ce: kotlinx.coroutines.CancellationException) {
             throw ce
         } catch (e: Exception) {
@@ -77,7 +79,8 @@ class AniSkipRepository @Inject constructor(
         }
 
     /** A submission as AniSkip recorded it, on the submitter's cut ([cutMs] = its episodeLength). */
-    // Internal (not private) so Moshi's reflection adapter can serialize it for the cache.
+    // Cached as JSON (skip:v2:*), so it carries a generated serializer.
+    @Serializable
     internal data class Submission(val type: SkipMarker.Type, val startMs: Long, val endMs: Long, val cutMs: Long)
 
     private fun AniSkipResult.toSubmission(): Submission? {
@@ -116,8 +119,7 @@ class AniSkipRepository @Inject constructor(
     }
 
     private companion object {
-        val SUBMISSIONS: java.lang.reflect.Type =
-            Types.newParameterizedType(List::class.java, Submission::class.java)
+        val SUBMISSIONS = ListSerializer(Submission.serializer())
         const val TTL_MS = 24L * 60 * 60 * 1000   // new submissions for airing shows land within a day
         // Real windows run 85–92s (OP) / 78–99s (ED) at p5–p95 across the sampled episodes.
         const val MIN_SPAN_MS = 10_000L

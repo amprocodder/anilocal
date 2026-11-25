@@ -9,12 +9,12 @@ import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.data.source.AutoSourceSelector
 import com.anilocal.app.domain.source.SourceRegistry
 import com.anilocal.app.extensions.loader.AnimeExtensionLoader
-import com.squareup.moshi.Types
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -343,9 +343,8 @@ class ExtensionRepositoryImpl @Inject constructor(
     }
 
     private companion object {
-        val ENTRIES: java.lang.reflect.Type =
-            Types.newParameterizedType(List::class.java, ExtensionEntry::class.java)
-        val META_TYPE: java.lang.reflect.Type = RepoMetaDto::class.java
+        val ENTRIES = ListSerializer(ExtensionEntry.serializer())
+        val META_TYPE = RepoMetaDto.serializer()
         const val REPO_TTL_MS = 60L * 60 * 1000   // repos publish updates at most a few times a day
         const val TAG = "AniLocalExtensions"
 

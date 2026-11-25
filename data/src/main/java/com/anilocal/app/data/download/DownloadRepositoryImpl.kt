@@ -27,8 +27,10 @@ import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
 import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.repo.StreamRepository
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.Types
+import com.anilocal.app.data.remote.JsonCodec
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
@@ -75,7 +77,6 @@ class DownloadRepositoryImpl @Inject constructor(
     // season on the source), which the catalog serves from cache.
     private val streams: StreamRepository,
     private val catalog: CatalogRepository,
-    moshi: Moshi,
     settings: SettingsRepository,
     @Named("downloadDir") private val downloadDir: File,
 ) : DownloadRepository {
@@ -86,14 +87,10 @@ class DownloadRepositoryImpl @Inject constructor(
     private val stateWrites = Channel<suspend () -> Unit>(Channel.UNLIMITED)
     private val progressWakeups = Channel<Unit>(Channel.CONFLATED)
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val subAdapter =
-        moshi.adapter<List<Subtitle>>(Types.newParameterizedType(List::class.java, Subtitle::class.java))
-    private val markerAdapter =
-        moshi.adapter<List<SkipMarker>>(Types.newParameterizedType(List::class.java, SkipMarker::class.java))
-    private val headerAdapter =
-        moshi.adapter<Map<String, String>>(
-            Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
-        )
+    // The downloads table's JSON columns (same JSON shape the earlier Moshi adapters wrote).
+    private val subAdapter = JsonCodec(ListSerializer(Subtitle.serializer()))
+    private val markerAdapter = JsonCodec(ListSerializer(SkipMarker.serializer()))
+    private val headerAdapter = JsonCodec(MapSerializer(String.serializer(), String.serializer()))
 
     // Retry machinery: one retry at a time (polite to the source — a season's worth of failures
     // arriving together must not stampede it), a bounded per-process auto-retry budget, and the

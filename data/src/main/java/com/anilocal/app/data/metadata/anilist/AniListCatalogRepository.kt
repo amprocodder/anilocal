@@ -10,9 +10,8 @@ import com.anilocal.app.domain.repo.CatalogRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -20,11 +19,6 @@ import javax.inject.Singleton
 class AniListCatalogRepository @Inject constructor(
     private val api: AniListApi,
 ) : CatalogRepository {
-
-    private val jsonMedia = "application/json".toMediaType()
-
-    private fun body(query: String, variables: JSONObject): okhttp3.RequestBody =
-        JSONObject().put("query", query).put("variables", variables).toString().toRequestBody(jsonMedia)
 
     override suspend fun home(): HomeCatalog = homeResult().catalog
 
@@ -53,7 +47,7 @@ class AniListCatalogRepository @Inject constructor(
               format episodes averageScore status nextAiringEpisode { episode }
             }
         """.trimIndent()
-        val response = api.query(body(q, JSONObject().put("season", season).put("year", year)))
+        val response = api.query(q, buildJsonObject { put("season", season); put("year", year) })
         val data = response.data ?: error("AniList: home unavailable")
         fun PageDto?.summaries() = this?.media.orEmpty().map { it.toSummary() }
         AniListHomeResult(HomeCatalog(
@@ -72,7 +66,7 @@ class AniListCatalogRepository @Inject constructor(
                 id idMal title{romaji english} coverImage{large} format episodes averageScore status nextAiringEpisode{episode}
               } } }
         """.trimIndent()
-        api.query(body(q, JSONObject().put("page", page)))
+        api.query(q, buildJsonObject { put("page", page) })
             .requireData().page?.media?.map { it.toSummary() } ?: error("AniList: page unavailable")
     }
 
@@ -84,7 +78,7 @@ class AniListCatalogRepository @Inject constructor(
                 id idMal title{romaji english} coverImage{large} format episodes averageScore status nextAiringEpisode{episode}
               } } }
         """.trimIndent()
-        api.query(body(q, JSONObject().put("search", query)))
+        api.query(q, buildJsonObject { put("search", query) })
             .requireData().page?.media?.map { it.toSummary() } ?: error("AniList: page unavailable")
     }
 
@@ -102,7 +96,7 @@ class AniListCatalogRepository @Inject constructor(
               } } }
             } }
         """.trimIndent()
-        val m = api.query(body(q, JSONObject().put("id", animeId.toInt()))).requireData().media
+        val m = api.query(q, buildJsonObject { put("id", animeId.toInt()) }).requireData().media
             ?: error("AniList: media $animeId not found")
         val count = m.releasedEpisodes() ?: 0
         AnimeDetail(
@@ -169,14 +163,14 @@ class AniListCatalogRepository @Inject constructor(
               }
             } }
         """.trimIndent()
-        api.query(body(q, JSONObject().put("page", page).put("genre", genre ?: JSONObject.NULL)))
+        api.query(q, buildJsonObject { put("page", page); put("genre", genre) })   // null genre = all
             .requireData().page?.media?.map { it.toSummary() } ?: error("AniList: page unavailable")
     }
 
     override suspend fun anilistIdForMal(malId: Int): String? = withContext(Dispatchers.IO) {
         val q = "query(${'$'}idMal:Int){ Media(idMal:${'$'}idMal, type:ANIME){ id } }"
         try {
-            api.query(body(q, JSONObject().put("idMal", malId))).requireData().media?.id?.toString()
+            api.query(q, buildJsonObject { put("idMal", malId) }).requireData().media?.id?.toString()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -191,7 +185,7 @@ class AniListCatalogRepository @Inject constructor(
                 id idMal title{romaji english} coverImage{large} format episodes averageScore status nextAiringEpisode{episode}
               } } }
         """.trimIndent()
-        api.query(body(q, JSONObject().put("page", page))).requireData().page?.media?.map { it.toSummary() }
+        api.query(q, buildJsonObject { put("page", page) }).requireData().page?.media?.map { it.toSummary() }
             ?: error("AniList: page unavailable")
     }
 

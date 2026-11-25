@@ -1,3 +1,2 @@
-# Keep Moshi-generated adapters / model classes reflected at runtime.
--keep,allowobfuscation,allowshrinking @com.squareup.moshi.JsonClass class *
--keepclassmembers class * { @com.squareup.moshi.Json <fields>; }
+# App-level R8 rules. (The optimized builds don't minify yet; JSON uses compile-time
+# kotlinx.serialization serializers, so no model classes need keeping for reflection.)

@@ -1,5 +1,6 @@
 package com.anilocal.app.data.source
 
+import kotlinx.serialization.Serializable
 import com.anilocal.app.domain.source.NoSourceInstalledException
 import android.os.SystemClock
 import com.anilocal.app.data.cache.JsonCache
@@ -65,10 +66,12 @@ class AutoSourceSelector @Inject constructor(
 
     /** A per-title (per AniList id) pin: which source last won, when, and whether it won with a
      *  confident match (a weak win means no source matched confidently when it was raced). */
+    @Serializable
     data class Pin(val sourceId: String, val wonAt: Long, val confident: Boolean = true)
 
     /** A per-source scoreboard row. Latency EWMA moves only on success, so a one-off 30 s cold
      *  Cloudflare solve or a timeout never poisons a source's ranking; failures only bump the count. */
+    @Serializable
     data class SrcStat(val latencyEwmaMs: Double, val successes: Int, val failures: Int)
 
     /**
@@ -284,8 +287,8 @@ class AutoSourceSelector @Inject constructor(
     private fun statKey(sourceId: String) = "srcstats:$sourceId"
 
     private companion object {
-        val PIN_TYPE: java.lang.reflect.Type = Pin::class.java
-        val STAT_TYPE: java.lang.reflect.Type = SrcStat::class.java
+        val PIN_TYPE = Pin.serializer()
+        val STAT_TYPE = SrcStat.serializer()
 
         const val PIN_TTL_MS = 7L * 24 * 60 * 60 * 1000    // scraper catalogs rot; re-race weekly
         const val RACE_K = 4                                // candidates raced per fresh title

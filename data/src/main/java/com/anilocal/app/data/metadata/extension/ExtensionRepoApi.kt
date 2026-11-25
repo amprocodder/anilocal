@@ -1,27 +1,37 @@
 package com.anilocal.app.data.metadata.extension
 
-import retrofit2.http.GET
-import retrofit2.http.Url
+import com.anilocal.app.data.remote.JsonHttp
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /** Fetches an Aniyomi-style extension repo index (a top-level JSON array) and its `repo.json`. */
-interface ExtensionRepoApi {
-    @GET
-    suspend fun index(@Url url: String): List<RepoEntryDto>
+@Singleton
+class ExtensionRepoApi @Inject constructor(private val http: JsonHttp) {
+    suspend fun index(url: String): List<RepoEntryDto> = http.get(url.toHttpUrl(), ENTRIES)
 
     /** A repo's `repo.json` — its `meta.signingKeyFingerprint` is the trust anchor for auto-install. */
-    @GET
-    suspend fun repoMeta(@Url url: String): RepoMetaDto
+    suspend fun repoMeta(url: String): RepoMetaDto = http.get(url.toHttpUrl(), RepoMetaDto.serializer())
+
+    private companion object {
+        val ENTRIES = ListSerializer(RepoEntryDto.serializer())
+    }
 }
 
-/** `repo.json`. Only `meta` is consumed; unknown keys are ignored by the reflection Moshi. */
-data class RepoMetaDto(val meta: RepoMeta?)
+/** `repo.json`. Only `meta` is consumed; other keys are ignored. Also cached as JSON (`extmeta:*`). */
+@Serializable
+data class RepoMetaDto(val meta: RepoMeta? = null)
 
+@Serializable
 data class RepoMeta(
-    val name: String?,
-    val signingKeyFingerprint: String?,
+    val name: String? = null,
+    val signingKeyFingerprint: String? = null,
 )
 
-/** One entry in `index.min.json`. Parsed by the shared reflection Moshi (no codegen needed). */
+/** One entry in `index.min.json`. */
+@Serializable
 data class RepoEntryDto(
     val name: String,
     val pkg: String,
@@ -30,12 +40,13 @@ data class RepoEntryDto(
     val code: Int,
     val version: String,
     val nsfw: Int,
-    val sources: List<RepoSourceDto>?,
+    val sources: List<RepoSourceDto>? = null,
 )
 
+@Serializable
 data class RepoSourceDto(
     val name: String,
     val lang: String,
     val id: String,
-    val baseUrl: String?,
+    val baseUrl: String? = null,
 )

@@ -2,8 +2,9 @@ package com.anilocal.app.data.download
 
 import android.net.Uri
 import com.anilocal.app.data.local.DownloadDao
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.Types
+import com.anilocal.app.data.remote.JsonCodec
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,11 +25,8 @@ import javax.inject.Singleton
 @Singleton
 class DownloadHeaderStore @Inject constructor(
     private val dao: DownloadDao,
-    moshi: Moshi,
 ) {
-    private val adapter = moshi.adapter<Map<String, String>>(
-        Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
-    )
+    private val adapter = JsonCodec(MapSerializer(String.serializer(), String.serializer()))
 
     private val byHost = ConcurrentHashMap<String, Map<String, String>>()
 
