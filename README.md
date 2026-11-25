@@ -66,8 +66,8 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
 
 ## Build
 1. Open the project root in Android Studio (Koala+); it will generate the Gradle wrapper
-   scripts (`gradlew`) and sync. (Wrapper pinned to Gradle 8.9 for AGP 8.7.)
-2. JDK 17, Android SDK 35 installed. `minSdk 24`.
+   scripts (`gradlew`) and sync. (Wrapper pinned to Gradle 9.9.2 for AGP 9.5.2.)
+2. JDK 17 and the Android SDK 37.2 platform installed. `minSdk 24`, `targetSdk 35`.
 3. Run the `app` config on a device/emulator. Browse works immediately (AniList); to **play**,
    install an extension first (Settings → Browse extensions), then pick it in the source picker.
 

@@ -24,8 +24,11 @@ Read `README.md` for the product-level feature list and rationale.
 
 The Gradle **wrapper is not committed** (no `gradlew`, and not even `gradle/wrapper/gradle-wrapper.jar` —
 only `gradle-wrapper.properties`). Either open the project in Android Studio (Koala+) to generate the
-wrapper, or use a system `gradle`. The wrapper/CI are pinned to **Gradle 8.9** (required by AGP 8.7).
-Toolchain: **JDK 17**, **compileSdk/targetSdk 35**, **minSdk 24**.
+wrapper, or use a system `gradle`. The wrapper/CI are pinned to **Gradle 9.9.2** (AGP 9.5.2 needs 9.1+).
+Toolchain: **JDK 17**, **Kotlin 2.4** (AGP 9's built-in Kotlin — there is no `kotlin-android` plugin),
+**compileSdk 37.2** (`release(37) { minorApiLevel = 2 }` — Compose 1.13 requires 37.1+), **targetSdk 35**,
+**minSdk 24**. targetSdk stays 35 **on purpose**: from 36, Android ignores an app's forced orientation on
+screens ≥600dp, which would break the player's sensor-landscape fullscreen on tablets.
 
 ```bash
 gradle :app:assembleDebug          # build the installable debug APK (what CI does)
@@ -37,7 +40,7 @@ gradle :data:testDebugUnitTest     # Android-library unit tests
 **No test suite is committed** and CI only lints and assembles: CI (`.github/workflows/android.yml`)
 runs on every push — it checks the commit messages, runs `:domain:check` plus lint on the Android
 modules, assembles `:app:assembleDebug` and `:app:assembleBenchmark`, and uploads both APKs (artifacts
-`anilocal-debug-apk` and `anilocal-optimized-apk`) for sideloading — it provisions Gradle 8.9 via `gradle/actions/setup-gradle`, **not** a committed wrapper,
+`anilocal-debug-apk` and `anilocal-optimized-apk`) for sideloading — it provisions Gradle 9.9.2 via `gradle/actions/setup-gradle`, **not** a committed wrapper,
 so don't "fix" CI by adding one. The pure-JVM `:domain` module is the fast, dependency-free place to add
 unit tests.
 
@@ -90,7 +93,7 @@ Optional body: what changed and why (not how), wrapped at ~72 columns.
 
 **Before pushing**
 - Build locally — it's much faster than CI. The dev machine has Android Studio's SDK at
-  `~/Android/Sdk` (`local.properties` → `sdk.dir`, gitignored) and Gradle 8.9 on PATH. Any code change
+  `~/Android/Sdk` (`local.properties` → `sdk.dir`, gitignored) and needs Gradle 9.9.2 on PATH. Any code change
   must pass `gradle :domain:check :app:assembleDebug` locally before pushing; docs/CI-only changes are
   exempt. CI is the backstop, not the gate: don't block on it, but if a run goes red
   (`gh run list --limit 3`), fix it next with a `fix`/`build` commit — no reverting history.
@@ -136,8 +139,12 @@ Four Gradle modules with a strict, one-way dependency direction:
   sources resolve at construction), and `loader/AnimeExtensionLoader` + `ChildFirstPathClassLoader`
   (discover installed extension APKs by the `tachiyomi.animeextension` feature, lib-version 12–16, and
   reflect their source classes in). Depends on `:domain`; `:data` consumes it via `implementation` so
-  the vendored `eu.kanade.*` types never reach `:app`. **OkHttp is pinned app-wide to `5.0.0-alpha.14`**
-  to match the vendored stack, and the module compiles with `-Xcontext-receivers`.
+  the vendored `eu.kanade.*` types never reach `:app`. Loaded extensions link against the **host's** copies
+  of OkHttp, okio, jsoup, kotlinx.serialization, coroutines, RxJava 1, Injekt, androidx.preference and
+  QuickJS (`app.cash.quickjs`, the JS engine shared extractors like StreamWish deobfuscate with), so each
+  must stay **at or above** what extensions are built against — a missing/older class surfaces only as
+  a silent "nothing found". The vendored `parseAs` uses Kotlin context *parameters*
+  (`context(json: Json)`, as upstream does; same compiled signature as the old context receivers).
   `AniyomiSourceAdapter.resolve()` tries the ext-lib-14 `getVideoList(episode)` path **first**, falling
   back to the lib-16 `getHosterList → getVideoList(hoster)` pipeline — classic-first avoids an
   `AbstractMethodError` on lib-14 sources, and every source call is `runCatching`-wrapped so a
@@ -268,7 +275,7 @@ for the old MAL client id).
   thread itself.
 
 - **The source's own request headers must reach the media host intact.** Neither download HTTP factory
-  sets a User-Agent: Media3 1.4.1 applies a constructor UA *after* the request properties and overwrites
+  sets a User-Agent: Media3 (1.4.1 through at least 1.11.1) applies a constructor UA *after* the request properties and overwrites
   the source's (the header scraper CDNs gate on, and the one `cf_clearance` is bound to).
   `FALLBACK_USER_AGENT` (a browser UA) is added only when the source supplied none — by the download
   resolver in `DownloadModule` and by `PlayerViewModel.playbackDataSource`, deliberately duplicated since
@@ -485,3 +492,7 @@ for the old MAL client id).
   that reproduces the caption's true on-screen px).
 - Every module keeps its Kotlin sources under `src/main/java/` (`:domain` was moved there from
   `src/main/kotlin/` to match). Put new files there, not in a `kotlin/` directory.
+- Icons are the app's own vectors in `app/.../ui/icons/AppIcons.kt` — there is **no material-icons
+  dependency** (the extended set was 11 MB of code for 50 glyphs). Call sites read
+  `AppIcons.Filled.X` / `AppIcons.Outlined.X` / `AppIcons.AutoMirrored.Filled.X`; to add a glyph, copy
+  its path data into `AppIcons` (from the Apache-2.0 Material sources, or draw your own).

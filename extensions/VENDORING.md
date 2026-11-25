@@ -30,10 +30,11 @@ these classes via the child-first class loader (Phase 3).
 - **`AnimeFilterList`** — dropped the `@androidx.compose.runtime.Stable` annotation (no Compose here).
 
 ## Compiler notes
-- `OkHttpExtensions.parseAs` uses Kotlin context receivers → `-Xcontext-receivers` is set in
-  `build.gradle.kts`.
-- OkHttp is pinned app-wide to `5.0.0-alpha.14` (what this code targets); the Injekt fork is
-  `com.github.mihonapp:injekt` from JitPack.
+- `OkHttpExtensions.parseAs` uses Kotlin context parameters (`context(json: Json)`), matching upstream
+  Aniyomi's migration off context receivers; the compiled signature is unchanged, so no compiler flag.
+- OkHttp is OkHttp 5 stable app-wide; it and the other libraries extensions call at runtime (okio,
+  jsoup, kotlinx.serialization, coroutines, QuickJS) are kept at or above the versions extensions are
+  built against. The Injekt fork is `com.github.mihonapp:injekt` from JitPack.
 
 `AniyomiSourceAdapter` (in `com.anilocal.app.extensions`) maps a loaded source onto the domain
 `AnimeSource` seam; `AniyomiInjektModule` + `AniyomiRuntime` seed the Injekt singletons it needs.
