@@ -339,7 +339,7 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   OP cap — Steins;Gate ep 1 opens at 10:42) and spans 10–150s (OP) / 10–180s (ED). Cache keys are
   `skip:v2:<mal>:<ep>:<lenSec>` holding that query's raw submissions (24h).
   On `STATE_ENDED` the player **auto-advances to the next episode in place** (same screen and
-  `PlayerView`; `playEpisode` resets per-episode state and normally re-runs `load()`, which builds a
+  video surface; `playEpisode` resets per-episode state and normally re-runs `load()`, which builds a
   fresh ExoPlayer — a downloaded next ep plays from cache), gated on the `autoPlayNext` setting and
   `hasEpisode()`; an `advancing` guard fires it exactly once, and with no next episode it
   `progress.remove()`s the title from Continue Watching. **Pre-cache next episode**
@@ -361,17 +361,27 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   hidden); exiting fullscreen (button or Back) shows the **watch page** (`WatchPanel.kt`: details +
   episode list) — portrait with the video on top on phones, landscape side-by-side on tablets
   (`smallestScreenWidthDp >= 600`). Back on the watch page leaves the player. The video `Box` stays
-  the first child of one `BoxWithConstraints` and only its size changes, so the `PlayerView`/SurfaceView
-  is never recreated on a mode switch — keep it that way (no Column/Row swap around it).
-  **Headset/Bluetooth play-pause** rides a Media3 `MediaSession` owned by `PlayerViewModel` (no
-  service, no notification; Media3 registers its own media-button receiver at runtime). Every player
-  swap goes through `swapPlayer`, which re-points the session — put a new player on screen any other
-  way and the buttons drive a released one. The session sees a `SessionPlayer` (`MediaButtons.kt`) that
-  exposes only play/pause and routes both to `setPlaying`, the same path as the overlay button.
-  Everything else is withheld: Media3's play handler `prepare()`s an IDLE player (one still connecting
-  or in recovery), and seek-to-next on a single item jumps to the end and auto-advances. A toggle key
-  (`PLAY_PAUSE`/`HEADSETHOOK`) is intercepted in the session callback and calls `togglePlay()`, because
-  Media3 reads an IDLE player as paused, so the button could never pause a loading episode.
+  the first child of one `BoxWithConstraints` and only its size changes, so its SurfaceView is never
+  recreated on a mode switch — keep it that way (no Column/Row swap around it).
+  **The player draws its own video and captions — no media3-ui.** `VideoSurface` is a `SurfaceView` sized
+  like Media3's AspectRatioFrameLayout (`VideoScale` Fit/Zoom/Stretch, same 1% tolerance), black until
+  the current player's first frame (PlayerView's shutter), and on a player swap it moves the surface from
+  the outgoing player to the new one (what keeps the standby promotion instant). `Captions` is a Compose
+  port of the parts of Media3's SubtitlePainter the app used — text size `CAPTION_TEXT_SIZE_FRACTION`
+  (0.0533) × scale of the **video frame's** height, white text with a 2dp black outline, the optional
+  translucent box as a background span on the edge layout, cue line/position anchors, bitmap cues, embedded
+  styles ignored, and Media3's per-line bidi wrap for RTL text — drawn over the video frame, exactly as
+  SubtitleView inside PlayerView's content frame did. Settings' preview uses the same `Captions`. The
+  default caption track is the first in the device's language, then English, then the first listed.
+  **Headset/Bluetooth play-pause** rides the platform's `android.media.session.MediaSession`
+  (`PlayerMediaSession` in `MediaButtons.kt`, owned by `PlayerViewModel`; no media3-session, no service,
+  no notification). It isn't tied to an ExoPlayer, so player swaps don't touch it; the view model feeds it
+  playing/buffering/paused and the title. It advertises only PLAY/PAUSE and routes both to `setPlaying`,
+  the same path as the overlay button — nothing else (seek, next, stop, speed) is offered, so nothing can
+  drive the ExoPlayer behind the view model's back. A toggle key (`PLAY_PAUSE`/`HEADSETHOOK`) is
+  intercepted in `onMediaButtonEvent` and calls `togglePlay()` on the first ACTION_DOWN: it flips the play
+  *intent*, because a player that's still connecting isn't playing, so a state-based toggle could never
+  pause a loading episode.
   A hardware keyboard's (e.g. a tablet keyboard cover's) Space and arrows aren't media keys, so the
   session never sees them (its media keys, if any, already reach the session). `PlayerScreen`
   installs `MainActivity.keyInterceptor` (consulted in `dispatchKeyEvent`, *before* focus routing):
@@ -523,7 +533,7 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   `Flow`s. On the first run after the switch it migrated DataStore's `settings.preferences_pb` with a small
   hand-written protobuf reader (`LegacyDataStorePreferences`) and left that file in place. Keys include
   `autoPlayNext`, `precacheNextEpisode`, `autoSkip`, `wifiOnlyDownloads`, default download quality, and **subtitle
-  scale/background** (the player applies these live to the `SubtitleView`; Settings shows a to-scale preview
+  scale/background** (the player applies these live to `Captions`; Settings shows a to-scale preview
   that reproduces the caption's true on-screen px).
 - Every module keeps its Kotlin sources under `src/main/java/` (`:domain` was moved there from
   `src/main/kotlin/` to match). Put new files there, not in a `kotlin/` directory.
