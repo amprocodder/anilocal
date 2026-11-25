@@ -92,7 +92,10 @@ fun SeekBar(
             // 1) full track
             drawRoundRect(cTrack, Offset(0f, top), Size(w, trackH), corner)
             if (!known) return@Canvas
-            // 2) skip ranges (over the track, under the played fill so consumed portions look played)
+            // 2) buffered fill
+            drawRoundRect(cBuffer, Offset(0f, top), Size(fx(bufferedMs).coerceIn(0f, w), trackH), corner)
+            // 3) skip ranges: over the buffer (which used to hide every marker inside it), under the
+            //    played fill so consumed portions look played
             markers.forEach { m ->
                 val x0 = fx(m.startMs).coerceIn(0f, w)
                 val x1 = fx(m.endMs).coerceIn(0f, w)
@@ -104,8 +107,6 @@ fun SeekBar(
                     )
                 }
             }
-            // 3) buffered fill
-            drawRoundRect(cBuffer, Offset(0f, top), Size(fx(bufferedMs).coerceIn(0f, w), trackH), corner)
             // 4) played fill
             val px = fx(shown).coerceIn(0f, w)
             drawRoundRect(accent, Offset(0f, top), Size(px, trackH), corner)
