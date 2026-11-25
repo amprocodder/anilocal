@@ -83,7 +83,7 @@ Optional body: what changed and why (not how), wrapped at ~72 columns.
 
 - **type** — `feat` (user-visible feature), `fix` (bug fix), `perf`, `refactor` (no behaviour
   change), `docs`, `build` (Gradle, deps, signing), `ci`, `test`, `chore` (housekeeping, releases),
-  `revert`, `style`. Add `!` after the type/scope for a breaking change (e.g. a Room schema bump
+  `revert`, `style`. Add `!` after the type/scope for a breaking change (e.g. a database schema bump
   without a migration path).
 - **scope** — optional, lowercase, the feature area: `player`, `downloads`, `sources`, `extensions`,
   `settings`, `library`, `home`, `explore`, `details`, `mal`, `skip`, `cache`, `net`, `ui`, `app`, or a
@@ -128,7 +128,7 @@ Four Gradle modules with a strict, one-way dependency direction:
   `SourcePreference` (sealed: Toggle/EditText/Select/MultiSelect) — a UI-agnostic mapping of an
   extension's settings so `:app` can render/persist them without touching `androidx.preference`/`eu.kanade.*`.
 - **`:data`** — Android library. *All* repository implementations live here: AniList/MAL APIs,
-  AniSkip, Room, DataStore, the Media3 download stack, the source registry, the
+  AniSkip, the SQLite databases, the settings file, the Media3 download stack, the source registry, the
   extension-repo browse/install impls, and the object graph (`DataGraph`). Depends on `:domain` and
   `:extensions`.
 - **`:extensions`** — Android library that makes AniLocal a host for Aniyomi extensions. Vendors the
@@ -180,7 +180,7 @@ Streams are **not one compile-time binding**. Built-in `AnimeSource`s would be p
 `builtIns` set (the app currently ships none); `SourceRegistryImpl` (in `:data`) merges that set with the
 extensions `AnimeExtensionLoader` discovers and exposes a reactive `sources: StateFlow`.
 `SourceStreamRepository` injects the `SourceRegistry` + `SettingsRepository` and routes resolution to
-the **user-selected** source (`selectedSourceId` in DataStore, chosen in the Settings-tab picker),
+the **user-selected** source (`selectedSourceId` in the settings file, chosen in the Settings-tab picker),
 falling back to the first available source. **To add a built-in source, add it to `builtIns` in
 `DataGraph`** — selection, routing, and the picker are automatic. The `AnimeSource` contract is **five required suspend methods** —
 `popular`/`search`/`detail` (catalog-shaped) *and* `servers`/`resolve` (stream-shaped) — **plus a
@@ -213,7 +213,7 @@ serves a fresh prefetch (≤ 4 min old — links are tokenized; at most 2 kept) 
 and falls back to a live resolve if it failed. Downloaded episodes are never prefetched.
 
 `DataGraph` builds the infrastructure through three small factory objects under
-`com.anilocal.app.data.*`: `NetworkModule` (the one shared `OkHttpClient`), `DatabaseModule` (Room), and
+`com.anilocal.app.data.*`: `NetworkModule` (the one shared `OkHttpClient`) and
 `DownloadModule` (the Media3 cache/manager stack). The four APIs (AniList/AniSkip/MAL/extension-repo)
 are plain classes over `JsonHttp`. Adding a new repo/source impl → a constructor call + property in
 `DataGraph` (and, if the UI needs it, a getter in `AppGraph`). In `:app`, **`AniLocalApp`** is the
@@ -223,15 +223,15 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
 
 ## Key cross-cutting patterns
 
-- **Room is the offline source of truth for the UI.** Everything the UI shows (downloads list,
-  badges, progress) reads from Room — never directly from Media3 or the network. `DownloadRepositoryImpl`'s
-  `init` block **bridges** Media3 → Room three ways: a `DownloadManager.Listener` writes state changes
+- **The database is the offline source of truth for the UI.** Everything the UI shows (downloads list,
+  badges, progress) reads from it — never directly from Media3 or the network. `DownloadRepositoryImpl`'s
+  `init` block **bridges** Media3 → the database three ways: a `DownloadManager.Listener` writes state changes
   (`dao.updateState(...)`) and removals (`dao.deleteById`), and the `wifiOnlyDownloads` settings `Flow`
   drives `downloadManager.setRequirements(...)`. When adding download/offline features, follow this bridge
   pattern rather than reading Media3 state in the UI. **Failed downloads retry by RE-RESOLUTION**
   (`DownloadRepository.retry`): a queued episode's tokenized stream URL usually expires before it
   gets one of the 2 parallel download slots, so a retry re-resolves a fresh URL at the original
-  quality, refetches subs, and swaps the Media3 download in place (same id; the Room row is
+  quality, refetches subs, and swaps the Media3 download in place (same id; the row is
   rewritten, and the resulting `onDownloadRemoved` is suppressed via the `retrying` guard so it
   can't delete the row). `STATE_FAILED` auto-retries this way (2× per process, backoff); the
   Downloads-screen Retry button calls `retry()` — never `resume()`, which is a no-op for FAILED.
@@ -239,12 +239,20 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   and the DAO hard-codes `state = 1` to mean COMPLETED — a magic number duplicated from private companion
   consts, easy to break; subtitles, skip markers and headers are stored as **JSON columns** on `DownloadEntity`
   (not separate tables); offline subtitle files are pulled into `<downloadDir>/subs/` with their URLs
-  rewritten to `file://` and **deleted manually in `remove()`**. There are **two Room databases**
-  (`DatabaseModule.kt`): `anilocal.db` (version 5, `exportSchema = false`) holds user data and **every
-  schema bump must ship a `Migration`** (`MIGRATION_4_5` — the `headersJson` column — is the pattern;
-  `fallbackToDestructiveMigration()` remains only as a last-resort for pathless jumps), while
-  `anilocal-cache.db` is the **disposable** JSON cache (one `kv_cache` table) where destructive
-  migration is always fine.
+  rewritten to `file://` and **deleted manually in `remove()`**.
+- **Storage is hand-written SQLite — no Room** (`data/.../local/`). `Db` wraps the platform
+  `SQLiteOpenHelper`: versioned create/migrate, WAL, coroutine `read`/`write` on the IO pool plus blocking
+  `readNow`/`transaction` for Media3's download threads, and `observe(tables) { query }` Flows that re-run
+  when a `write` to one of those tables **reports a change** (a write block returns whether it changed a
+  row — return `false` for a no-op so the frequent download-progress writes don't wake every observer).
+  The DAOs (`LibraryDao`/`DownloadDao`/`MalDao`/`ProgressDao`/`CacheDao`) are plain SQL. There are two
+  files: **`anilocal.db`** (`AppDatabase`, version 5) holds user data and **every schema bump must add a
+  migration** to its `Schema` (the 4→5 `headersJson` column is the pattern); a version with no migration
+  fails loudly rather than wiping data. **`anilocal-cache.db`** (`CacheDatabase`) is the **disposable**
+  JSON cache (one `kv_cache` table) and drops/recreates on any version mismatch. The CREATE statements are
+  byte-for-byte what Room generated and **Room's identity hash is kept in `room_master_table`**, so the
+  files stay interchangeable with older Room-based builds (a downgrade still opens them) — when the schema
+  changes, change both the statements and the hash's meaning deliberately.
 
 - **Stale-while-revalidate reads via `JsonCache`** (`data/.../cache/JsonCache.kt`, over the disposable
   cache DB): repositories call `cache.cached(key, type, ttl) { fetch() }` — **any** cached hit (fresh
@@ -276,7 +284,7 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   headers ride a `ResolvingDataSource` that consults `DownloadHeaderStore` **per request**: enqueue/
   resume point the store at the download's headers (persisted in `DownloadEntity.headersJson`), and
   on a cold process — including a headless scheduler/boot service restart, where no ViewModel ever
-  constructs `DownloadRepositoryImpl` — the store lazily restores them from Room on the download
+  constructs `DownloadRepositoryImpl` — the store lazily restores them from the database on the download
   thread itself.
 
 - **The source's own request headers must reach the media host intact.** Neither download HTTP factory
@@ -301,7 +309,7 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   `internal` properties), not to a constructor.
 
 - **Player has a dual online/offline path** (`app/.../player/PlayerViewModel.kt`): on load it first
-  checks `downloads.getOffline(...)`. Offline → skip markers and subtitles come from the cached Room
+  checks `downloads.getOffline(...)`. Offline → skip markers and subtitles come from the cached database
   record. Online → AniList resolves the title, the bound `AnimeSource` resolves the stream.
   **Skip markers: the source's own timestamps first, AniSkip only fills gaps.** Aniyomi extensions
   publish per-file intro/outro windows (`Video.timestamps`; the HiAnime-family megaplay/megacloud
@@ -381,12 +389,12 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   and nothing needs a build-time key:
   - **MAL sync** uses **no API key and no OAuth** — it mirrors the user's PUBLIC list from MAL's own
     `load.json` page endpoint (`myanimelist.net/animelist/{username}/load.json?status=7`), by **username
-    only** (entered in Settings → DataStore). Per-entry status is MAL's numeric code, mapped in
+    only** (entered in Settings → the settings file). Per-entry status is MAL's numeric code, mapped in
     `MalRepositoryImpl`. Sync is one-way/read-only: it pages the list (~300/page, ≤50 pages), then
     `dao.clear()` + `upsertAll()` (full replace, not merge), throttled to once per 30 min. Requires the
     user's MAL list privacy to be Public. It fires from `AppViewModel.onAppOpen()` (a `MainActivity`
     `LaunchedEffect` on every app open) through the gated/throttled `syncIfDue()`; **"Sync now"** in Settings
-    calls the un-throttled `sync()`. Library's **"My List"** then merges the Room library with the *entire*
+    calls the un-throttled `sync()`. Library's **"My List"** then merges the local library with the *entire*
     MAL mirror (deduped by MAL id, local wins); MAL-only rows get a synthetic `mal-<malId>` id, so opening
     one must first resolve `catalog.anilistIdForMal(malId)` before navigating — the detail route is keyed by
     **AniList id** (`DetailsScreen` does `animeId.toInt()`), and a miss shows a "not found" Toast.
@@ -509,7 +517,11 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   client with explicit timeouts, a 20 MB HTTP cache, and a bounded `RetryInterceptor` (ONE retry with
   backoff on IO errors, or one honored short `Retry-After` on 429 — AniList rate-limits at 90 req/min;
   Explore additionally debounces typed queries 300 ms).
-- Settings persist via DataStore (`DataStoreSettingsRepository`) exposed as Kotlin `Flow`s — including
+- Settings persist in the app's own settings file — `files/settings.json`, a flat JSON object
+  (`SettingsFile`: loaded once off the main thread, edits serialized and written atomically via
+  `AtomicFile` before they're published; no DataStore) — exposed by `SettingsRepositoryImpl` as Kotlin
+  `Flow`s. On the first run after the switch it migrated DataStore's `settings.preferences_pb` with a small
+  hand-written protobuf reader (`LegacyDataStorePreferences`) and left that file in place. Keys include
   `autoPlayNext`, `precacheNextEpisode`, `autoSkip`, `wifiOnlyDownloads`, default download quality, and **subtitle
   scale/background** (the player applies these live to the `SubtitleView`; Settings shows a to-scale preview
   that reproduces the caption's true on-screen px).

@@ -23,13 +23,13 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   files and **skip-times are cached** too, so playback + auto-skip work with no network. A
   **Downloads tab** (offline-accessible) lists them with progress + **pause / resume / cancel**
   controls, and browser posters get a **downloaded badge**. Everything the UI shows reads from
-  Room, so it works fully offline.
+  the local database, so it works fully offline.
 - **WiFi-only downloads** setting (Settings tab): sets the `DownloadManager` requirement to
   unmetered, so downloads auto-pause on mobile data and resume on WiFi.
 - **Download quality selection**: a default-quality preference (Settings tab) plus a per-episode
   quality picker shown when the source offers multiple variants (pre-selected from the
   default). The chosen quality is stored and shown on the Downloads tab.
-- **Auto-skip** toggle (Settings tab) persisted via **DataStore**; when on, the player seeks past
+- **Auto-skip** toggle (Settings tab), persisted in the app's settings file; when on, the player seeks past
   each intro/outro window automatically (once per marker).
 - **Auto-play next episode** with **pre-cache** (Settings tab, both on by default): near the end of
   an episode the next one is resolved and buffered in a hidden player, so the advance starts
@@ -42,7 +42,7 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   equivalent), fed by the **source's own per-episode timestamps** where the extension publishes them
   (exactly aligned to the file being played), with **AniSkip** (crowd-sourced op/ed times by MAL id)
   filling any window the source lacks; titles without a MAL id get AniSkip nothing.
-- **Room persistence**: "My List" (My List tab) + "Continue Watching" (Home), with watch
+- **Local persistence** (hand-written SQLite): "My List" (My List tab) + "Continue Watching" (Home), with watch
   progress saved during playback.
 - **In-list search**: the Explore-style search box on the My List tab (filters My List or the
   selected MAL category by title) and on the Downloads tab (filters the season folders).
@@ -84,8 +84,8 @@ The dependency direction is compile-enforced (not just convention):
 
 - **`:domain`** — pure Kotlin (`kotlin("jvm")`, no Android dependency). Models, repository
   interfaces, the `AnimeSource` seam. `import android.*` here won't compile — that's the boundary.
-- **`:data`** — Android library. All repository implementations: AniList, AniSkip, Room,
-  DataStore, Media3 downloads, the source registry, extension-repo
+- **`:data`** — Android library. All repository implementations: AniList, AniSkip, the
+  SQLite databases, the settings file, Media3 downloads, the source registry, extension-repo
   browse/install, and the object graph (`DataGraph`). Depends on `:domain` + `:extensions`.
 - **`:extensions`** — Android library hosting Aniyomi extensions: the vendored Aniyomi source-api
   (see `extensions/VENDORING.md`), the `AniyomiSourceAdapter`, the Injekt runtime, and the
