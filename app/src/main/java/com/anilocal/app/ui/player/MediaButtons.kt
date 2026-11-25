@@ -1,78 +1,81 @@
 package com.anilocal.app.ui.player
 
+import android.content.Context
 import android.content.Intent
+import android.media.MediaMetadata
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.view.KeyEvent
-import androidx.annotation.OptIn
 import androidx.core.content.IntentCompat
-import androidx.media3.common.ForwardingPlayer
-import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.session.MediaSession
 
 /**
- * The player as the system media session exposes it to Bluetooth headset/earbud buttons, a car, a
- * watch or the Assistant. They may play and pause, nothing else, and both go through the view
- * model ([setPlaying]) so a press follows the overlay button's rules: the play intent outlives a
- * player swap, and an ended episode replays from the start. Everything that would drive the
- * ExoPlayer behind the view model's back is withheld — prepare (Media3's play handler prepares an
- * IDLE player, i.e. one that's still connecting or has failed into recovery), stop, speed,
- * playlist edits, and seek-to-next, which on a single item jumps to the end and auto-advances.
+ * The system media session, so Bluetooth headset/earbud buttons (and a car, a watch, the Assistant)
+ * can play and pause — nothing else. Built on the platform's own [MediaSession]: the player state it
+ * advertises comes from the view model ([setState]), and both commands go through the view model
+ * ([setPlaying]) so a press follows the overlay button's rules — the play intent outlives a player
+ * swap, and an ended episode replays from the start. Seeking, skipping, stop and speed aren't
+ * offered (only PLAY/PAUSE actions are advertised), so nothing can drive the ExoPlayer behind the
+ * view model's back — e.g. "next" on a single item would jump to the end and auto-advance.
+ *
+ * A headset's single play/pause button ([KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE] / HEADSETHOOK) toggles
+ * the play INTENT ([togglePlay]) rather than going by the player's state: a player that's still
+ * connecting or reconnecting isn't playing yet, so a state-based toggle could never pause it. Acting on
+ * the first ACTION_DOWN (a held button repeats) also skips the platform's double-tap wait (double tap
+ * = "next", which isn't offered). Dedicated play and pause keys map to [setPlaying].
  */
-@OptIn(UnstableApi::class)
-internal class SessionPlayer(
-    player: Player,
+internal class PlayerMediaSession(
+    context: Context,
     private val setPlaying: (Boolean) -> Unit,
-) : ForwardingPlayer(player) {
+    private val togglePlay: () -> Unit,
+) {
+    private val session = MediaSession(context, "AniLocalPlayer")
 
-    override fun play() = setPlaying(true)
+    init {
+        session.setCallback(object : MediaSession.Callback() {
+            override fun onPlay() = setPlaying(true)
 
-    override fun pause() = setPlaying(false)
+            override fun onPause() = setPlaying(false)
 
-    override fun setPlayWhenReady(playWhenReady: Boolean) = setPlaying(playWhenReady)
-
-    override fun isCommandAvailable(command: Int): Boolean =
-        command in ALLOWED && super.isCommandAvailable(command)
-
-    override fun getAvailableCommands(): Player.Commands {
-        val available = super.getAvailableCommands()
-        return Player.Commands.Builder()
-            .apply { ALLOWED.forEach { addIf(it, available.contains(it)) } }
-            .build()
+            override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                val key = IntentCompat.getParcelableExtra(mediaButtonIntent, Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+                if (key == null || (key.keyCode != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE && key.keyCode != KeyEvent.KEYCODE_HEADSETHOOK)) {
+                    return super.onMediaButtonEvent(mediaButtonIntent)
+                }
+                if (key.action == KeyEvent.ACTION_DOWN && key.repeatCount == 0) togglePlay()
+                return true
+            }
+        })
+        setState(playing = false, buffering = false)
+        session.isActive = true
     }
 
-    private companion object {
-        val ALLOWED = intArrayOf(
-            Player.COMMAND_PLAY_PAUSE,
-            Player.COMMAND_GET_CURRENT_MEDIA_ITEM,
-            Player.COMMAND_GET_TIMELINE,
-            Player.COMMAND_GET_METADATA,
-            Player.COMMAND_GET_AUDIO_ATTRIBUTES,
+    /** What the session advertises: playing, waiting to play (connecting/buffering), or paused. */
+    fun setState(playing: Boolean, buffering: Boolean) {
+        val state = when {
+            playing -> PlaybackState.STATE_PLAYING
+            buffering -> PlaybackState.STATE_BUFFERING
+            else -> PlaybackState.STATE_PAUSED
+        }
+        session.setPlaybackState(
+            PlaybackState.Builder()
+                .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE)
+                .setState(state, PlaybackState.PLAYBACK_POSITION_UNKNOWN, if (playing) 1f else 0f)
+                .build(),
         )
     }
-}
 
-/**
- * A headset's single play/pause button toggles the view model's play intent, exactly like the
- * overlay's button. Left to Media3, the toggle is decided from the player's state, and a player
- * that's still connecting or reconnecting is IDLE — so every press would read as "play" and the
- * button could never pause it. Handling it here also skips Media3's double-tap wait (a double tap
- * means "next", which the session doesn't offer). Dedicated play and pause keys, and controllers'
- * play/pause commands, still reach [SessionPlayer].
- */
-@OptIn(UnstableApi::class)
-internal fun mediaButtonCallback(togglePlay: () -> Unit) = object : MediaSession.Callback {
-    override fun onMediaButtonEvent(
-        session: MediaSession,
-        controllerInfo: MediaSession.ControllerInfo,
-        intent: Intent,
-    ): Boolean {
-        // Media3 only passes on ACTION_DOWN; a held button repeats it, so act on the first press.
-        val key = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
-            ?: return false
-        if (key.keyCode != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE && key.keyCode != KeyEvent.KEYCODE_HEADSETHOOK) {
-            return false
-        }
-        if (key.repeatCount == 0) togglePlay()
-        return true
+    /** The title a car/watch/lock-screen control shows. */
+    fun setTitle(title: String, episode: Int) {
+        session.setMetadata(
+            MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_TITLE, title)
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, "Episode $episode")
+                .build(),
+        )
+    }
+
+    fun release() {
+        session.isActive = false
+        session.release()
     }
 }

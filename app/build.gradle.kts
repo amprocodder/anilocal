@@ -75,13 +75,11 @@ dependencies {
 
     implementation(libs.coil.compose)
 
-    // Player UI (the player itself lives in :app; the offline cache factory comes from :data).
+    // The player engine. Its UI — video surface, captions, controls, media session — is the app's own.
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.hls)
     // DASH (.mpd) and SmoothStreaming (.ism) so adaptive extension streams resolve instead of
     // crashing — DefaultMediaSourceFactory reflectively loads these factories when present.
     implementation(libs.media3.exoplayer.dash)
     implementation(libs.media3.exoplayer.smoothstreaming)
-    implementation(libs.media3.ui)
-    implementation(libs.media3.session)
 }

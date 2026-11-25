@@ -36,7 +36,6 @@ import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.SingleSampleMediaSource
 import androidx.media3.exoplayer.text.TextOutput
 import androidx.media3.exoplayer.text.TextRenderer
-import androidx.media3.session.MediaSession
 import com.anilocal.app.domain.model.AnimeDetail
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.Episode
@@ -62,6 +61,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -72,7 +72,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.coroutineContext
-import java.util.concurrent.atomic.AtomicInteger
 
 /** A selectable subtitle (text) track surfaced to the UI — no Media3 types cross into Compose. */
 data class PlayerTextTrack(val label: String, val selected: Boolean)
@@ -118,13 +117,9 @@ class PlayerViewModel(
     private val currentPlayer: ExoPlayer get() = _player.value
 
     // The system media session, so Bluetooth headset/earbud buttons (and a car, a watch, the
-    // Assistant) can play and pause. It follows every player swap (swapPlayer); see SessionPlayer
-    // for what it may do. The id only has to be unique while an outgoing player screen's view
-    // model is still being torn down.
-    private val mediaSession = MediaSession.Builder(context, SessionPlayer(currentPlayer, ::setPlaying))
-        .setId("player-${sessionIds.incrementAndGet()}")
-        .setCallback(mediaButtonCallback(::togglePlay))
-        .build()
+    // Assistant) can play and pause; see PlayerMediaSession for what it may do. It isn't tied to an
+    // ExoPlayer, so player swaps don't touch it; its state is fed from the flows below.
+    private val mediaSession = PlayerMediaSession(context, ::setPlaying, ::togglePlay)
 
     private val _markers = MutableStateFlow<List<SkipMarker>>(emptyList())
     val markers: StateFlow<List<SkipMarker>> = _markers
@@ -252,6 +247,14 @@ class PlayerViewModel(
     val recoveryState: StateFlow<PlaybackRecoveryState> = recovery.state
 
     init {
+        viewModelScope.launch {
+            combine(_isPlaying, _playWhenReady) { playing, wanted -> playing to wanted }.collect { (playing, wanted) ->
+                mediaSession.setState(playing = playing, buffering = wanted && !playing)
+            }
+        }
+        viewModelScope.launch {
+            combine(_title, _currentEpisode) { t, ep -> t to ep }.collect { (t, ep) -> mediaSession.setTitle(t, ep) }
+        }
         viewModelScope.launch { settings.autoSkip.collect { autoSkipEnabled = it } }
         viewModelScope.launch { settings.autoPlayNext.collect { autoPlayNextEnabled = it } }
         viewModelScope.launch { settings.precacheNextEpisode.collect { precacheEnabled = it } }
@@ -604,7 +607,6 @@ class PlayerViewModel(
     private fun swapPlayer(replacement: ExoPlayer) {
         val previous = currentPlayer
         _player.value = replacement
-        mediaSession.player = SessionPlayer(replacement, ::setPlaying)
         previous.release()
     }
 
@@ -1228,7 +1230,6 @@ class PlayerViewModel(
         // Enough to ride out a cold CDN connection's slow start; more buys nothing once promoted.
         const val STANDBY_BUFFER_US = 15_000_000L
         const val INACTIVE_GENERATION = -1
-        val sessionIds = AtomicInteger()
 
         // Duplicated from :data's DownloadModule rather than shared: :app must not import
         // com.anilocal.app.data.*, and a user-agent string is not domain logic.

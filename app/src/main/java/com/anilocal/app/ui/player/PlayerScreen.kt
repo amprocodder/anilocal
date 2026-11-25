@@ -74,7 +74,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -82,10 +81,6 @@ import com.anilocal.app.appViewModel
 import com.anilocal.app.ui.navigation.Route
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.CaptionStyleCompat
-import androidx.media3.ui.PlayerView
-import androidx.media3.ui.SubtitleView
 import com.anilocal.app.MainActivity
 import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.SkipMarker
@@ -104,16 +99,6 @@ private val DiscColor = Color.Black.copy(alpha = 0.35f)
  * identity, so `LaunchedEffect(seekFlash)` re-triggers its fade on every rapid double-tap.
  */
 private class SeekFlash(val forward: Boolean)
-
-// Built in an opted-in function: lint no longer accepts @OptIn on a property for its initializer.
-@OptIn(UnstableApi::class)
-private fun resizeModes() = listOf(
-    AspectRatioFrameLayout.RESIZE_MODE_FIT to "Fit",
-    AspectRatioFrameLayout.RESIZE_MODE_ZOOM to "Zoom",
-    AspectRatioFrameLayout.RESIZE_MODE_FILL to "Stretch",
-)
-
-private val ResizeModes = resizeModes()
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -279,7 +264,7 @@ fun PlayerScreen(
     }
 
     // One tree for every mode: the video Box is always the first child and only its size/offset
-    // changes, so the PlayerView/SurfaceView is never torn down when toggling fullscreen. Out of
+    // changes, so the video SurfaceView is never torn down when toggling fullscreen. Out of
     // fullscreen a phone stacks the video over the details+episodes list (portrait); a tablet stays
     // landscape with video+details on the left and the episode list on the right.
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -306,43 +291,12 @@ fun PlayerScreen(
         else Modifier.padding(start = videoStart, top = videoTop).size(videoWidth, videoHeight))
             .background(Color.Black)
     ) {
-        AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    player = currentPlayer
-                    useController = false                       // we draw our own Compose controls
-                    setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT)
-                }
-            },
-            update = { v ->
-                if (v.player !== currentPlayer) v.player = currentPlayer
-                // update re-runs on unrelated recompositions (the 300ms position tick), so key the
-                // real work on the values it depends on — SubtitleView.setStyle would otherwise
-                // rebuild/invalidate the caption layer three times a second.
-                val key = Triple(resizeIndex, subtitleScale, subtitleBackground)
-                if (v.tag != key) {
-                    v.tag = key
-                    v.resizeMode = ResizeModes[resizeIndex].first
-                    v.subtitleView?.let { sv ->
-                        sv.setApplyEmbeddedStyles(false)
-                        sv.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitleScale)
-                        val bg = if (subtitleBackground) android.graphics.Color.argb(160, 0, 0, 0)
-                        else android.graphics.Color.TRANSPARENT
-                        sv.setStyle(
-                            CaptionStyleCompat(
-                                android.graphics.Color.WHITE,
-                                bg,
-                                android.graphics.Color.TRANSPARENT,
-                                CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-                                android.graphics.Color.BLACK,
-                                null,
-                            )
-                        )
-                    }
-                }
-            },
-            onReset = null,
-            onRelease = { it.player = null },
+        // The video surface (+ captions over the video frame). Same position in every mode, so the
+        // SurfaceView is never recreated; player swaps move the surface to the new player.
+        VideoSurface(
+            player = currentPlayer,
+            scale = VideoScale.entries[resizeIndex],
+            captions = CaptionStyle(scale = subtitleScale, background = subtitleBackground),
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -414,8 +368,8 @@ fun PlayerScreen(
                 onSelectSpeed = { vm.setSpeed(it); interactionTick++ },
                 onOpenEpisodes = { episodesOpen = true; interactionTick++ },
                 onCycleResize = {
-                    resizeIndex = (resizeIndex + 1) % ResizeModes.size
-                    resizeLabel = ResizeModes[resizeIndex].second
+                    resizeIndex = (resizeIndex + 1) % VideoScale.entries.size
+                    resizeLabel = VideoScale.entries[resizeIndex].label
                     interactionTick++
                 },
                 onLock = { locked = true; unlockVisible = true; interactionTick++ },
