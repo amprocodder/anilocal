@@ -120,10 +120,11 @@ private fun AppRoot() {
         NavDisplay(nav, modifier = if (isPlayer) Modifier else Modifier.padding(padding)) { entry ->
             val openDetail: (String) -> Unit = { navigator.navigate(Route.Detail(it)) }
             val play: (String, Int) -> Unit = { animeId, ep -> navigator.navigate(Route.Player(animeId, ep)) }
+            val resume: (String, Int, Long) -> Unit = { id, ep, pos -> navigator.navigate(Route.Player(id, ep, pos)) }
             when (val route = entry.route) {
                 Route.Home -> HomeScreen(
                     onOpen = openDetail,
-                    onResume = { id, ep, pos -> navigator.navigate(Route.Player(id, ep, pos)) },
+                    onResume = resume,
                     onExplore = { navigator.selectTab(TopTab.Explore) },
                 )
                 Route.Explore -> ExploreScreen(onOpen = openDetail)
@@ -138,6 +139,7 @@ private fun AppRoot() {
                 is Route.Detail -> DetailsScreen(
                     animeId = route.animeId,
                     onPlay = play,
+                    onResume = resume,
                     onOpenDetail = openDetail,
                     onBack = { navigator.back() },
                 )

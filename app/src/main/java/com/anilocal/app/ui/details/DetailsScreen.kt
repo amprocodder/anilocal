@@ -85,6 +85,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.anilocal.app.ui.image.RemoteImage
 import com.anilocal.app.domain.model.AnimeDetail
+import com.anilocal.app.domain.model.ContinueWatching
 import com.anilocal.app.domain.model.AnimeSummary
 import com.anilocal.app.domain.model.DownloadQuality
 import com.anilocal.app.domain.model.DownloadState
@@ -147,7 +148,7 @@ class DetailsViewModel(
     private val downloads: DownloadRepository,
     private val settings: SettingsRepository,
     mal: MalRepository,
-    progress: ProgressRepository,
+    private val progress: ProgressRepository,
     // Season downloads keep queuing after the user leaves the screen (viewModelScope would cancel).
     private val appScope: CoroutineScope,
 ) : ViewModel() {
@@ -171,6 +172,12 @@ class DetailsViewModel(
             if (d.episodes.any { it.number == resume.episodeNumber }) streams.prefetch(d, resume.episodeNumber)
         }
     }
+
+    /** Where the user left this title (Continue Watching's entry), or null if they haven't started it. */
+    val resumePoint: StateFlow<ContinueWatching?> =
+        progress.continueWatching
+            .map { list -> list.firstOrNull { it.anime.id == animeId } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val saved: StateFlow<Boolean> =
         library.isSaved(animeId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -352,6 +359,7 @@ private val ACTIONS_MAX_WIDTH = 640.dp
 fun DetailsScreen(
     animeId: String,
     onPlay: (animeId: String, episodeNumber: Int) -> Unit,
+    onResume: (animeId: String, episodeNumber: Int, positionMs: Long) -> Unit,
     onOpenDetail: (animeId: String) -> Unit,
     onBack: () -> Unit,
     vm: DetailsViewModel = appViewModel { DetailsViewModel(animeId, it.catalog, it.library, it.streams, it.skip, it.downloads, it.settings, it.mal, it.progress, it.appScope) },
@@ -366,6 +374,7 @@ fun DetailsScreen(
     val pending by vm.pending.collectAsStateWithLifecycle()
     val seasonDownload by vm.seasonDownload.collectAsStateWithLifecycle()
     val defaultQuality by vm.defaultQuality.collectAsStateWithLifecycle()
+    val resumePoint by vm.resumePoint.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val d = detail
 
@@ -432,8 +441,17 @@ fun DetailsScreen(
                         // Only released episodes are listed, so none means nothing is out yet:
                         // there's nothing to play or download, only to save for later.
                         val released = d.episodes.isNotEmpty()
+                        // Partway through the title: the button picks up where Continue Watching
+                        // would (that episode is already being resolved in the background).
+                        val resumeAt = resumePoint?.takeIf { r -> d.episodes.any { it.number == r.episodeNumber } }
                         Button(
-                            onClick = { d.episodes.firstOrNull()?.let { onPlay(d.id, it.number) } },
+                            onClick = {
+                                if (resumeAt != null) {
+                                    onResume(d.id, resumeAt.episodeNumber, resumeAt.positionMs)
+                                } else {
+                                    d.episodes.firstOrNull()?.let { onPlay(d.id, it.number) }
+                                }
+                            },
                             enabled = released,
                             shape = RoundedCornerShape(100.dp),
                             colors = ButtonDefaults.buttonColors(
@@ -444,7 +462,12 @@ fun DetailsScreen(
                         ) {
                             if (released) {
                                 Icon(AppIcons.Filled.PlayArrow, null, modifier = Modifier.size(20.dp))
-                                Text("  Watch", fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (resumeAt != null) "  Resume E${resumeAt.episodeNumber} · ${clockTime(resumeAt.positionMs)}"
+                                    else "  Watch",
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                )
                             } else {
                                 Text("Not released yet", fontWeight = FontWeight.Bold)
                             }
@@ -1007,4 +1030,13 @@ private fun EpisodeCard(
             }
         }
     }
+}
+
+/** "14:20" / "1:02:05" — a resume position as the player's clock shows it. */
+private fun clockTime(ms: Long): String {
+    val total = (ms / 1000).coerceAtLeast(0)
+    val h = total / 3600
+    val m = (total % 3600) / 60
+    val sec = total % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
 }
