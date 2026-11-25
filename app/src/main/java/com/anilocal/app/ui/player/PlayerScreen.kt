@@ -235,21 +235,33 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = hiltViewModel()) {
         }
     }
 
-    // A keyboard's Space bar (a tablet keyboard cover) toggles play like the overlay's button —
-    // Media3's session only hears media keys. Hooked at the activity, ahead of focus routing: an
-    // arrow key can move focus onto an overlay button, and Space would then press that one (Back
-    // included). Plain Space only, so modifier shortcuts (Shift/Ctrl+Space language switching) pass.
-    // Pausing brings the controls up to show where it stopped; any press restarts their auto-hide.
+    // A hardware keyboard (a tablet keyboard cover): Space toggles play like the overlay's button,
+    // and Left/Right seek 10s like a double-tap on that side (same flash; holding one repeats) —
+    // Media3's session only hears media keys. Hooked at the activity, ahead of focus routing, which
+    // would otherwise spend the arrows moving focus between overlay buttons and have Space press the
+    // focused one (Back included). Unmodified keys only, so shortcuts (Shift/Ctrl+Space language
+    // switching) pass. Pausing brings the controls up to show where it stopped; any press restarts
+    // their auto-hide. Deliberate keypresses still work in lock mode, which guards against touches.
     DisposableEffect(activity) {
         val host = activity as? MainActivity ?: return@DisposableEffect onDispose {}
         val onKey: (KeyEvent) -> Boolean = onKey@{ event ->
-            if (event.keyCode != KeyEvent.KEYCODE_SPACE || !event.hasNoModifiers()) return@onKey false
-            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                vm.togglePlay()
-                if (!locked) {
-                    if (!vm.playWhenReady.value) controlsVisible = true
+            if (!event.hasNoModifiers()) return@onKey false
+            val down = event.action == KeyEvent.ACTION_DOWN
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_SPACE -> if (down && event.repeatCount == 0) {
+                    vm.togglePlay()
+                    if (!locked) {
+                        if (!vm.playWhenReady.value) controlsVisible = true
+                        interactionTick++
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> if (down) {
+                    val forward = event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+                    if (forward) vm.seekForward() else vm.seekBack()
+                    seekFlash = SeekFlash(forward)
                     interactionTick++
                 }
+                else -> return@onKey false
             }
             true
         }
