@@ -30,7 +30,6 @@ dependencies {
     // Vendored Aniyomi source-api runtime deps. `implementation` (not `api`): :data consumes
     // :extensions as `implementation`, so none of these leak onto :app's classpath.
     implementation(libs.rxjava)
-    implementation(libs.kotlin.reflect)
     implementation(libs.okhttp)
     implementation(libs.okio)
     implementation(libs.jsoup)
