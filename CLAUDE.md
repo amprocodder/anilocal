@@ -205,8 +205,12 @@ must exist on the matched entry — there's no fallback to episode 1. `FreshStre
 player's mid-episode `recoverStream`) matches through the same `TitleMatcher` and ranks a confident
 match above a faster unverified one. It exposes
 `resolveStream` (single, highest quality — but carrying the de-duped **union of every variant's
-subtitles**, so captions on lower renditions aren't lost to the height sort → online playback) and
-`resolveStreams` (all variants → the download quality picker).
+subtitles**, so captions on lower renditions aren't lost to the height sort → online playback),
+`resolveStreams` (all variants → the download quality picker), and `prefetch(anime, ep)`: a background
+resolve of the episode the user is likely to play next — the resume bar's item (`AppViewModel`, ~1.5 s
+after app open) and, on Details, the episode of a title the user is partway through. `resolveStream`
+serves a fresh prefetch (≤ 4 min old — links are tokenized; at most 2 kept) instead of resolving again,
+and falls back to a live resolve if it failed. Downloaded episodes are never prefetched.
 
 `DataGraph` builds the infrastructure through three small factory objects under
 `com.anilocal.app.data.*`: `NetworkModule` (the one shared `OkHttpClient`), `DatabaseModule` (Room), and
