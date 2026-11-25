@@ -34,14 +34,15 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 shrinks and optimizes the app; the extension host's ABI (the vendored source API
+            // and the libraries extensions link against by name) is kept by :extensions'
+            // consumer-rules.pro. Resource shrinking stays off: androidx.preference, which
+            // extensions build their settings with, resolves its styles by name.
+            isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         create("benchmark") {
             initWith(getByName("release"))
-            // Keep the extension host ABI intact and the original Phase 2 update identity.
-            // Loaded extension APKs reference the host's class and method names at runtime.
-            isMinifyEnabled = false
             isDebuggable = false
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")

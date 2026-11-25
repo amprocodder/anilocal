@@ -16,6 +16,8 @@ android {
 
     defaultConfig {
         minSdk = 24
+        // The extension ABI: what R8 must keep for runtime-loaded extensions (see the file).
+        consumerProguardFiles("consumer-rules.pro")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
