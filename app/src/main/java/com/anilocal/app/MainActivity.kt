@@ -6,8 +6,6 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -26,14 +24,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import com.anilocal.app.appViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation.NavType
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
+import androidx.lifecycle.createSavedStateHandle
 import com.anilocal.app.ui.common.ContinueWatchingBar
 import com.anilocal.app.ui.details.DetailsScreen
 import com.anilocal.app.ui.downloads.DownloadsScreen
@@ -42,7 +34,9 @@ import com.anilocal.app.ui.extensions.ExtensionsScreen
 import com.anilocal.app.ui.home.HomeScreen
 import com.anilocal.app.ui.library.LibraryScreen
 import com.anilocal.app.ui.more.MoreScreen
-import com.anilocal.app.ui.navigation.Routes
+import com.anilocal.app.ui.navigation.AppNavigation
+import com.anilocal.app.ui.navigation.NavDisplay
+import com.anilocal.app.ui.navigation.Route
 import com.anilocal.app.ui.navigation.TopTab
 import com.anilocal.app.ui.player.PlayerScreen
 import com.anilocal.app.ui.source.SourcePreferencesScreen
@@ -74,13 +68,13 @@ private fun AppRoot() {
     val appVm: AppViewModel = appViewModel { AppViewModel(it.mal, it.progress) }
     LaunchedEffect(Unit) { appVm.onAppOpen() }   // throttled MAL sync on app open
     val resumeItem by appVm.resumeBar.collectAsStateWithLifecycle()
-    val nav = rememberNavController()
-    val backStack by nav.currentBackStackEntryAsState()
-    val currentRoute = backStack?.destination?.route
-    val showBottomBar = TopTab.entries.any { it.route == currentRoute }
-    // The player is fullscreen/immersive — it must bleed under where the system bars were, so it gets
-    // no Scaffold content padding (deterministic, vs. relying on bar-hiding to collapse the insets).
-    val isPlayer = currentRoute == Routes.PLAYER
+    val nav: AppNavigation = appViewModel { AppNavigation(createSavedStateHandle()) }
+    val navigator = nav.navigator
+    val current = navigator.current
+    // The bar shows on a tab's root screen only; the player is fullscreen/immersive, so it bleeds
+    // under where the system bars were and gets no Scaffold content padding.
+    val showBottomBar = navigator.atTabRoot
+    val isPlayer = current.route is Route.Player
 
     // Vertical insets are handled per-screen so edge-to-edge art (Home hero, Details header) can
     // draw under the status bar while other screens use statusBarsPadding() (or their own
@@ -97,7 +91,7 @@ private fun AppRoot() {
                         ContinueWatchingBar(
                             item = item,
                             onResume = {
-                                nav.navigate(Routes.player(item.anime.id, item.episodeNumber, item.positionMs))
+                                navigator.navigate(Route.Player(item.anime.id, item.episodeNumber, item.positionMs))
                             },
                             onDismiss = appVm::dismissBar,
                         )
@@ -105,14 +99,8 @@ private fun AppRoot() {
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest) {
                         TopTab.entries.forEach { tab ->
                             NavigationBarItem(
-                                selected = currentRoute == tab.route,
-                                onClick = {
-                                    nav.navigate(tab.route) {
-                                        popUpTo(TopTab.Home.route) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
+                                selected = navigator.tab == tab,
+                                onClick = { navigator.selectTab(tab) },
                                 icon = { androidx.compose.material3.Icon(tab.icon, tab.label) },
                                 label = { Text(tab.label) },
                                 colors = NavigationBarItemDefaults.colors(
@@ -129,74 +117,36 @@ private fun AppRoot() {
             }
         },
     ) { padding ->
-        NavHost(
-            navController = nav,
-            startDestination = TopTab.Home.route,
-            modifier = if (isPlayer) Modifier else Modifier.padding(padding),
-        ) {
-            composable(TopTab.Home.route) {
-                HomeScreen(
-                    onOpen = { nav.navigate(Routes.detail(it)) },
-                    onResume = { id, ep, pos -> nav.navigate(Routes.player(id, ep, pos)) },
-                    onExplore = {
-                        nav.navigate(TopTab.Explore.route) {
-                            popUpTo(TopTab.Home.route) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
+        NavDisplay(nav, modifier = if (isPlayer) Modifier else Modifier.padding(padding)) { entry ->
+            val openDetail: (String) -> Unit = { navigator.navigate(Route.Detail(it)) }
+            val play: (String, Int) -> Unit = { animeId, ep -> navigator.navigate(Route.Player(animeId, ep)) }
+            when (val route = entry.route) {
+                Route.Home -> HomeScreen(
+                    onOpen = openDetail,
+                    onResume = { id, ep, pos -> navigator.navigate(Route.Player(id, ep, pos)) },
+                    onExplore = { navigator.selectTab(TopTab.Explore) },
                 )
-            }
-            composable(TopTab.Explore.route) {
-                ExploreScreen(onOpen = { nav.navigate(Routes.detail(it)) })
-            }
-            composable(TopTab.Library.route) {
-                LibraryScreen(onOpen = { nav.navigate(Routes.detail(it)) })
-            }
-            composable(TopTab.Downloads.route) {
-                DownloadsScreen(onPlay = { animeId, ep -> nav.navigate(Routes.player(animeId, ep)) })
-            }
-            composable(TopTab.Settings.route) {
-                MoreScreen(
-                    onBrowseExtensions = { nav.navigate(Routes.EXTENSIONS) },
-                    onConfigureSource = { nav.navigate(Routes.sourcePreferences(it)) },
+                Route.Explore -> ExploreScreen(onOpen = openDetail)
+                Route.Library -> LibraryScreen(onOpen = openDetail)
+                Route.Downloads -> DownloadsScreen(onPlay = play)
+                Route.Settings -> MoreScreen(
+                    onBrowseExtensions = { navigator.navigate(Route.Extensions) },
+                    onConfigureSource = { navigator.navigate(Route.SourcePreferences(it)) },
                 )
-            }
-            composable(Routes.EXTENSIONS) {
-                ExtensionsScreen(onBack = { nav.popBackStack() })
-            }
-            composable(
-                Routes.SOURCE_PREFERENCES,
-                arguments = listOf(navArgument("sourceId") { type = NavType.StringType }),
-            ) {
-                SourcePreferencesScreen(onBack = { nav.popBackStack() })
-            }
-
-            composable(
-                Routes.DETAIL,
-                arguments = listOf(navArgument("animeId") { type = NavType.StringType }),
-            ) {
-                DetailsScreen(
-                    onPlay = { animeId, ep -> nav.navigate(Routes.player(animeId, ep)) },
-                    onOpenDetail = { nav.navigate(Routes.detail(it)) },
-                    onBack = { nav.popBackStack() },
+                Route.Extensions -> ExtensionsScreen(onBack = { navigator.back() })
+                is Route.SourcePreferences -> SourcePreferencesScreen(route.sourceId, onBack = { navigator.back() })
+                is Route.Detail -> DetailsScreen(
+                    animeId = route.animeId,
+                    onPlay = play,
+                    onOpenDetail = openDetail,
+                    onBack = { navigator.back() },
                 )
-            }
-            composable(
-                Routes.PLAYER,
-                arguments = listOf(
-                    navArgument("animeId") { type = NavType.StringType },
-                    navArgument("episodeNumber") { type = NavType.IntType },
-                    navArgument("startMs") { type = NavType.LongType; defaultValue = 0L },
-                ),
-                // Instant cut in/out — the video SurfaceView can't alpha-fade with the Compose chrome,
-                // so a default fade desyncs (UI fades while the frame lingers). No transition = no desync.
-                enterTransition = { EnterTransition.None },
-                exitTransition = { ExitTransition.None },
-                popEnterTransition = { EnterTransition.None },
-                popExitTransition = { ExitTransition.None },
-            ) {
-                PlayerScreen(onBack = { nav.popBackStack() })
+                is Route.Player -> PlayerScreen(
+                    route = route,
+                    onBack = { navigator.back() },
+                    // Kept on the route so a restored stack reopens the episode that was playing.
+                    onEpisodeChanged = { navigator.update(entry.id, route.copy(episode = it, startMs = 0L)) },
+                )
             }
         }
     }

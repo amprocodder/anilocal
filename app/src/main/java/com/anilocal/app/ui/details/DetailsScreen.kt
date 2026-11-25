@@ -78,8 +78,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.annotation.VisibleForTesting
 import com.anilocal.app.appViewModel
-import androidx.lifecycle.createSavedStateHandle
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -139,7 +137,7 @@ data class SeasonDownload(
 )
 
 class DetailsViewModel(
-    savedState: SavedStateHandle,
+    private val animeId: String,
     private val catalog: CatalogRepository,
     private val library: LibraryRepository,
     private val streams: StreamRepository,
@@ -150,7 +148,6 @@ class DetailsViewModel(
     // Season downloads keep queuing after the user leaves the screen (viewModelScope would cancel).
     private val appScope: CoroutineScope,
 ) : ViewModel() {
-    private val animeId: String = checkNotNull(savedState["animeId"])
     private val loader = CatalogLoad<AnimeDetail?>(
         viewModelScope,
         null,
@@ -338,10 +335,11 @@ private val ACTIONS_MAX_WIDTH = 640.dp
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailsScreen(
+    animeId: String,
     onPlay: (animeId: String, episodeNumber: Int) -> Unit,
     onOpenDetail: (animeId: String) -> Unit,
     onBack: () -> Unit,
-    vm: DetailsViewModel = appViewModel { DetailsViewModel(createSavedStateHandle(), it.catalog, it.library, it.streams, it.skip, it.downloads, it.settings, it.mal, it.appScope) },
+    vm: DetailsViewModel = appViewModel { DetailsViewModel(animeId, it.catalog, it.library, it.streams, it.skip, it.downloads, it.settings, it.mal, it.appScope) },
 ) {
     val detail by vm.detail.collectAsStateWithLifecycle()
     val loadState by vm.loadState.collectAsStateWithLifecycle()

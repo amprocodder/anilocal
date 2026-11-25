@@ -36,8 +36,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.anilocal.app.appViewModel
-import androidx.lifecycle.createSavedStateHandle
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -60,11 +58,10 @@ import kotlinx.coroutines.launch
  * the screen reflects the new value. Degrades to "no settings" if the source has none or can't be read.
  */
 class SourcePreferencesViewModel(
-    savedState: SavedStateHandle,
+    private val sourceId: String,
     registry: SourceRegistry,
 ) : ViewModel() {
 
-    private val sourceId: String = checkNotNull(savedState["sourceId"])
     private val source: AnimeSource? = registry.get(sourceId)
     val title: String = source?.info?.name ?: "Source settings"
 
@@ -154,7 +151,11 @@ class SourcePreferencesViewModel(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SourcePreferencesScreen(onBack: () -> Unit, vm: SourcePreferencesViewModel = appViewModel { SourcePreferencesViewModel(createSavedStateHandle(), it.sources) }) {
+fun SourcePreferencesScreen(
+    sourceId: String,
+    onBack: () -> Unit,
+    vm: SourcePreferencesViewModel = appViewModel { SourcePreferencesViewModel(sourceId, it.sources) },
+) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()

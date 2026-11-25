@@ -6,7 +6,6 @@ import android.net.Uri
 import android.os.Looper
 import android.os.SystemClock
 import androidx.annotation.OptIn
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.AudioAttributes
@@ -82,7 +81,9 @@ data class PlayerTextTrack(val label: String, val selected: Boolean)
 @OptIn(UnstableApi::class, ExperimentalApi::class)
 class PlayerViewModel(
     private val context: Context,
-    private val savedState: SavedStateHandle,
+    private val animeId: String,
+    startEpisode: Int,
+    startMs: Long,
     private val cache: Cache,
     private val catalog: CatalogRepository,
     private val streams: StreamRepository,
@@ -94,13 +95,11 @@ class PlayerViewModel(
     settings: SettingsRepository,
 ) : ViewModel() {
 
-    private val animeId: String = checkNotNull(savedState["animeId"])
-
     // The episode currently loaded — the single source of truth, observable by the UI (the overlay's
     // "Episode N" label and the episode picker's highlighted row). Mutable so auto-play-next can
-    // advance through a season in place (same player/surface); mirrored back into the
-    // SavedStateHandle on each advance so a process-death restore resumes the right episode.
-    private val _currentEpisode = MutableStateFlow<Int>(checkNotNull(savedState["episodeNumber"]))
+    // advance through a season in place (same player/surface); the screen mirrors it onto the
+    // navigation route so a process-death restore resumes the right episode.
+    private val _currentEpisode = MutableStateFlow(startEpisode)
     val currentEpisode: StateFlow<Int> = _currentEpisode
     private var episodeNumber: Int
         get() = _currentEpisode.value
@@ -108,7 +107,7 @@ class PlayerViewModel(
 
     // Resume point (ms) for the CURRENT episode. Seeded from the Continue-Watching arg for the first
     // episode; reset to 0 when we auto-advance so each subsequent episode starts from the beginning.
-    private var resumeFromMs: Long = savedState["startMs"] ?: 0L
+    private var resumeFromMs: Long = startMs
 
     private val session = PlaybackSession(resumeFromMs)
     private var loadJob: Job? = null
@@ -914,7 +913,6 @@ class PlayerViewModel(
         session.switchEpisode()
         currentPlayer.stop()
         episodeNumber = number
-        savedState["episodeNumber"] = number
         resumeFromMs = 0L
         loading = false
         _playWhenReady.value = true

@@ -79,7 +79,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.anilocal.app.appViewModel
-import androidx.lifecycle.createSavedStateHandle
+import com.anilocal.app.ui.navigation.Route
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -117,7 +117,12 @@ private val ResizeModes = resizeModes()
 
 @OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = appViewModel { PlayerViewModel(it.appContext, createSavedStateHandle(), it.mediaCache, it.catalog, it.streams, it.skip, it.progress, it.downloads, it.appScope, it.settings) }) {
+fun PlayerScreen(
+    route: Route.Player,
+    onBack: () -> Unit,
+    onEpisodeChanged: (Int) -> Unit,
+    vm: PlayerViewModel = appViewModel { PlayerViewModel(it.appContext, route.animeId, route.episode, route.startMs, it.mediaCache, it.catalog, it.streams, it.skip, it.progress, it.downloads, it.appScope, it.settings) },
+) {
     val currentPlayer by vm.player.collectAsStateWithLifecycle()
     val recoveryState by vm.recoveryState.collectAsStateWithLifecycle()
     val position by vm.position.collectAsStateWithLifecycle()
@@ -130,6 +135,8 @@ fun PlayerScreen(onBack: () -> Unit, vm: PlayerViewModel = appViewModel { Player
     val isBuffering by vm.isBuffering.collectAsStateWithLifecycle()
     val title by vm.title.collectAsStateWithLifecycle()
     val currentEpisode by vm.currentEpisode.collectAsStateWithLifecycle()
+    // Auto-advance moves to the next episode in place; keep the route in step (for restore).
+    LaunchedEffect(currentEpisode) { if (currentEpisode != route.episode) onEpisodeChanged(currentEpisode) }
     val episodes by vm.episodes.collectAsStateWithLifecycle()
     val hasPrev by vm.hasPrev.collectAsStateWithLifecycle()
     val hasNext by vm.hasNext.collectAsStateWithLifecycle()
