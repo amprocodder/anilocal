@@ -12,21 +12,22 @@ navigation = "2.10.2"
 room = "2.8.5"
 datastore = "1.3.0"
 retrofit = "2.11.0"
-# Bumped 4.12.0 -> 5.0.0-alpha.14 app-wide: the vendored Aniyomi source-api/network stack
-# (:extensions) is written against OkHttp 5.x. Retrofit 2.11 + :data's kotlin-ext usage are
-# compatible; matching aniyomi's exact version avoids vendored-code compile drift.
-okhttp = "5.0.0-alpha.14"
+# OkHttp 5 app-wide: the vendored Aniyomi source-api/network stack (:extensions) is written
+# against it, and loaded extensions link against the host's copy at runtime — keep it at or above
+# what extensions are built with (yuzono anime-extensions: 5.3.2 as of 2026-11).
+okhttp = "5.5.1"
 moshi = "1.15.1"
 coil = "2.7.0"
 media3 = "1.11.1"
-coroutines = "1.8.1"
+coroutines = "1.11.0"
 
-# Vendored Aniyomi source-api runtime deps (:extensions only). Versions match aniyomi master.
+# Vendored Aniyomi source-api runtime deps (:extensions only). Extensions call these at runtime, so
+# keep each at or above the version extensions compile against (latest stable as of 2026-11).
 rxjava = "1.3.8"
-okio = "3.10.2"
-jsoup = "1.19.1"
+okio = "3.18.2"
+jsoup = "1.24.1"
 injekt = "91edab2317"          # com.github.mihonapp:injekt JitPack commit
-serialization = "1.7.3"
+serialization = "1.13.0"
 preference = "1.2.1"
 
 [libraries]
