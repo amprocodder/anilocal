@@ -4,6 +4,6 @@ package com.anilocal.app.data.repo
 //  - CatalogRepository  -> data/metadata/anilist/AniListCatalogRepository
 //  - StreamRepository   -> data/source/SourceStreamRepository
 //  - SkipRepository     -> data/skip/AniSkipRepository
-//  - LibraryRepository  -> data/local/RoomLibraryRepository
-//  - ProgressRepository -> data/local/RoomProgressRepository
-// Bindings are wired in di/AppModule.kt. This file is intentionally left as a pointer.
+//  - LibraryRepository  -> data/local/LocalRepositories (LibraryRepositoryImpl)
+//  - ProgressRepository -> data/local/LocalRepositories (ProgressRepositoryImpl)
+// Every binding is wired in data/DataGraph.kt. This file is intentionally left as a pointer.
