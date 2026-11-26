@@ -417,6 +417,23 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   resized while its on-screen rect stays the same (exactly where a glide ends) shows a frame at its old
   scale. Phones snap — their toggle rotates the screen, and the system's rotation animation is the
   transition.
+  **Swipe down to go Home** (fullscreen only — not locked, no menu or episode panel open; `SwipeHome.kt`).
+  A drag that sets off more down than sideways anywhere on the player (a seek-bar drag consumes its own
+  and cancels it) pulls the video along under the finger: the grabbed point stays put while the box
+  scales toward `MIN_SCALE`, narrows to the 16:9 frame and rounds its corners — one `graphicsLayer`
+  transform of the video box, measured on the untransformed root (the SurfaceView follows scale + move;
+  its hole in the window follows the rounded clip, since Home around it is opaque). Meanwhile
+  `Navigator.revealHome` has `NavDisplay` *seek* a transition to Home's root beneath it (Home scales up
+  from 0.94, held on a `KeepUntilTransitionsFinished` exit so the player stays composed on top), the
+  player's black backdrop clears, and `AppRoot`'s bottom bar rises with the same progress. As the drag
+  takes hold, the controls and Skip pill step aside and the system bars come back, so Home is laid out
+  with its real insets before it shows. Let go past 20% of the height or with a downward fling
+  (≥1000 dp/s) and it falls off the bottom edge from the release speed (`Motion.PLAYER_SWIPE_OUT_MS`
+  from a standstill), then `Navigator.goHome()` pops the player, returns Home's stack to its root and
+  selects Home (the closed player is kept warm as on any close); otherwise it springs back and
+  `cancelReveal()` puts Home away and hides the bars again. Horizontal-inset padding is applied per
+  non-player screen in `MainActivity` (not around `NavDisplay`) for the same reason: a screen showing
+  beneath the player is already laid out as it will be once the player has gone.
   **The player draws its own video and captions — no media3-ui.** `VideoSurface` is a `SurfaceView` sized
   like Media3's AspectRatioFrameLayout (`VideoScale` Fit/Zoom/Stretch, same 1% tolerance), black until
   the current player's first frame (PlayerView's shutter), and on a player swap it moves the surface from
@@ -572,7 +589,8 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   - `Navigator` — **one back stack per tab**; switching tabs keeps each tab's screens, Back pops (then from
     another tab's root returns Home, then leaves the app), re-selecting the current tab pops to its root.
     `update(id, route)` changes an entry's route without rebuilding it (the player mirrors auto-advance's
-    episode into its route so a restore reopens the right episode).
+    episode into its route so a restore reopens the right episode). `revealHome`/`cancelReveal`/`goHome`
+    back the player's swipe down to Home (see "Swipe down to go Home").
   - `NavDisplay` + `AppNavigation` (activity-scoped ViewModel) — each entry gets its own `ViewModelStore` and
     `rememberSaveable` state, disposed only once it's off every stack and off screen; the stacks survive
     config changes and process death (saved as JSON). Predictive back seeks the pop animation
