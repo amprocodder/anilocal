@@ -55,9 +55,7 @@ internal class HttpStreamSpeedProbe(client: OkHttpClient) : StreamSpeedProbe {
         var sample = first
         // Master -> variant -> media playlist. Reject recursive/unbounded playlist chains.
         repeat(MAX_PLAYLIST_DEPTH) {
-            if (sample.bytes.size > MAX_MANIFEST_BYTES) return null
-            val lines = sample.bytes.toString(Charsets.UTF_8).removePrefix("\uFEFF")
-                .lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+            val lines = completeLines(sample) ?: return null
             if (lines.firstOrNull() != "#EXTM3U") return null
             val variants = lines.mapIndexedNotNull { index, line ->
                 if (!line.startsWith("#EXT-X-STREAM-INF:")) return@mapIndexedNotNull null
@@ -93,6 +91,23 @@ internal class HttpStreamSpeedProbe(client: OkHttpClient) : StreamSpeedProbe {
             }
         }
         return null
+    }
+
+    /**
+     * A playlist's lines, from at most its first [MAX_MANIFEST_BYTES]. A longer playlist isn't
+     * rejected: a 24-minute episode's media playlist of tokenized segment URLs runs past that
+     * (Anikoto's do), yet all a measurement needs, the variants or the first segment, is at the top.
+     * Only the lines that arrived whole are kept, so the cut-off last one never reads as a URI.
+     */
+    private fun completeLines(sample: Sample): List<String>? {
+        var bytes = sample.bytes
+        if (bytes.size > MAX_MANIFEST_BYTES) {
+            val end = bytes.copyOf(MAX_MANIFEST_BYTES).lastIndexOf('\n'.code.toByte())
+            if (end < 0) return null
+            bytes = bytes.copyOf(end)
+        }
+        return bytes.toString(Charsets.UTF_8).removePrefix("\uFEFF")
+            .lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
     }
 
     private suspend fun readSample(
