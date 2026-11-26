@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
@@ -17,11 +18,13 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.createSavedStateHandle
+import com.anilocal.app.domain.model.ContinueWatching
 import com.anilocal.app.ui.common.ContinueWatchingBar
 import com.anilocal.app.ui.details.DetailsScreen
 import com.anilocal.app.ui.downloads.DownloadsScreen
@@ -45,8 +48,9 @@ import com.anilocal.app.ui.theme.AppTheme
 class MainActivity : ComponentActivity() {
     /**
      * Set by the screen on display to see hardware keys before focus routing does (the player's
-     * Space bar = play/pause, which has to win over whatever button keyboard navigation focused).
-     * Returns true to consume the event.
+     * Space bar = play/pause, which has to win over whatever button keyboard navigation focused;
+     * Home's F = resume). Returns true to consume the event. Whoever sets it clears it on leaving,
+     * only if it's still theirs, so screens handing over in one frame can't clear each other's.
      */
     var keyInterceptor: ((KeyEvent) -> Boolean)? = null
 
@@ -75,6 +79,26 @@ private fun AppRoot() {
     // under where the system bars were and gets no inset padding.
     val showBottomBar = navigator.atTabRoot
     val isPlayer = current.route is Route.Player
+    val resumeFromBar: (ContinueWatching) -> Unit = { item ->
+        navigator.navigate(Route.Player(item.anime.id, item.episodeNumber, item.positionMs))
+    }
+
+    // A hardware keyboard's F on Home resumes the resume bar's episode, as tapping the bar does
+    // (the player opens fullscreen). Home has no text field for the key to be typed into; with no
+    // bar showing, F passes through. The player installs its own keys once it's up.
+    val host = LocalActivity.current as? MainActivity
+    val homeResume = resumeItem.takeIf { current.route == Route.Home }
+    DisposableEffect(host, homeResume) {
+        val item = homeResume
+        if (host == null || item == null) return@DisposableEffect onDispose {}
+        val onKey: (KeyEvent) -> Boolean = onKey@{ event ->
+            if (event.keyCode != KeyEvent.KEYCODE_F || !event.hasNoModifiers()) return@onKey false
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) resumeFromBar(item)
+            true
+        }
+        host.keyInterceptor = onKey
+        onDispose { if (host.keyInterceptor === onKey) host.keyInterceptor = null }
+    }
 
     // Vertical insets are handled per-screen so edge-to-edge art (Home hero, Details header) can
     // draw under the status bar while other screens use statusBarsPadding() (or their own top
@@ -124,9 +148,7 @@ private fun AppRoot() {
                 resumeItem?.let { item ->
                     ContinueWatchingBar(
                         item = item,
-                        onResume = {
-                            navigator.navigate(Route.Player(item.anime.id, item.episodeNumber, item.positionMs))
-                        },
+                        onResume = { resumeFromBar(item) },
                         onDismiss = appVm::dismissBar,
                     )
                 }
