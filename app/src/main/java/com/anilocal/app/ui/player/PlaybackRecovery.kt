@@ -58,6 +58,8 @@ internal class PlaybackRecovery(
     private var attempts = 0
     private var closed = false
     private var generation = 0
+    // Off screen (see pauseRetries): failures queue up but start no attempt until resumeRetries.
+    private var retriesPaused = false
 
     fun onError(request: PlaybackRestart) {
         if (closed) return
@@ -76,10 +78,11 @@ internal class PlaybackRecovery(
     }
 
     private fun launchRecovery(session: Int, automaticFirstAttempt: Boolean = false) {
-        if (closed || session != generation || recoveryJob?.isActive == true) return
+        if (closed || retriesPaused || session != generation || recoveryJob?.isActive == true) return
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 while (pending != null && session == generation) {
+                    if (retriesPaused) return@launch   // pending stays queued for resumeRetries
                     val next = checkNotNull(pending)
                     pending = null
                     if (attempts >= MAX_ATTEMPTS) {
@@ -95,6 +98,12 @@ internal class PlaybackRecovery(
                     delay(1_000L shl (attempt - 1))
                     // Duplicate notifications during the delay are the same stopped session.
                     pending = null
+                    if (retriesPaused) {
+                        // Hidden during the back-off: this attempt waits for the player to be shown.
+                        attempts--
+                        pending = next
+                        return@launch
+                    }
                     try {
                         restart(next)
                     } catch (cancelled: CancellationException) {
@@ -179,6 +188,27 @@ internal class PlaybackRecovery(
         lastRequest?.let(::onError)
     }
 
+    /**
+     * The player went off screen (closed into the warm slot, or warmed up hidden). Every attempt is
+     * a full multi-source search, so none may run unseen: the background retry loop stops, and an
+     * attempt already running finishes (cancelling one midway could leave a half-swapped player)
+     * but no new one starts. Failures meanwhile are queued, and [resumeRetries] picks them up.
+     */
+    fun pauseRetries() {
+        retriesPaused = true
+        backgroundRetryJob?.cancel()
+        backgroundRetryJob = null
+    }
+
+    /** Back on screen: run what [pauseRetries] held — a queued attempt, or a fresh budget if failed. */
+    fun resumeRetries() {
+        if (!retriesPaused) return
+        retriesPaused = false
+        if (closed) return
+        if (_state.value == PlaybackRecoveryState.Failed) retry()
+        else if (pending != null) launchRecovery(generation)
+    }
+
     fun close() {
         closed = true
         reset()
@@ -208,12 +238,12 @@ internal class PlaybackRecovery(
      * discovery and speed probes are run afresh on every pass.
      */
     private fun scheduleBackgroundRetry(session: Int) {
-        if (closed || session != generation || backgroundRetryJob?.isActive == true) return
+        if (closed || retriesPaused || session != generation || backgroundRetryJob?.isActive == true) return
         backgroundRetryJob = scope.launch {
             try {
                 while (!closed && session == generation) {
                     delay(backgroundRetryDelayMs)
-                    if (closed || session != generation) return@launch
+                    if (closed || retriesPaused || session != generation) return@launch
                     val request = lastRequest ?: return@launch
                     // A callback may have arrived while the watchdog was asleep. Let the active
                     // foreground loop consume it rather than starting a second recovery job.

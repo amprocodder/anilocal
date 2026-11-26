@@ -256,7 +256,7 @@ class PlayerViewModel(
     private val recovery = PlaybackRecovery(viewModelScope) {
         val generation = session.generation
         load(recovering = true, failedUrl = it.failedStreamUrl, generation = generation)
-    }
+    }.also { if (startHidden) it.pauseRetries() }
     val recoveryState: StateFlow<PlaybackRecoveryState> = recovery.state
 
     init {
@@ -1266,6 +1266,7 @@ class PlayerViewModel(
         hidden = true
         setPlaying(false)
         mediaSession.active = false
+        recovery.pauseRetries()
         discardStandby()
         viewModelScope.launch { saveProgress() }
     }
@@ -1281,6 +1282,7 @@ class PlayerViewModel(
         mediaSession.active = true
         if (startMs == 0L && session.positionMs > 0L) seekTo(0L)
         setPlaying(true)
+        recovery.resumeRetries()
     }
 
     override fun onCleared() {
