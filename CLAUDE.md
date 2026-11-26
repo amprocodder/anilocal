@@ -207,9 +207,10 @@ the picker; `info.configurable` flags sources with settings) **and two more susp
 impls** for per-source settings, `preferences()` and `setPreference()` (no-ops unless overridden). So a
 minimal source implements six members and a configurable one eight, even though browsing goes through
 AniList's `CatalogRepository`. `SourceStreamRepository` is the join: per request it runs `search` → `detail` →
-`servers().firstOrNull()` → `resolve`, sorts variants by height descending, and throws when no search
-result is the title (an extension that finds nothing throws and the player degrades to a short hint —
-there is no longer a built-in source that matched *any* query to keep playback always-resolving).
+`servers().firstOrNull()` → `resolve`, sorts variants by the audio setting's fit, then height
+descending (see "Track languages" below), and throws when no search result is the title (an
+extension that finds nothing throws and the player degrades to a short hint — there is no longer a
+built-in source that matched *any* query to keep playback always-resolving).
 **Which search result is the title is decided by `TitleMatcher`, never by the site's ranking** — a
 sequel's search lists its prequel first, and since the adapter numbers every entry's episodes 1..N,
 taking `firstOrNull()` played season 1's episodes under season 2 with no error anywhere. So
@@ -221,7 +222,7 @@ neighbour (`related`, with the neighbours' own `altTitles`) than like the title;
 hit is trusted only for a standalone title, never for one with a prequel/parent. The requested episode
 must exist on the matched entry — there's no fallback to episode 1. `FreshStreamRecovery` (the
 player's mid-episode `recoverStream`) matches through the same `TitleMatcher` and ranks a confident
-match above a faster unverified one. It exposes
+match above a faster unverified one, and a variant in the preferred audio above a faster one. It exposes
 `resolveStream` (single, highest quality — but carrying the de-duped **union of every variant's
 subtitles**, so captions on lower renditions aren't lost to the height sort → online playback),
 `resolveStreams` (all variants → the download quality picker), and `prefetch(anime, ep)`: a background
@@ -405,8 +406,23 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   (0.0533) × scale of the **video frame's** height, white text with a 2dp black outline, the optional
   translucent box as a background span on the edge layout, cue line/position anchors, bitmap cues, embedded
   styles ignored, and Media3's per-line bidi wrap for RTL text — drawn over the video frame, exactly as
-  SubtitleView inside PlayerView's content frame did. Settings' preview uses the same `Captions`. The
-  default caption track is the first in the device's language, then English, then the first listed.
+  SubtitleView inside PlayerView's content frame did. Settings' preview uses the same `Captions`.
+  **Track languages** (Settings → Language: `subtitleLanguage`, default Auto = the device's language,
+  or Off; `audioLanguage`, default Japanese, or Auto = the source's own pick). The loose matching lives
+  in the domain `TrackLanguages`: sources name tracks in free text ("English [CC]", "Spanish - Latino",
+  "jpn"), so `identify` reads names, native names and 639-2 codes as whole words, and a bare 2-letter
+  code only when nothing longer names a language ("de" in "Español de España"). Captions start in the
+  first of `subtitleOrder` (the setting, the device's, English) — `buildMedia` flags that sidecar
+  DEFAULT and rewrites every sidecar's language to its ISO code, and `carriedTrackParameters` sets the
+  same order as Media3's preferred text languages for a stream's own (HLS) caption renditions. With none
+  of those, the first sidecar whose language can't be told is the default, never one known to be in
+  another language (the CC menu still lists it). A caption picked in the menu carries to later episodes
+  only by label/language — never by list position, which put the next episode in another language. The
+  audio setting is Media3's preferred audio language (a stream's own audio renditions) and, because
+  sources that offer an episode subbed and dubbed tell them apart only in the variant's label ("Sub"/
+  "Dub", "jpn"/"eng", "Latino"), `TrackLanguages.audioFit` ranks variants ahead of height in
+  `SourceStreamRepository.resolveFrom` and ahead of speed in `FreshStreamRecovery` — a height-only sort
+  played whichever version came in the higher resolution.
   **Headset/Bluetooth play-pause** rides the platform's `android.media.session.MediaSession`
   (`PlayerMediaSession` in `MediaButtons.kt`, owned by `PlayerViewModel`; no media3-session, no service,
   no notification). It isn't tied to an ExoPlayer, so player swaps don't touch it; the view model feeds it
@@ -578,8 +594,8 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   `AtomicFile` before they're published; no DataStore) — exposed by `SettingsRepositoryImpl` as Kotlin
   `Flow`s. On the first run after the switch it migrated DataStore's `settings.preferences_pb` with a small
   hand-written protobuf reader (`LegacyDataStorePreferences`) and left that file in place. Keys include
-  `autoPlayNext`, `precacheNextEpisode`, `autoSkip`, `wifiOnlyDownloads`, default download quality, and **subtitle
-  scale/background** (the player applies these live to `Captions`; Settings shows a to-scale preview
+  `autoPlayNext`, `precacheNextEpisode`, `autoSkip`, `wifiOnlyDownloads`, default download quality,
+  `subtitleLanguage`/`audioLanguage` (ISO 639-1 codes), and **subtitle scale/background** (the player applies these live to `Captions`; Settings shows a to-scale preview
   that reproduces the caption's true on-screen px).
 - Every module keeps its Kotlin sources under `src/main/java/` (`:domain` was moved there from
   `src/main/kotlin/` to match). Put new files there, not in a `kotlin/` directory.

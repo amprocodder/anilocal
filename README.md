@@ -29,6 +29,9 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
 - **Download quality selection**: a default-quality preference (Settings tab) plus a per-episode
   quality picker shown when the source offers multiple variants (pre-selected from the
   default). The chosen quality is stored and shown on the Downloads tab.
+- **Default subtitle and audio language** (Settings tab → Language): captions start in your chosen
+  language (or your device's, falling back to English, or off), and audio prefers Japanese by
+  default — also choosing a source's sub or dub version when it offers both.
 - **Auto-skip** toggle (Settings tab), persisted in the app's settings file; when on, the player seeks past
   each intro/outro window automatically (once per marker).
 - **Auto-play next episode** with **pre-cache** (Settings tab, both on by default): near the end of
