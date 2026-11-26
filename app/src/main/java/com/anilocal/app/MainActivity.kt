@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -20,8 +22,14 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.createSavedStateHandle
 import com.anilocal.app.domain.model.ContinueWatching
@@ -44,6 +52,8 @@ import com.anilocal.app.ui.kit.NavigationBar
 import com.anilocal.app.ui.kit.NavigationBarItem
 import com.anilocal.app.ui.kit.Surface
 import com.anilocal.app.ui.theme.AppTheme
+import com.anilocal.app.ui.theme.Motion
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     /**
@@ -79,8 +89,38 @@ private fun AppRoot() {
     // under where the system bars were and gets no inset padding.
     val showBottomBar = navigator.atTabRoot
     val isPlayer = current.route is Route.Player
+
+    // The bottom bar (resume bar + tabs) gets out of the player's way: it sinks off the bottom edge
+    // as the player rises over the screen, and rises back as the player sinks away. It slides over
+    // the screen's bottom edge and claims its space only once fully up, so the screen above it is
+    // re-laid out once, not every frame. Every other change shows or hides it at once, as before.
+    // 1 = in place, 0 = below the screen.
+    val barSlide = remember { Animatable(1f) }
+    val barUp by remember { derivedStateOf { barSlide.value >= 1f } }
+    // The player opened over the bar: it stays on screen until it has sunk away.
+    var barSinking by remember { mutableStateOf(false) }
+    LaunchedEffect(isPlayer) {
+        when {
+            isPlayer -> try {
+                if (barSinking) barSlide.animateTo(0f, tween(BAR_SINK_MS, easing = Motion.Accelerate))
+                else barSlide.snapTo(0f)
+            } finally {
+                barSinking = false
+            }
+            showBottomBar -> barSlide.animateTo(1f, tween(Motion.PLAYER_CLOSE_MS, easing = Motion.Standard))
+            else -> barSlide.snapTo(1f)
+        }
+    }
+
+    // A second tap landing on the screen under the rising player must not stack another player.
+    val openPlayer: (Route.Player) -> Unit = { route ->
+        if (navigator.current.route !is Route.Player) {
+            barSinking = navigator.atTabRoot
+            navigator.navigate(route)
+        }
+    }
     val resumeFromBar: (ContinueWatching) -> Unit = { item ->
-        navigator.navigate(Route.Player(item.anime.id, item.episodeNumber, item.positionMs))
+        openPlayer(Route.Player(item.anime.id, item.episodeNumber, item.positionMs))
     }
 
     // A hardware keyboard's F on Home resumes the resume bar's episode, as tapping the bar does
@@ -111,8 +151,8 @@ private fun AppRoot() {
             Box(Modifier.weight(1f).then(if (isPlayer) Modifier else Modifier.windowInsetsPadding(sideInsets))) {
                 NavDisplay(nav, modifier = Modifier.fillMaxSize()) { entry ->
                     val openDetail: (String) -> Unit = { navigator.navigate(Route.Detail(it)) }
-                    val play: (String, Int) -> Unit = { animeId, ep -> navigator.navigate(Route.Player(animeId, ep)) }
-                    val resume: (String, Int, Long) -> Unit = { id, ep, pos -> navigator.navigate(Route.Player(id, ep, pos)) }
+                    val play: (String, Int) -> Unit = { animeId, ep -> openPlayer(Route.Player(animeId, ep)) }
+                    val resume: (String, Int, Long) -> Unit = { id, ep, pos -> openPlayer(Route.Player(id, ep, pos)) }
                     when (val route = entry.route) {
                         Route.Home -> HomeScreen(
                             onOpen = openDetail,
@@ -137,6 +177,8 @@ private fun AppRoot() {
                         )
                         is Route.Player -> PlayerScreen(
                             route = route,
+                            // False while it slides away on close: Back then belongs to the screen beneath.
+                            active = entry.id == navigator.current.id,
                             onBack = { navigator.back() },
                             // Kept on the route so a restored stack reopens the episode that was playing.
                             onEpisodeChanged = { navigator.update(entry.id, route.copy(episode = it, startMs = 0L)) },
@@ -144,25 +186,45 @@ private fun AppRoot() {
                     }
                 }
             }
-            if (showBottomBar) {
-                resumeItem?.let { item ->
-                    ContinueWatchingBar(
-                        item = item,
-                        onResume = { resumeFromBar(item) },
-                        onDismiss = appVm::dismissBar,
-                    )
-                }
-                NavigationBar {
-                    TopTab.entries.forEach { tab ->
-                        NavigationBarItem(
-                            selected = navigator.tab == tab,
-                            onClick = { navigator.selectTab(tab) },
-                            icon = tab.icon,
-                            label = tab.label,
-                        )
+            if (showBottomBar || barSinking) {
+                Box(
+                    Modifier.layout { measurable, constraints ->
+                        val bar = measurable.measure(constraints)
+                        val claimed = if (barUp && showBottomBar) bar.height else 0
+                        layout(bar.width, claimed) {
+                            bar.place(0, claimed - (bar.height * barSlide.value).roundToInt())
+                        }
+                    },
+                ) {
+                    Column {
+                        resumeItem?.let { item ->
+                            ContinueWatchingBar(
+                                item = item,
+                                onResume = { resumeFromBar(item) },
+                                onDismiss = appVm::dismissBar,
+                            )
+                        }
+                        NavigationBar {
+                            TopTab.entries.forEach { tab ->
+                                NavigationBarItem(
+                                    selected = navigator.tab == tab,
+                                    onClick = { navigator.selectTab(tab) },
+                                    icon = tab.icon,
+                                    label = tab.label,
+                                )
+                            }
+                        }
+                    }
+                    // Sinking under the player: it takes no more taps (a tab switch would strand it).
+                    if (!showBottomBar) {
+                        Box(Modifier.matchParentSize().pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } })
                     }
                 }
             }
         }
     }
 }
+
+/** The bottom bar sinking away under the opening player — quicker than the player's rise, so it's
+ *  gone by the time the player has covered the screen. */
+private const val BAR_SINK_MS = 200

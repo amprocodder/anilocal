@@ -109,6 +109,8 @@ fun PlayerScreen(
     route: Route.Player,
     onBack: () -> Unit,
     onEpisodeChanged: (Int) -> Unit,
+    /** False once the player is closing (it slides away), so Back goes to the screen beneath. */
+    active: Boolean = true,
     vm: PlayerViewModel = appViewModel { PlayerViewModel(it.appContext, route.animeId, route.episode, route.startMs, it.mediaCache, it.catalog, it.streams, it.skip, it.progress, it.downloads, it.appScope, it.settings) },
 ) {
     val currentPlayer by vm.player.collectAsStateWithLifecycle()
@@ -162,7 +164,7 @@ fun PlayerScreen(
     // Lock mode swallows back (shows the unlock chip instead); the episode panel closes on back;
     // fullscreen backs out to the watch page, and only the watch page leaves the player.
     val exitFullscreen = { fullscreen = false; interactionTick++ }
-    BackHandler {
+    BackHandler(enabled = active) {
         when {
             episodesOpen -> episodesOpen = false
             locked -> unlockVisible = true
