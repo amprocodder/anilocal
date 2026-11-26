@@ -226,8 +226,8 @@ match above a faster unverified one, and a variant in the preferred audio above 
 `resolveStream` (single, highest quality — but carrying the de-duped **union of every variant's
 subtitles**, so captions on lower renditions aren't lost to the height sort → online playback),
 `resolveStreams` (all variants → the download quality picker), and `prefetch(anime, ep)`: a background
-resolve of the episode the user is likely to play next — the resume bar's item (`AppViewModel`, ~1.5 s
-after app open) and, on Details, the episode of a title the user is partway through. `resolveStream`
+resolve of the episode the user is likely to play next — on Details, the episode of a title the user is
+partway through (the resume bar's episode gets more: a whole warmed-up player, see "Warm player" below). `resolveStream`
 serves a fresh prefetch (≤ 4 min old — links are tokenized; at most 2 kept) instead of resolving again,
 and falls back to a live resolve if it failed. Downloaded episodes are never prefetched.
 
@@ -384,6 +384,20 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   is also released on seeking back >5 min from the end, recovery, the setting going off, an episode
   jump, and `onCleared`. The player's built-in next/prev
   buttons are disabled.
+  **Warm player — resuming never reloads.** Closing the player doesn't release it: the screen calls
+  `PlayerViewModel.hide()` (paused, progress saved, media session inactive, standby dropped) and
+  `AppNavigation.prune` keeps that entry's `ViewModelStore` as the *warm* player instead of clearing
+  it. At app open (`AppRoot`, 1.5 s after STARTED) the resume bar's episode is built the same way off
+  screen — `nav.warmUp(route, …)` constructs `playerViewModel(graph, route, startHidden = true)` into a
+  fresh store under `viewModel()`'s default key — which resolves it, prepares it paused at the saved
+  position and buffers `STANDBY_BUFFER_US` (a capped `StandbyLoadControl`, lifted on show). Opening the
+  same anime + episode (resume bar, Continue Watching, Details) **adopts** that store in
+  `AppNavigation.ownerOf`, so `PlayerScreen` finds the very same view model, `show(startMs)` resumes it
+  (startMs 0 = started from the beginning, so it seeks to 0), and the video is on screen during the
+  slide-up — no resolve, no buffering. One is kept at a time: opening any other episode releases it, a
+  warm-up older than 10 min is rebuilt (tokenized links), and `ON_STOP` releases it (no decoder held in
+  the background; the next start warms up again). Hidden, a view model saves no progress, prefetches
+  nothing and builds no standby.
   **Two layouts, one tree** (`PlayerScreen`): playback opens **fullscreen** (sensor-landscape, bars
   hidden); exiting fullscreen (button or Back) shows the **watch page** (`WatchPanel.kt`: details +
   episode list) — portrait with the video on top on phones, landscape side-by-side on tablets
@@ -558,7 +572,8 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
     layers but can't fade with them), while `AppRoot`'s bottom bar sinks under it and rises back; the
     bar slides over the screen's edge and claims its space only once fully up, so the screen above is
     laid out once. A screen's own `BackHandler` (the player's) wins over the navigator's; the closing
-    player's `active` is false so its handler stands down, and `openPlayer` ignores a second open.
+    player's `active` is false so its handler stands down, and `openPlayer` ignores a second open. A
+    closed player's store is kept as the warm player rather than cleared (see "Warm player").
   - The bottom bar shows only at a tab's root. Adding a tab = a `TopTab` entry + a `Route` + a branch in
     `MainActivity`'s `when (route)`; adding a screen = a `Route` + a branch.
 - ViewModels are plain classes built with `appViewModel { graph -> … }` and take only domain

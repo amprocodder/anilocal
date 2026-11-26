@@ -47,6 +47,9 @@ Sideload-only (not Google Play eligible); it bundles no extensions.
   filling any window the source lacks; titles without a MAL id get AniSkip nothing.
 - **Local persistence** (hand-written SQLite): "My List" (My List tab) + "Continue Watching" (Home), with watch
   progress saved during playback.
+- **Instant resume**: on app open the resume bar's episode is loaded in the background, paused at the
+  saved position, and closing the player keeps it the same way — so resuming just carries on, with
+  the video already on screen as the player slides up.
 - **In-list search**: the Explore-style search box on the My List tab (filters My List or the
   selected MAL category by title) and on the Downloads tab (filters the season folders).
 - **User-selectable stream sources**: a runtime **source registry** + picker (Settings tab). No
