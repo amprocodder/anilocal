@@ -58,6 +58,16 @@ it in (e.g. uncommitted `sourceSets` srcDir pointers in the module `build.gradle
 checkout has no tests and no test wiring — that's expected. The code **builds clean** (CI proves it on
 every push), so don't assume an uncompiled first build.
 
+**`app/src/main/baseline-prof.txt` is a committed startup/journey profile** (AGP compiles it into the
+APK; ProfileInstaller applies it on sideloaded installs; R8 rewrites it to the optimized code). It was
+recorded on a device, not by a benchmark module: install a benchmark build with `isMinifyEnabled = false`
+(a throwaway copy — never commit that), `adb shell pm art clear-app-profiles com.anilocal.app`, drive
+cold start / Home and Explore scrolling / Details / Settings / Downloads / playback a few times, then
+`adb shell cmd package dump-profiles --dump-classes-and-methods com.anilocal.app` and pull
+`/data/misc/profman/com.anilocal.app-primary.prof.txt`. Drop the `Landroidx/compose` lines (the Compose
+libraries ship their own profiles) and replace the file. Refresh it after large UI changes; a stale
+profile only loses its benefit (rules for code that no longer exists are dropped).
+
 `gradle.properties` turns on `org.gradle.configuration-cache` and `nonTransitiveRClass`; if a first
 build trips a config-cache violation, disabling it is a fair triage step.
 
