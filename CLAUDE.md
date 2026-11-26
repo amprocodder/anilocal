@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 **AniLocal** — an Android anime player (Kotlin, Compose, single APK), **branded "Onboard" to the
-user** (launcher label/icon, Home wordmark) with a midnight-blue accent on near-black surfaces —
+user** (launcher label and tugboat icon, Home wordmark) with a midnight-blue accent on near-black surfaces —
 code, packages, and CI names remain AniLocal. AniList provides the entire
 browse/metadata catalog (no API key); playable streams come from a **user-selected** `AnimeSource`
 behind one plugin seam. The app ships **no** built-in stream sources; it can **discover, install, and
@@ -559,3 +559,21 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   dependency** (the extended set was 11 MB of code for 50 glyphs). Call sites read
   `AppIcons.Filled.X` / `AppIcons.Outlined.X` / `AppIcons.AutoMirrored.Filled.X`; to add a glyph, copy
   its path data into `AppIcons` (from the Apache-2.0 Material sources, or draw your own).
+- **The design system is the app's own — no Material.** `ui/theme/Theme.kt` is `AniLocalTheme` +
+  `AppTheme.colors` / `AppTheme.type`: the Onboard palette and type scale under the *Material role
+  names* the screens were written against (`primary`, `onSurfaceVariant`, `surfaceContainerHigh`,
+  `titleMedium`, `bodySmall`…), so a role means what it always did. `ui/kit/` holds the components, named
+  and shaped like the Material ones they replaced so call sites read the same: `Text`/`Icon`/`Surface`
+  (+ `LocalContentColor`/`LocalTextStyle`/`ProvideTextStyle`), `Button` (filled pill) / `TonalButton` /
+  `TextButton` / `IconButton` / `TonalIconButton`, `FilterChip` (filled when selected, **no checkmark**),
+  `Switch`, `RadioButton`, `Checkbox`, `Slider` (continuous track, snaps to `steps` with a haptic tick,
+  no tick marks), `TextInput` (label *above* the box), `AlertDialog`, `DropdownMenu`/`DropdownMenuItem`
+  (a `Popup` — UI dumps don't see it), `Linear`/`CircularProgressIndicator`, `TopBar`, and
+  `NavigationBar`/`NavigationBarItem`. There are **no ripples or shadows**: `PressIndication` (the
+  theme's `LocalIndication`) tints a pressed element; `PressIndication.Button`/`.Card` also dip it 3%
+  (filled buttons, posters). Flat surfaces separated by hairlines (`outlineVariant`). Restyle by
+  changing tokens or a kit component, not call sites; the player keeps its own button styling and layout.
+- **The logo** is a tugboat traced from the user's draft into vectors: `res/drawable/ic_launcher_foreground.xml`
+  (adaptive foreground, also the themed-icon monochrome layer; 50/108 tall to stay in the safe zone) on
+  `ic_launcher_background` `#16181F`, `mipmap-anydpi/ic_launcher_legacy.xml` (pre-26 tile), and
+  `drawable/ic_logo.xml` (the bare glyph, tinted by its user — the Home wordmark draws it in `tertiary`).
