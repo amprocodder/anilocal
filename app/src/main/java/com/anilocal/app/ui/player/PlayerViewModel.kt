@@ -94,6 +94,9 @@ class PlayerViewModel(
     // App-lifetime scope so the final save survives viewModelScope being cancelled on teardown.
     private val appScope: CoroutineScope,
     private val settings: SettingsRepository,
+    // Built off screen to have the episode ready before it's asked for (see hide/show): it loads
+    // paused and buffers only a little until it's shown.
+    startHidden: Boolean = false,
 ) : ViewModel() {
 
     // The episode currently loaded — the single source of truth, observable by the UI (the overlay's
@@ -110,10 +113,14 @@ class PlayerViewModel(
     // episode; reset to 0 when we auto-advance so each subsequent episode starts from the beginning.
     private var resumeFromMs: Long = startMs
 
-    private val session = PlaybackSession(resumeFromMs)
+    private val session = PlaybackSession(resumeFromMs).apply { playWhenReady = !startHidden }
     private var loadJob: Job? = null
     private var loading = false
     private var cleared = false
+    // Off screen: closed and kept for a resume, or warmed up before one (see hide/show).
+    private var hidden = startHidden
+    // A hidden player's buffer cap, lifted when it's shown.
+    private var hiddenLoadControl: StandbyLoadControl? = null
     private val _player = MutableStateFlow(createPlayer(playbackDataSource(emptyMap(), offline = false)))
     val player: StateFlow<ExoPlayer> = _player.asStateFlow()
     private val currentPlayer: ExoPlayer get() = _player.value
@@ -121,7 +128,7 @@ class PlayerViewModel(
     // The system media session, so Bluetooth headset/earbud buttons (and a car, a watch, the
     // Assistant) can play and pause; see PlayerMediaSession for what it may do. It isn't tied to an
     // ExoPlayer, so player swaps don't touch it; its state is fed from the flows below.
-    private val mediaSession = PlayerMediaSession(context, ::setPlaying, ::togglePlay)
+    private val mediaSession = PlayerMediaSession(context, ::setPlaying, ::togglePlay).apply { active = !startHidden }
 
     private val _markers = MutableStateFlow<List<SkipMarker>>(emptyList())
     val markers: StateFlow<List<SkipMarker>> = _markers
@@ -147,7 +154,7 @@ class PlayerViewModel(
     val isPlaying: StateFlow<Boolean> = _isPlaying
 
     // Playback intent also controls Pause while the replacement is connecting/buffering.
-    private val _playWhenReady = MutableStateFlow(true)
+    private val _playWhenReady = MutableStateFlow(!startHidden)
     val playWhenReady: StateFlow<Boolean> = _playWhenReady
 
     // True while the player is rebuffering — drives the centered spinner in the overlay.
@@ -295,14 +302,14 @@ class PlayerViewModel(
                     captureProgress()
                     maybeAutoSkip(session.positionMs)
                     maybeFetchMarkers()
-                    maybePrecacheNext()
+                    if (!hidden) maybePrecacheNext()
                 }
                 _position.value = session.positionMs
                 _duration.value = session.durationMs
                 _bufferedPosition.value = if (session.prepared) currentPlayer.bufferedPosition else session.positionMs
                 _isBuffering.value = loading || recoveryState.value is PlaybackRecoveryState.Restarting ||
                     currentPlayer.playbackState == Player.STATE_BUFFERING
-                if (++tick % 20 == 0) saveProgress()   // ~ every 6s
+                if (++tick % 20 == 0 && !hidden) saveProgress()   // ~ every 6s
                 delay(300)
             }
         }
@@ -399,7 +406,7 @@ class PlayerViewModel(
         session.ready(player.currentPosition, player.duration)
         _error.value = null
         recovery.onPlayerReady()
-        if (!_offline.value) prefetchNext()
+        if (!_offline.value && !hidden) prefetchNext()
     }
 
     private fun startRecovery() {
@@ -598,7 +605,8 @@ class PlayerViewModel(
             if (prefs.subtitles == TrackLanguages.OFF) _textDisabled.value = true
         }
         val previous = currentPlayer
-        val replacement = createPlayer(dataSource)
+        hiddenLoadControl = if (hidden) StandbyLoadControl() else null
+        val replacement = createPlayer(dataSource, loadControl = hiddenLoadControl)
         replacement.setPlaybackSpeed(_speed.value)
         replacement.volume = previous.volume
         replacement.trackSelectionParameters = carriedTrackParameters(previous, prefs)
@@ -1242,6 +1250,38 @@ class PlayerViewModel(
     }
 
     fun retryPlayback() = recovery.retry()
+
+    // ---- Off screen ----------------------------------------------------------------------------
+    //
+    // Closing the player doesn't throw it away: it's hidden — paused, its position saved — and kept
+    // (AppNavigation's warm slot), so resuming the same episode continues this very player, buffer,
+    // tracks and all, instead of loading again. One built for the resume bar's episode at app open
+    // starts hidden: it resolves and buffers that episode, paused at the saved position, so Resume
+    // starts at once. Hidden, it takes no media buttons, saves no progress, resolves nothing ahead
+    // and builds no next-episode standby; a warmed one buffers only [STANDBY_BUFFER_US].
+
+    /** The player left the screen (closed). */
+    fun hide() {
+        if (hidden || cleared) return
+        hidden = true
+        setPlaying(false)
+        mediaSession.active = false
+        discardStandby()
+        viewModelScope.launch { saveProgress() }
+    }
+
+    /**
+     * The player is on screen. A hidden one comes back playing; [startMs] 0 (an episode started from
+     * its beginning rather than resumed) also takes it back to the start.
+     */
+    fun show(startMs: Long) {
+        if (!hidden) return
+        hidden = false
+        hiddenLoadControl?.capped = false
+        mediaSession.active = true
+        if (startMs == 0L && session.positionMs > 0L) seekTo(0L)
+        setPlaying(true)
+    }
 
     override fun onCleared() {
         // viewModelScope is already cancelled here, so persist the final position on the app scope

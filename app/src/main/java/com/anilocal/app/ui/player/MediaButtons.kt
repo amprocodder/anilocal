@@ -49,6 +49,11 @@ internal class PlayerMediaSession(
         session.isActive = true
     }
 
+    /** Off while the player is hidden (closed, or warmed up off screen): no button may start it unseen. */
+    var active: Boolean
+        get() = session.isActive
+        set(value) { session.isActive = value }
+
     /** What the session advertises: playing, waiting to play (connecting/buffering), or paused. */
     fun setState(playing: Boolean, buffering: Boolean) {
         val state = when {

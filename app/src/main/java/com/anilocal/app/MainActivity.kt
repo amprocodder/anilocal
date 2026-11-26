@@ -30,7 +30,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.createSavedStateHandle
 import com.anilocal.app.domain.model.ContinueWatching
 import com.anilocal.app.ui.common.ContinueWatchingBar
@@ -46,6 +50,8 @@ import com.anilocal.app.ui.navigation.NavDisplay
 import com.anilocal.app.ui.navigation.Route
 import com.anilocal.app.ui.navigation.TopTab
 import com.anilocal.app.ui.player.PlayerScreen
+import com.anilocal.app.ui.player.PlayerViewModel
+import com.anilocal.app.ui.player.playerViewModel
 import com.anilocal.app.ui.source.SourcePreferencesScreen
 import com.anilocal.app.ui.theme.AniLocalTheme
 import com.anilocal.app.ui.kit.NavigationBar
@@ -53,6 +59,7 @@ import com.anilocal.app.ui.kit.NavigationBarItem
 import com.anilocal.app.ui.kit.Surface
 import com.anilocal.app.ui.theme.AppTheme
 import com.anilocal.app.ui.theme.Motion
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -79,7 +86,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AppRoot() {
-    val appVm: AppViewModel = appViewModel { AppViewModel(it.mal, it.progress, it.catalog, it.streams, it.downloads) }
+    val appVm: AppViewModel = appViewModel { AppViewModel(it.mal, it.progress) }
     LaunchedEffect(Unit) { appVm.onAppOpen() }   // throttled MAL sync on app open
     val resumeItem by appVm.resumeBar.collectAsStateWithLifecycle()
     val nav: AppNavigation = appViewModel { AppNavigation(createSavedStateHandle()) }
@@ -110,6 +117,30 @@ private fun AppRoot() {
             showBottomBar -> barSlide.animateTo(1f, tween(Motion.PLAYER_CLOSE_MS, easing = Motion.Standard))
             else -> barSlide.snapTo(1f)
         }
+    }
+
+    // The resume bar's episode is the likeliest thing to be played next: once the app is open and
+    // its first screen has settled, build that episode's player off screen — resolved, buffered and
+    // paused at the saved position — so Resume just carries on, no loading (AppNavigation keeps it,
+    // as it keeps a closed player). Rebuilt once its link may have expired; released whenever the
+    // app leaves the foreground, so no decoder or buffer is held in the background.
+    val graph = appGraph()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val warmRoute = resumeItem?.takeUnless { isPlayer }?.let { Route.Player(it.anime.id, it.episodeNumber, it.positionMs) }
+    LaunchedEffect(warmRoute) {
+        val route = warmRoute ?: return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            delay(WARM_UP_DELAY_MS)
+            while (true) {
+                nav.warmUp(route, PlayerViewModel::class, WARM_UP_MAX_AGE_MS) { playerViewModel(graph, route, startHidden = true) }
+                delay(WARM_UP_MAX_AGE_MS)
+            }
+        }
+    }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) nav.releaseWarm() }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
     }
 
     // A second tap landing on the screen under the rising player must not stack another player.
@@ -228,3 +259,9 @@ private fun AppRoot() {
 /** The bottom bar sinking away under the opening player — quicker than the player's rise, so it's
  *  gone by the time the player has covered the screen. */
 private const val BAR_SINK_MS = 200
+
+/** The resume bar's episode is warmed up this long after the app opens, once its first screen has settled. */
+private const val WARM_UP_DELAY_MS = 1_500L
+
+/** A warmed-up player older than this is rebuilt: its link (tokenized, short-lived) may have expired. */
+private const val WARM_UP_MAX_AGE_MS = 600_000L

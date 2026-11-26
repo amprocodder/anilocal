@@ -93,6 +93,7 @@ import androidx.compose.ui.zIndex
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.anilocal.app.AppGraph
 import com.anilocal.app.appViewModel
 import com.anilocal.app.ui.navigation.Route
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -121,6 +122,12 @@ private val OverlayMask = Color(0x99121318)
 private val DimColor = Color.Black.copy(alpha = 0.45f)
 private val DiscColor = Color.Black.copy(alpha = 0.35f)
 
+/** The player for [route]; [startHidden] builds it off screen, ahead of being shown. */
+internal fun playerViewModel(graph: AppGraph, route: Route.Player, startHidden: Boolean = false) = PlayerViewModel(
+    graph.appContext, route.animeId, route.episode, route.startMs, graph.mediaCache, graph.catalog, graph.streams,
+    graph.skip, graph.progress, graph.downloads, graph.appScope, graph.settings, startHidden,
+)
+
 /**
  * One-shot double-tap seek feedback. Deliberately NOT a data class: each instance has distinct
  * identity, so `LaunchedEffect(seekFlash)` re-triggers its fade on every rapid double-tap.
@@ -135,8 +142,18 @@ fun PlayerScreen(
     onEpisodeChanged: (Int) -> Unit,
     /** False once the player is closing (it slides away), so Back goes to the screen beneath. */
     active: Boolean = true,
-    vm: PlayerViewModel = appViewModel { PlayerViewModel(it.appContext, route.animeId, route.episode, route.startMs, it.mediaCache, it.catalog, it.streams, it.skip, it.progress, it.downloads, it.appScope, it.settings) },
+    vm: PlayerViewModel = appViewModel { playerViewModel(it, route) },
 ) {
+    // On screen, a player kept warm (closed earlier, or built ahead for the resume bar) carries on
+    // playing; closed, it's hidden — paused and kept, so resuming this episode continues it rather
+    // than loading it again (see AppNavigation). Leaving composition while still the current screen
+    // (the activity being recreated) is neither.
+    val isActive by rememberUpdatedState(active)
+    DisposableEffect(vm) {
+        vm.show(route.startMs)
+        onDispose { if (!isActive) vm.hide() }
+    }
+
     val currentPlayer by vm.player.collectAsStateWithLifecycle()
     val recoveryState by vm.recoveryState.collectAsStateWithLifecycle()
     val position by vm.position.collectAsStateWithLifecycle()
