@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Adaptive-icon background: the app's surface (near-black), as in the logo draft. -->
-    <color name="ic_launcher_background">#16181F</color>
+    <!-- Adaptive-icon background: pure black, like most Android launcher icons. -->
+    <color name="ic_launcher_background">#000000</color>
 </resources>

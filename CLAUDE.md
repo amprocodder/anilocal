@@ -603,5 +603,5 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   changing tokens or a kit component, not call sites; the player keeps its own button styling and layout.
 - **The logo** is a tugboat traced from the user's draft into vectors: `res/drawable/ic_launcher_foreground.xml`
   (adaptive foreground, also the themed-icon monochrome layer; 50/108 tall to stay in the safe zone) on
-  `ic_launcher_background` `#16181F`, `mipmap-anydpi/ic_launcher_legacy.xml` (pre-26 tile), and
+  `ic_launcher_background` `#000000` (pure black), `mipmap-anydpi/ic_launcher_legacy.xml` (pre-26 tile), and
   `drawable/ic_logo.xml` (the bare glyph, tinted by its user — the Home wordmark draws it in `tertiary`).
