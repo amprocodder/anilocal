@@ -45,6 +45,10 @@ internal class PlayerMediaSession(
                 return true
             }
         })
+        // Before API 26 the system routes media buttons only to a session that sets these flags
+        // (deprecated no-ops since: every session handles them).
+        @Suppress("DEPRECATION")
+        session.setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
         setState(playing = false, buffering = false)
         session.isActive = true
     }
