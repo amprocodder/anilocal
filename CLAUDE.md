@@ -229,7 +229,8 @@ subtitles**, so captions on lower renditions aren't lost to the height sort → 
 resolve of the episode the user is likely to play next — on Details, the episode of a title the user is
 partway through (the resume bar's episode gets more: a whole warmed-up player, see "Warm player" below). `resolveStream`
 serves a fresh prefetch (≤ 4 min old — links are tokenized; at most 2 kept) instead of resolving again,
-and falls back to a live resolve if it failed. Downloaded episodes are never prefetched.
+and falls back to a live resolve if it failed. Prefetches are keyed by the selected source and audio
+setting too, so one made before the user changed either is never played. Downloaded episodes are never prefetched.
 
 `DataGraph` builds the infrastructure through three small factory objects under
 `com.anilocal.app.data.*`: `NetworkModule` (the one shared `OkHttpClient`) and
@@ -397,7 +398,8 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   slide-up — no resolve, no buffering. One is kept at a time: opening any other episode releases it, a
   warm-up older than 10 min is rebuilt (tokenized links), and `ON_STOP` releases it (no decoder held in
   the background; the next start warms up again). Hidden, a view model saves no progress, prefetches
-  nothing and builds no standby.
+  nothing, builds no standby and starts no stream recovery (`PlaybackRecovery.pauseRetries`: an attempt
+  already running finishes; failures queue and run when it's shown).
   **Two layouts, one tree** (`PlayerScreen`): playback opens **fullscreen** (sensor-landscape, bars
   hidden); exiting fullscreen (button or Back) shows the **watch page** (`WatchPanel.kt`: details +
   episode list) — portrait with the video on top on phones, landscape side-by-side on tablets
@@ -436,7 +438,9 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   sources that offer an episode subbed and dubbed tell them apart only in the variant's label ("Sub"/
   "Dub", "jpn"/"eng", "Latino"), `TrackLanguages.audioFit` ranks variants ahead of height in
   `SourceStreamRepository.resolveFrom` and ahead of speed in `FreshStreamRecovery` — a height-only sort
-  played whichever version came in the higher resolution.
+  played whichever version came in the higher resolution. Downloads pick the same way: the domain
+  `pickDownloadVariant` (season downloads, the quality picker's pre-selection, retries) takes the best
+  audio fit, then the quality setting's height rule, so a cap never swaps the sub for the dub.
   **Headset/Bluetooth play-pause** rides the platform's `android.media.session.MediaSession`
   (`PlayerMediaSession` in `MediaButtons.kt`, owned by `PlayerViewModel`; no media3-session, no service,
   no notification). It isn't tied to an ExoPlayer, so player swaps don't touch it; the view model feeds it
@@ -503,7 +507,9 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   a warm pinned resolve is the common case and matches manual latency (a pin won weakly, i.e. nothing
   matched confidently, is kept on a weak result rather than re-raced every episode); (2) on a pin miss/fail, **races**
   the top-K(≤4) sources ranked by a persisted scoreboard (`srcstats:<sourceId>`: latency EWMA that moves
-  only on success ÷ Laplace-smoothed success rate), staggered 300 ms, gated by a shared `Semaphore(3)`,
+  only on success ÷ Laplace-smoothed success rate), staggered 300 ms, gated by a shared `Semaphore(3)`
+  whose permit follows the detached extension call (released when the call ends, not at its deadline —
+  so the cap bounds the calls really in flight; a candidate's clock starts once it holds a permit),
   12 s per candidate / 15 s overall (each probe runs detached and is *awaited* under its deadline —
   a blocking lib-14 call or a 30 s Cloudflare latch ignores cancellation, so a `withTimeout` around the
   call itself never fired on time); the FIRST *strong* success (non-empty **and** a confident title
