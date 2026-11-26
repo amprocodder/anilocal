@@ -14,6 +14,8 @@ import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -52,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -61,13 +64,32 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.lerp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -79,6 +101,7 @@ import com.anilocal.app.MainActivity
 import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.SkipMarker
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import com.anilocal.app.ui.kit.CircularProgressIndicator
 import com.anilocal.app.ui.kit.DropdownMenu
 import com.anilocal.app.ui.kit.DropdownMenuItem
@@ -87,6 +110,7 @@ import com.anilocal.app.ui.kit.IconButton
 import com.anilocal.app.ui.kit.Surface
 import com.anilocal.app.ui.kit.Text
 import com.anilocal.app.ui.theme.AppTheme
+import com.anilocal.app.ui.theme.Motion
 
 // AniLab player HUD constants (from the reference app's control skin). Hoisted so the 300ms
 // position tick doesn't rebuild them every recomposition.
@@ -172,6 +196,24 @@ fun PlayerScreen(
             else -> onBack()
         }
     }
+
+    // 1 = fullscreen, 0 = the watch page. Toggling glides the video from its old place to its new
+    // one (and fades the page in or out around it) as a transform of the old layout — nothing is
+    // re-laid out per frame and the video never stops — and the layout switches to the new mode
+    // once the video is there, where the transform is back to none, so the relayout comes after the
+    // motion instead of in its first frame. On a phone the toggle also rotates the screen and the
+    // system's rotation animation is the transition, so it just snaps.
+    val modeProgress = remember { Animatable(if (fullscreen) 1f else 0f) }
+    var layoutFullscreen by remember { mutableStateOf(fullscreen) }
+    LaunchedEffect(fullscreen, isTablet) {
+        val target = if (fullscreen) 1f else 0f
+        if (isTablet) modeProgress.animateTo(target, tween(Motion.FULLSCREEN_MS, easing = Motion.Standard))
+        else modeProgress.snapTo(target)
+        layoutFullscreen = fullscreen
+    }
+    // The watch page stays composed while it fades out under the growing video.
+    val watchShown by remember { derivedStateOf { !fullscreen || modeProgress.value < 1f } }
+    val watchFade = Modifier.graphicsLayer { alpha = 1f - modeProgress.value }
 
     // Fullscreen = landscape + hidden system bars; the watch page = portrait with the bars back.
     // Fullscreen-only chrome (lock, the in-player episode panel) is dropped on the way out.
@@ -298,27 +340,48 @@ fun PlayerScreen(
     // fullscreen a phone stacks the video over the details+episodes list (portrait); a tablet stays
     // landscape with video+details on the left and the episode list on the right.
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val watchBackground = AppTheme.colors.background
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val sideInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
-            .background(if (fullscreen) Color.Black else AppTheme.colors.background)
+            .drawBehind { drawRect(lerp(watchBackground, Color.Black, modeProgress.value)) }
             .then(
-                if (fullscreen) Modifier
+                if (layoutFullscreen) Modifier
                 else Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
             ),
     ) {
-    val tabletWatch = isTablet && !fullscreen
     // Tablet watch page: the video and the episode card float inside a margin with a gutter between.
     val videoWidth =
         if (isTablet) (maxWidth - TABLET_MARGIN * 2 - TABLET_GUTTER) * TABLET_VIDEO_FRACTION else maxWidth
     val videoHeight = videoWidth * 9f / 16f
     val videoTop = statusTop + if (isTablet) TABLET_TOP_GAP else 0.dp
     val videoStart = if (isTablet) TABLET_MARGIN else 0.dp
+    val glide = VideoGlide(
+        box = with(density) {
+            Rect(videoStart.toPx(), videoTop.toPx(), (videoStart + videoWidth).toPx(), (videoTop + videoHeight).toPx())
+        },
+        // The whole screen in this box's pixels: the watch page pads the box by the side insets.
+        screen = if (layoutFullscreen) Rect(0f, 0f, constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat())
+        else Rect(
+            -sideInsets.getLeft(density, layoutDirection).toFloat(), 0f,
+            (constraints.maxWidth + sideInsets.getRight(density, layoutDirection)).toFloat(),
+            constraints.maxHeight.toFloat(),
+        ),
+        fullscreen = layoutFullscreen,
+    )
     // Its own group, so toggling it never shifts the video Box's identity below.
-    if (tabletWatch) AmbientBackdrop(info?.let { it.bannerUrl ?: it.posterHdUrl ?: it.posterUrl }, Modifier.fillMaxSize())
+    if (isTablet && watchShown) {
+        AmbientBackdrop(info?.let { it.bannerUrl ?: it.posterHdUrl ?: it.posterUrl }, Modifier.fillMaxSize().then(watchFade))
+    }
     Box(
-        (if (fullscreen) Modifier.fillMaxSize()
+        (if (layoutFullscreen) Modifier.fillMaxSize()
         else Modifier.padding(start = videoStart, top = videoTop).size(videoWidth, videoHeight))
+            // Above the watch page, which the video overlaps only while it glides.
+            .zIndex(1f)
+            .graphicsLayer { glide.apply(this, modeProgress.value) }
             .background(Color.Black)
     ) {
         // The video surface (+ captions over the video frame). Same position in every mode, so the
@@ -327,7 +390,10 @@ fun PlayerScreen(
             player = currentPlayer,
             scale = VideoScale.entries[resizeIndex],
             captions = CaptionStyle(scale = subtitleScale, background = subtitleBackground),
-            modifier = Modifier.fillMaxSize(),
+            // On the watch page the video is laid out at its fullscreen size and scaled down into
+            // the box, so toggling fullscreen never resizes its SurfaceView: a resize that leaves
+            // its on-screen rect unchanged (the glide ends exactly there) shows one stale frame.
+            modifier = Modifier.fillMaxSize().then(if (layoutFullscreen) Modifier else Modifier.laidOutAt(glide.frame.size)),
         )
 
         // Tap layer — sits UNDER the control overlay; the overlay's buttons/seek bar consume their
@@ -389,7 +455,7 @@ fun PlayerScreen(
                 hasEpisodeList = episodes.isNotEmpty(),
                 textTracks = textTracks,
                 textDisabled = textDisabled,
-                fullscreen = fullscreen,
+                fullscreen = layoutFullscreen,
                 speed = speed,
                 ccMenuOpen = ccMenuOpen,
                 speedMenuOpen = speedMenuOpen,
@@ -434,25 +500,25 @@ fun PlayerScreen(
                 color = ScrimColor,
                 modifier = Modifier
                     .align(if (flash.forward) Alignment.CenterEnd else Alignment.CenterStart)
-                    .padding(horizontal = if (fullscreen) 42.dp else 12.dp),
+                    .padding(horizontal = if (layoutFullscreen) 42.dp else 12.dp),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.padding(horizontal = if (fullscreen) 14.dp else 8.dp, vertical = if (fullscreen) 10.dp else 8.dp),
+                    modifier = Modifier.padding(horizontal = if (layoutFullscreen) 14.dp else 8.dp, vertical = if (layoutFullscreen) 10.dp else 8.dp),
                 ) {
                     Icon(
                         if (flash.forward) AppIcons.Filled.Forward10 else AppIcons.Filled.Replay10,
-                        null, tint = Color.White, modifier = Modifier.size(if (fullscreen) 26.dp else 22.dp),
+                        null, tint = Color.White, modifier = Modifier.size(if (layoutFullscreen) 26.dp else 22.dp),
                     )
-                    if (fullscreen) Text("10s", color = Color.White, style = AppTheme.type.labelLarge)
+                    if (layoutFullscreen) Text("10s", color = Color.White, style = AppTheme.type.labelLarge)
                 }
             }
         }
 
         // Resize-mode name / caption-toggle flash.
         flashLabel?.let { label ->
-            CenterChip(label, Modifier.align(Alignment.TopCenter).padding(top = if (fullscreen) 64.dp else 12.dp))
+            CenterChip(label, Modifier.align(Alignment.TopCenter).padding(top = if (layoutFullscreen) 64.dp else 12.dp))
         }
 
         // Lock mode: everything is hidden; a tap shows this lone unlock button (AniLab-style).
@@ -490,7 +556,7 @@ fun PlayerScreen(
                 onSkip = vm::seekPast,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = if (fullscreen) 112.dp else 60.dp, end = if (fullscreen) 24.dp else 12.dp),
+                    .padding(bottom = if (layoutFullscreen) 112.dp else 60.dp, end = if (layoutFullscreen) 24.dp else 12.dp),
             )
         }
 
@@ -502,15 +568,15 @@ fun PlayerScreen(
                 border = BorderStroke(1.dp, AppTheme.colors.outlineVariant),
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .padding(if (fullscreen) 24.dp else 12.dp)
+                    .padding(if (layoutFullscreen) 24.dp else 12.dp)
                     .widthIn(max = 420.dp),
             ) {
                 Column(
-                    Modifier.padding(horizontal = 20.dp, vertical = if (fullscreen) 18.dp else 12.dp),
+                    Modifier.padding(horizontal = 20.dp, vertical = if (layoutFullscreen) 18.dp else 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (fullscreen) {
+                    if (layoutFullscreen) {
                         Icon(
                             AppIcons.Outlined.ErrorOutline, null,
                             tint = AppTheme.colors.tertiary,
@@ -580,7 +646,7 @@ fun PlayerScreen(
             )
         }
     }
-    if (!fullscreen) {
+    if (watchShown) {
         val content = WatchContent(title, info, episodes, currentEpisode, vm::jumpTo)
         if (isTablet) {
             // Info column aligned to the video's edges (its items carry their own 16dp inset).
@@ -589,7 +655,8 @@ fun PlayerScreen(
                 Modifier
                     .padding(start = videoStart - 16.dp, top = videoTop + videoHeight + 4.dp)
                     .width(videoWidth + 32.dp)
-                    .fillMaxHeight(),
+                    .fillMaxHeight()
+                    .then(watchFade),
             )
             WatchEpisodesPane(
                 content,
@@ -599,13 +666,64 @@ fun PlayerScreen(
                     .navigationBarsPadding()
                     .padding(bottom = TABLET_TOP_GAP)
                     .width(maxWidth - TABLET_MARGIN * 2 - TABLET_GUTTER - videoWidth)
-                    .fillMaxHeight(),
+                    .fillMaxHeight()
+                    .then(watchFade),
             )
         } else {
-            WatchPanel(content, Modifier.padding(top = statusTop + videoHeight).fillMaxSize())
+            WatchPanel(content, Modifier.padding(top = statusTop + videoHeight).fillMaxSize().then(watchFade))
         }
     }
     }
+}
+
+/**
+ * The video's glide between its two places, in the player box's pixels: [box] on the watch page,
+ * and fullscreen the 16:9 frame centred on the [screen] (where a 16:9 video sits). The video box is
+ * laid out for one mode ([fullscreen]) and transformed so that frame is drawn at the in-between
+ * rect for progress p (0 = watch page, 1 = fullscreen) — a uniform scale + move, which the video's
+ * SurfaceView follows exactly. Laid out fullscreen, the box is also clipped to a rect that closes
+ * in on the frame as p falls, so its letterbox doesn't spill over the page around the shrinking video.
+ */
+private class VideoGlide(private val box: Rect, private val screen: Rect, private val fullscreen: Boolean) {
+    /** Where a 16:9 video sits fullscreen. */
+    val frame = screen.fitAspect(16f / 9f)
+
+    fun apply(layer: GraphicsLayerScope, p: Float) = with(layer) {
+        val laidOut = if (fullscreen) screen else box
+        val ref = if (fullscreen) frame else box      // where the frame sits in the laid-out box
+        val target = lerp(box, frame, p)              // where it's drawn now
+        val s = target.width / ref.width
+        transformOrigin = TransformOrigin(0f, 0f)
+        scaleX = s
+        scaleY = s
+        translationX = target.left - laidOut.left - (ref.left - laidOut.left) * s
+        translationY = target.top - laidOut.top - (ref.top - laidOut.top) * s
+        clip = fullscreen && p < 1f
+        shape = if (clip) RectShape(lerp(ref.translate(-laidOut.left, -laidOut.top), Rect(Offset.Zero, laidOut.size), p))
+        else RectangleShape
+    }
+}
+
+/** Lays the content out at [size] (px) and scales it, from the top-left, to the width it's given. */
+private fun Modifier.laidOutAt(size: Size) = layout { measurable, constraints ->
+    val width = size.width.roundToInt().coerceAtLeast(1)
+    val height = size.height.roundToInt().coerceAtLeast(1)
+    val placeable = measurable.measure(Constraints.fixed(width, height))
+    layout(constraints.maxWidth, constraints.maxHeight) {
+        placeable.placeWithLayer(0, 0) {
+            transformOrigin = TransformOrigin(0f, 0f)
+            scaleX = constraints.maxWidth / width.toFloat()
+            scaleY = scaleX
+        }
+    }
+}
+
+private fun Rect.fitAspect(aspect: Float): Rect =
+    if (width / height > aspect) Rect(Offset(center.x - height * aspect / 2f, top), Size(height * aspect, height))
+    else Rect(Offset(left, center.y - width / aspect / 2f), Size(width, width / aspect))
+
+private class RectShape(private val rect: Rect) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density) = Outline.Rectangle(rect)
 }
 
 /** Tablet watch page: the video's share of the content width (the episode card takes the rest). */
