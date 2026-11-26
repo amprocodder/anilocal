@@ -77,6 +77,8 @@ import com.anilocal.app.domain.model.DownloadQuality
 import com.anilocal.app.domain.model.DownloadState
 import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.SkipMarker
+import com.anilocal.app.domain.model.TrackLanguages
+import com.anilocal.app.domain.model.pickDownloadVariant
 import com.anilocal.app.domain.model.VideoStream
 import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
@@ -207,6 +209,9 @@ class DetailsViewModel(
 
     val defaultQuality: StateFlow<DownloadQuality> =
         settings.downloadQuality.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DownloadQuality.AUTO)
+    // The quality picker pre-selects in the preferred audio, as playback and season downloads do.
+    val audioLanguage: StateFlow<String> =
+        settings.audioLanguage.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TrackLanguages.JAPANESE)
 
     private val requests = DownloadRequests(viewModelScope, { detail.value }, streams, skip, downloads)
     val pending = requests.pending
@@ -263,6 +268,7 @@ class DetailsViewModel(
         seasonJobs[animeId] = appScope.launch {
             try {
                 val quality = loadOrNull { settings.downloadQuality.first() } ?: DownloadQuality.AUTO
+                val audio = loadOrNull { settings.audioLanguage.first() } ?: TrackLanguages.JAPANESE
                 val toQueue = d.episodes.filter { it.number !in episodesQueuedNow() }
                 if (toQueue.isEmpty()) {
                     seasonState.value = null
@@ -277,7 +283,7 @@ class DetailsViewModel(
                         if (ep.number !in episodesQueuedNow()) {
                             coroutineScope {
                                 val markers = async { loadOrNull { skip.markers(d.idMal, ep.number, 0) }.orEmpty() }
-                                val stream = checkNotNull(pickForQuality(streams.resolveStreams(d, ep.number), quality))
+                                val stream = checkNotNull(pickDownloadVariant(streams.resolveStreams(d, ep.number), quality.maxHeight, audio))
                                 downloads.enqueue(d, ep, stream, markers.await())
                             }
                         }
@@ -338,13 +344,6 @@ class DetailsViewModel(
     }
 }
 
-/** The variant the picker pre-selects, given the user's default-quality preference. */
-private fun pickForQuality(options: List<VideoStream>, quality: DownloadQuality): VideoStream? {
-    val maxH = quality.maxHeight ?: return options.maxByOrNull { it.height ?: 0 }
-    return options.filter { (it.height ?: 0) <= maxH }.maxByOrNull { it.height ?: 0 }
-        ?: options.minByOrNull { it.height ?: Int.MAX_VALUE }
-}
-
 private const val EPISODE_RANGE_SIZE = 100
 private val EPISODE_CARD_MIN_WIDTH = 180.dp
 /** Width AniList serves banner images at. */
@@ -372,6 +371,7 @@ fun DetailsScreen(
     val pending by vm.pending.collectAsStateWithLifecycle()
     val seasonDownload by vm.seasonDownload.collectAsStateWithLifecycle()
     val defaultQuality by vm.defaultQuality.collectAsStateWithLifecycle()
+    val audioLanguage by vm.audioLanguage.collectAsStateWithLifecycle()
     val resumePoint by vm.resumePoint.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val d = detail
@@ -672,7 +672,9 @@ fun DetailsScreen(
     }
 
     pending?.let { p ->
-        val preselected = remember(p, defaultQuality) { pickForQuality(p.options, defaultQuality) }
+        val preselected = remember(p, defaultQuality, audioLanguage) {
+            pickDownloadVariant(p.options, defaultQuality.maxHeight, audioLanguage)
+        }
         AlertDialog(
             onDismissRequest = { vm.dismissPicker(p) },
             title = { Text("Episode ${p.episode.number} · Download quality") },

@@ -10,6 +10,22 @@ enum class DownloadQuality(val label: String, val maxHeight: Int?) {
     P480("480p", 480),
 }
 
+/**
+ * The variant to download from [variants]: among those that best fit the [audio] setting
+ * ([TrackLanguages.audioFit]), the highest at or under [maxHeight] (null = no cap), else the lowest
+ * of them. Audio comes first, as it does for playback: a dub isn't a smaller copy of the sub but
+ * another version, so neither a higher resolution nor a quality cap swaps one for the other.
+ */
+fun pickDownloadVariant(variants: List<VideoStream>, maxHeight: Int?, audio: String): VideoStream? {
+    if (variants.isEmpty()) return null
+    val fit = variants.associateWith { TrackLanguages.audioFit(it.quality, audio) }
+    val best = fit.values.max()
+    val version = variants.filter { fit[it] == best }
+    if (maxHeight == null) return version.maxByOrNull { it.height ?: 0 }
+    return version.filter { (it.height ?: 0) <= maxHeight }.maxByOrNull { it.height ?: 0 }
+        ?: version.minByOrNull { it.height ?: Int.MAX_VALUE }
+}
+
 /** A downloaded (or in-progress) episode, as shown in the Downloads tab. */
 data class DownloadItem(
     val id: String,                // "<animeId>-ep<n>"

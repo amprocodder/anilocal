@@ -22,6 +22,7 @@ import com.anilocal.app.domain.model.OfflineEpisode
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.Subtitle
 import com.anilocal.app.domain.model.VideoStream
+import com.anilocal.app.domain.model.pickDownloadVariant
 import com.anilocal.app.domain.model.withFallback
 import com.anilocal.app.domain.repo.CatalogRepository
 import com.anilocal.app.domain.repo.DownloadRepository
@@ -44,6 +45,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.SharingStarted
@@ -72,7 +74,7 @@ class DownloadRepositoryImpl(
     // season on the source), which the catalog serves from cache.
     private val streams: StreamRepository,
     private val catalog: CatalogRepository,
-    settings: SettingsRepository,
+    private val settings: SettingsRepository,
     private val downloadDir: File,
 ) : DownloadRepository {
 
@@ -334,7 +336,7 @@ class DownloadRepositoryImpl(
                 val variants = runCatching { streams.resolveStreams(catalog.detail(e.animeId), e.episodeNumber) }
                     .onFailure { if (it is CancellationException) throw it; Log.w(TAG, "Retry $id: re-resolve failed: ${it.message}") }
                     .getOrNull() ?: return@operation false
-                val stream = pickVariant(variants, e.quality) ?: run {
+                val stream = pickVariant(variants, e.quality, settings.audioLanguage.first()) ?: run {
                     Log.w(TAG, "Retry $id: re-resolve returned no usable variant"); return@operation false
                 }
                 val localSubs = fetchLocalSubs(stream, id)
@@ -388,13 +390,15 @@ class DownloadRepositoryImpl(
      * match, else the best variant not above the label's height, else the lowest one (everything
      * now exceeds it), else the best available. [variants] arrive best-first.
      */
-    private fun pickVariant(variants: List<VideoStream>, quality: String?): VideoStream? {
+    private fun pickVariant(variants: List<VideoStream>, quality: String?, audio: String): VideoStream? {
         if (variants.isEmpty()) return null
-        if (quality == null) return variants.first()
-        variants.firstOrNull { it.quality == quality }?.let { return it }
-        val wanted = quality.filter { it.isDigit() }.toIntOrNull() ?: return variants.first()
-        return variants.filter { (it.height ?: 0) <= wanted }.maxByOrNull { it.height ?: 0 }
-            ?: variants.lastOrNull()
+        // The same label is the same version at the same quality.
+        if (quality != null) variants.firstOrNull { it.quality == quality }?.let { return it }
+        // Otherwise the original's height read from its label ("HD-1 - Sub - 1080p" -> 1080; a bare
+        // digit filter read that as 11080), in the preferred audio — a height-only pick could
+        // re-download the episode as the other version.
+        val wanted = quality?.let { HEIGHT_LABEL.find(it)?.groupValues?.get(1)?.toInt() }
+        return pickDownloadVariant(variants, wanted, audio)
     }
 
     override fun resume(id: String) {
@@ -524,6 +528,7 @@ class DownloadRepositoryImpl(
     )
 
     private companion object {
+        val HEIGHT_LABEL = Regex("""(\d{3,4})[pP]""")
         const val STATE_DOWNLOADING = 0
         const val STATE_COMPLETED = 1
         const val STATE_FAILED = 2
