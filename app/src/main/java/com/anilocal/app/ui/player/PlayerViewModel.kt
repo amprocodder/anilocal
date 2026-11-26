@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
@@ -1055,14 +1056,7 @@ class PlayerViewModel(
             restoreTextChoice = false
             val choice = textChoice ?: return
             if (_textDisabled.value) return
-            val formats = groups.map { (group, index) -> group.getFormat(index) }
-            val byLabel = formats.indexOfFirst { choice.label != null && it.label == choice.label && it.language == choice.language }
-            val byLanguage = formats.indexOfFirst { choice.language != null && it.language == choice.language }
-            selectTextTrack(when {
-                byLabel >= 0 -> byLabel
-                byLanguage >= 0 -> byLanguage
-                else -> choice.ordinal.coerceIn(0, groups.lastIndex)
-            })
+            selectTextTrack(matchTextChoice(choice, groups.map { (group, index) -> group.getFormat(index) }))
         }
     }
 
@@ -1157,11 +1151,49 @@ class PlayerViewModel(
         val format = group.getFormat(trackIndex)
         textChoice = TextChoice(format.label, format.language, index)
         restoreTextChoice = false
+        showTextTrack(group, trackIndex)
+    }
+
+    private fun showTextTrack(group: TrackGroup, trackIndex: Int) {
         currentPlayer.trackSelectionParameters = currentPlayer.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
             .setOverrideForType(TrackSelectionOverride(group, trackIndex))
             .build()
         _textDisabled.value = false
+    }
+
+    /**
+     * The keyboard's C: captions showing → off; off → back on with the track the user last picked
+     * (matched as across episodes), else the one the media flags as default, else the first. Only
+     * a pick from the menu is remembered, so the default case doesn't follow the user to the next
+     * episode. Returns the label now showing, or null when captions went off or there are none.
+     */
+    fun toggleCaptions(): String? {
+        if (textGroups.isEmpty()) return null
+        // A pick made a moment ago is in the parameters before the tracks report it selected.
+        val showing = currentPlayer.trackSelectionParameters.overrides.values.any { it.type == C.TRACK_TYPE_TEXT } ||
+            _textTracks.value.any { it.selected }
+        if (!_textDisabled.value && showing) {
+            disableTextTrack()
+            return null
+        }
+        val formats = textGroups.map { (group, index) -> group.getFormat(index) }
+        val picked = textChoice?.let { matchTextChoice(it, formats) }
+        val index = picked
+            ?: formats.indexOfFirst { it.selectionFlags and C.SELECTION_FLAG_DEFAULT != 0 }.coerceAtLeast(0)
+        if (picked != null) selectTextTrack(index)
+        else textGroups[index].let { (group, trackIndex) -> showTextTrack(group, trackIndex) }
+        return _textTracks.value.getOrNull(index)?.label
+    }
+
+    private fun matchTextChoice(choice: TextChoice, formats: List<Format>): Int {
+        val byLabel = formats.indexOfFirst { choice.label != null && it.label == choice.label && it.language == choice.language }
+        val byLanguage = formats.indexOfFirst { choice.language != null && it.language == choice.language }
+        return when {
+            byLabel >= 0 -> byLabel
+            byLanguage >= 0 -> byLanguage
+            else -> choice.ordinal.coerceIn(0, formats.lastIndex)
+        }
     }
 
     fun disableTextTrack() {

@@ -14,6 +14,10 @@ import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.ui.kit.Button
 import com.anilocal.app.ui.kit.Text
 
+/** The window the Skip button is showing for at [positionMs], if any (the keyboard's Enter uses it too). */
+fun activeSkip(markers: List<SkipMarker>, positionMs: Long): SkipMarker? =
+    markers.firstOrNull { positionMs in it.startMs until it.endMs }
+
 /**
  * The AniLab-style skip pill: a light, fully-rounded button with dark text, shown only while the
  * playback position is inside an intro/outro window; tapping seeks past it.
@@ -25,7 +29,7 @@ fun SkipButton(
     onSkip: (SkipMarker) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val active = markers.firstOrNull { positionMs in it.startMs until it.endMs }
+    val active = activeSkip(markers, positionMs)
     AnimatedVisibility(visible = active != null, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
         if (active != null) {
             Button(

@@ -153,7 +153,7 @@ fun PlayerScreen(
     var episodesOpen by remember { mutableStateOf(false) }
     val anyMenuOpen = ccMenuOpen || speedMenuOpen || episodesOpen
 
-    var resizeLabel by remember { mutableStateOf<String?>(null) }
+    var flashLabel by remember { mutableStateOf<String?>(null) }
     var seekFlash by remember { mutableStateOf<SeekFlash?>(null) }
     var unlockVisible by remember { mutableStateOf(true) }
     // Read inside the pointerInput(Unit) block so a lock/unlock doesn't restart the tap detector.
@@ -218,19 +218,25 @@ fun PlayerScreen(
     }
 
     // A hardware keyboard (a tablet keyboard cover): Space toggles play like the overlay's button,
-    // and Left/Right seek 10s like a double-tap on that side (same flash; holding one repeats) —
-    // Media3's session only hears media keys. Hooked at the activity, ahead of focus routing, which
-    // would otherwise spend the arrows moving focus between overlay buttons and have Space press the
-    // focused one (Back included). Unmodified keys only, so shortcuts (Shift/Ctrl+Space language
+    // Left/Right seek 10s like a double-tap on that side (same flash; holding one repeats), F toggles
+    // fullscreen, C toggles captions (a chip names the track, since the controls may be hidden), and
+    // Enter presses the Skip Intro/Outro pill while it shows — Media3's session only hears media keys.
+    // Hooked at the activity, ahead of focus routing, which would otherwise spend the arrows moving
+    // focus between overlay buttons and have Space press the focused one (Back included). Enter is
+    // taken only while there's something to skip (its release too), so outside a skip window it still
+    // presses a button focused with Tab. Unmodified keys only, so shortcuts (Shift/Ctrl+Space language
     // switching) pass. Pausing brings the controls up to show where it stopped; any press restarts
-    // their auto-hide. Deliberate keypresses still work in lock mode, which guards against touches.
+    // their auto-hide. Deliberate keypresses still work in lock mode, which guards against touches —
+    // except Enter, as lock mode hides the Skip pill.
     DisposableEffect(activity) {
         val host = activity as? MainActivity ?: return@DisposableEffect onDispose {}
+        var enterTaken = false
         val onKey: (KeyEvent) -> Boolean = onKey@{ event ->
             if (!event.hasNoModifiers()) return@onKey false
             val down = event.action == KeyEvent.ACTION_DOWN
+            val first = down && event.repeatCount == 0
             when (event.keyCode) {
-                KeyEvent.KEYCODE_SPACE -> if (down && event.repeatCount == 0) {
+                KeyEvent.KEYCODE_SPACE -> if (first) {
                     vm.togglePlay()
                     if (!locked) {
                         if (!vm.playWhenReady.value) controlsVisible = true
@@ -243,6 +249,25 @@ fun PlayerScreen(
                     seekFlash = SeekFlash(forward)
                     interactionTick++
                 }
+                KeyEvent.KEYCODE_F -> if (first) {
+                    fullscreen = !fullscreen
+                    interactionTick++
+                }
+                KeyEvent.KEYCODE_C -> if (first) {
+                    flashLabel = if (textTracks.isEmpty()) "No subtitles"
+                        else vm.toggleCaptions()?.let { "Subtitles: $it" } ?: "Subtitles off"
+                    interactionTick++
+                }
+                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                    if (first) {
+                        val skip = if (locked) null else activeSkip(markers, position)
+                        enterTaken = skip != null
+                        skip?.let(vm::seekPast)
+                    }
+                    val taken = enterTaken
+                    if (!down) enterTaken = false
+                    if (!taken) return@onKey false
+                }
                 else -> return@onKey false
             }
             true
@@ -251,7 +276,7 @@ fun PlayerScreen(
         onDispose { if (host.keyInterceptor === onKey) host.keyInterceptor = null }
     }
 
-    LaunchedEffect(resizeLabel) { if (resizeLabel != null) { delay(900); resizeLabel = null } }
+    LaunchedEffect(flashLabel) { if (flashLabel != null) { delay(900); flashLabel = null } }
     LaunchedEffect(seekFlash) { if (seekFlash != null) { delay(650); seekFlash = null } }
     LaunchedEffect(locked, unlockVisible) {
         if (locked && unlockVisible) { delay(2_500); unlockVisible = false }
@@ -372,7 +397,7 @@ fun PlayerScreen(
                 onOpenEpisodes = { episodesOpen = true; interactionTick++ },
                 onCycleResize = {
                     resizeIndex = (resizeIndex + 1) % VideoScale.entries.size
-                    resizeLabel = VideoScale.entries[resizeIndex].label
+                    flashLabel = VideoScale.entries[resizeIndex].label
                     interactionTick++
                 },
                 onLock = { locked = true; unlockVisible = true; interactionTick++ },
@@ -423,8 +448,8 @@ fun PlayerScreen(
             }
         }
 
-        // Resize-mode name flash.
-        resizeLabel?.let { label ->
+        // Resize-mode name / caption-toggle flash.
+        flashLabel?.let { label ->
             CenterChip(label, Modifier.align(Alignment.TopCenter).padding(top = if (fullscreen) 64.dp else 12.dp))
         }
 
