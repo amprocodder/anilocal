@@ -21,6 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
@@ -194,22 +195,29 @@ class SourceStreamRepository internal constructor(
     private val prefetches = ConcurrentHashMap<String, Prefetch>()
     private val prefetchScope = appScope
 
-    private fun prefetchKey(animeId: String, episode: Int) = "$animeId:$episode"
+    // The settings a resolve depends on are part of the key: a prefetch made before the user picked
+    // another source or audio language is never played after the change (it just goes unused).
+    private suspend fun prefetchKey(animeId: String, episode: Int) =
+        "$animeId:$episode:${settings.selectedSourceId.first()}:${settings.audioLanguage.first()}"
 
     override fun prefetch(anime: AnimeDetail, episodeNumber: Int) {
-        val key = prefetchKey(anime.id, episodeNumber)
-        prefetches.entries.removeAll { (_, p) -> p.isStale().also { stale -> if (stale) p.result.cancel() } }
-        if (prefetches.containsKey(key)) return
-        // At most a couple at a time — the latest asks are the likely ones.
-        while (prefetches.size >= MAX_PREFETCHES) {
-            prefetches.entries.minByOrNull { it.value.startedAt }?.let { oldest ->
-                prefetches.remove(oldest.key)?.result?.cancel()
-            } ?: break
+        prefetchScope.launch {
+            val key = prefetchKey(anime.id, episodeNumber)
+            synchronized(prefetches) {
+                prefetches.entries.removeAll { (_, p) -> p.isStale().also { stale -> if (stale) p.result.cancel() } }
+                if (prefetches.containsKey(key)) return@launch
+                // At most a couple at a time — the latest asks are the likely ones.
+                while (prefetches.size >= MAX_PREFETCHES) {
+                    prefetches.entries.minByOrNull { it.value.startedAt }?.let { oldest ->
+                        prefetches.remove(oldest.key)?.result?.cancel()
+                    } ?: break
+                }
+                prefetches[key] = Prefetch(
+                    prefetchScope.async(Dispatchers.IO) { resolveStreams(anime, episodeNumber).first() },
+                    SystemClock.elapsedRealtime(),
+                )
+            }
         }
-        prefetches[key] = Prefetch(
-            prefetchScope.async(Dispatchers.IO) { resolveStreams(anime, episodeNumber).first() },
-            SystemClock.elapsedRealtime(),
-        )
     }
 
     override suspend fun recoverStream(
