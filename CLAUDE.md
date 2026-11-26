@@ -222,7 +222,10 @@ neighbour (`related`, with the neighbours' own `altTitles`) than like the title;
 hit is trusted only for a standalone title, never for one with a prequel/parent. The requested episode
 must exist on the matched entry — there's no fallback to episode 1. `FreshStreamRecovery` (the
 player's mid-episode `recoverStream`) matches through the same `TitleMatcher` and ranks a confident
-match above a faster unverified one, and a variant in the preferred audio above a faster one. It exposes
+match above a faster unverified one, and a variant in the preferred audio above a faster one. "Faster" is
+`HttpStreamSpeedProbe` timing one real media segment; it reads a playlist only up to 64 KB and parses the
+lines that arrived whole — never reject a longer one (Anikoto's media playlists run past 64 KB, and
+rejecting them made every reconnect fail with "No reachable stream"). It exposes
 `resolveStream` (single, highest quality — but carrying the de-duped **union of every variant's
 subtitles**, so captions on lower renditions aren't lost to the height sort → online playback),
 `resolveStreams` (all variants → the download quality picker), and `prefetch(anime, ep)`: a background
