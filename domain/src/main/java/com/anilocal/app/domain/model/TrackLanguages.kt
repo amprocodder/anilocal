@@ -36,8 +36,20 @@ object TrackLanguages {
      * starts in one the user reads rather than whatever the source lists first.
      */
     fun subtitleOrder(preferred: String, device: Locale = Locale.getDefault()): List<String> =
-        listOf(preferred.takeUnless { it == AUTO || it == OFF }, device.language.ifBlank { null }, ENGLISH)
+        listOf(preferred.takeUnless { it == AUTO || it == OFF }, deviceLanguage(device), ENGLISH)
             .filterNotNull().map { it.lowercase(Locale.ROOT) }.distinct()
+
+    /** The device's language as an ISO 639-1 code. Android's [Locale.getLanguage] can still report
+     *  the withdrawn codes (Indonesian "in", Hebrew "iw", Yiddish "ji", as in `values-in`), which
+     *  name no track here — Indonesian captions would lose to English. */
+    private fun deviceLanguage(device: Locale): String? =
+        when (val code = device.language.lowercase(Locale.ROOT)) {
+            "" -> null
+            "in" -> "id"
+            "iw" -> "he"
+            "ji" -> "yi"
+            else -> code
+        }
 
     /**
      * The language [text] names, among [among] (ISO 639-1 codes), or null when it names none of them.
