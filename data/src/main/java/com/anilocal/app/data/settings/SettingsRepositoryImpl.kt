@@ -3,6 +3,7 @@ package com.anilocal.app.data.settings
 import android.content.Context
 import com.anilocal.app.data.metadata.extension.RecommendedSources
 import com.anilocal.app.domain.model.DownloadQuality
+import com.anilocal.app.domain.model.TrackLanguages
 import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.source.Sources
 import com.anilocal.app.extensions.loader.AnimeExtensionLoader
@@ -48,6 +49,8 @@ class SettingsRepositoryImpl internal constructor(
         const val DOWNLOAD_QUALITY = "download_quality"
         const val SUBTITLE_SCALE = "subtitle_scale"
         const val SUBTITLE_BG = "subtitle_background"
+        const val SUBTITLE_LANGUAGE = "subtitle_language"
+        const val AUDIO_LANGUAGE = "audio_language"
         const val SELECTED_SOURCE = "selected_source"
         const val AUTO_LAST_WINNER = "auto_last_winner"
         const val EXTENSION_REPOS = "extension_repos"
@@ -82,6 +85,14 @@ class SettingsRepositoryImpl internal constructor(
 
     override val subtitleBackground = bool(Keys.SUBTITLE_BG, true)
     override suspend fun setSubtitleBackground(enabled: Boolean) = set(Keys.SUBTITLE_BG, JsonPrimitive(enabled), true)
+
+    override val subtitleLanguage = string(Keys.SUBTITLE_LANGUAGE, TrackLanguages.AUTO)
+    override suspend fun setSubtitleLanguage(code: String) =
+        set(Keys.SUBTITLE_LANGUAGE, JsonPrimitive(code), TrackLanguages.AUTO)
+
+    override val audioLanguage = string(Keys.AUDIO_LANGUAGE, TrackLanguages.JAPANESE)
+    override suspend fun setAudioLanguage(code: String) =
+        set(Keys.AUDIO_LANGUAGE, JsonPrimitive(code), TrackLanguages.JAPANESE)
 
     override val selectedSourceId = string(Keys.SELECTED_SOURCE, Sources.NONE)
     override suspend fun setSelectedSourceId(id: String) = set(Keys.SELECTED_SOURCE, JsonPrimitive(id), Sources.NONE)

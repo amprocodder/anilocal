@@ -2,6 +2,7 @@ package com.anilocal.app.data.source
 
 import com.anilocal.app.domain.source.NoSourceInstalledException
 import com.anilocal.app.domain.model.AnimeDetail
+import com.anilocal.app.domain.model.TrackLanguages
 import com.anilocal.app.domain.model.VideoStream
 import com.anilocal.app.domain.source.AnimeSource
 import com.anilocal.app.domain.source.SourceRegistry
@@ -50,6 +51,8 @@ internal class FreshStreamRecovery(
         episodeNumber: Int,
         failedStreamUrl: String?,
         selectedSourceId: String,
+        /** The audio setting: a recovery mustn't swap a subbed episode for a faster dub. */
+        audioLanguage: String,
     ): RecoveredStream {
         val available = registry.sources.value.takeIf { it.isNotEmpty() }
             ?: withTimeoutOrNull(REGISTRY_WAIT_MS) { registry.sources.first { it.isNotEmpty() } }
@@ -152,6 +155,7 @@ internal class FreshStreamRecovery(
         return alternatives.ifEmpty { healthy }.sortedWith(
             // A confident title match beats a faster unverified one, as in Auto's race.
             compareByDescending<MeasuredStream> { it.candidate.result.confident }
+                .thenByDescending { TrackLanguages.audioFit(it.candidate.result.stream.quality, audioLanguage) }
                 .thenByDescending { it.bytesPerSecond }
                 .thenByDescending { it.candidate.result.stream.height ?: 0 }
                 .thenBy { it.candidate.sourceIndex }

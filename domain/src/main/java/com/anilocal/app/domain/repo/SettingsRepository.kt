@@ -1,6 +1,7 @@
 package com.anilocal.app.domain.repo
 
 import com.anilocal.app.domain.model.DownloadQuality
+import com.anilocal.app.domain.model.TrackLanguages
 import kotlinx.coroutines.flow.Flow
 
 /** User settings, persisted in the app's settings file. */
@@ -34,6 +35,22 @@ interface SettingsRepository {
     /** Whether subtitles render with a background box. */
     val subtitleBackground: Flow<Boolean>
     suspend fun setSubtitleBackground(enabled: Boolean)
+
+    /**
+     * Caption language an episode starts with: an ISO 639-1 code, [TrackLanguages.AUTO] (the device's
+     * language — the default) or [TrackLanguages.OFF]. One the episode lacks falls back to the
+     * device's language, then English (see [TrackLanguages.subtitleOrder]).
+     */
+    val subtitleLanguage: Flow<String>
+    suspend fun setSubtitleLanguage(code: String)
+
+    /**
+     * Preferred audio language: an ISO 639-1 code ([TrackLanguages.JAPANESE] by default), or
+     * [TrackLanguages.AUTO] for whatever the source serves first. It picks between a stream's audio
+     * tracks and between a source's sub and dub versions of an episode.
+     */
+    val audioLanguage: Flow<String>
+    suspend fun setAudioLanguage(code: String)
 
     /** Id of the [com.anilocal.app.domain.source.AnimeSource] chosen to resolve streams. */
     val selectedSourceId: Flow<String>

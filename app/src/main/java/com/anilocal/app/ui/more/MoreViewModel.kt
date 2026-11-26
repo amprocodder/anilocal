@@ -6,6 +6,7 @@ import kotlinx.coroutines.channels.Channel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.anilocal.app.domain.model.DownloadQuality
+import com.anilocal.app.domain.model.TrackLanguages
 import com.anilocal.app.domain.repo.ExtensionRepository
 import com.anilocal.app.domain.repo.MalRepository
 import com.anilocal.app.domain.repo.SettingsRepository
@@ -50,6 +51,12 @@ class MoreViewModel(
     val subtitleBackground: StateFlow<Boolean> =
         settings.subtitleBackground.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    val subtitleLanguage: StateFlow<String> =
+        settings.subtitleLanguage.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TrackLanguages.AUTO)
+
+    val audioLanguage: StateFlow<String> =
+        settings.audioLanguage.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TrackLanguages.JAPANESE)
+
     /** Available stream sources (built-ins now; + installed extensions later) for the picker. */
     val sources: StateFlow<List<SourceInfo>> =
         sourceRegistry.sources.map { list -> list.map(AnimeSource::info) }
@@ -86,6 +93,8 @@ class MoreViewModel(
     private val qualityWrites = ConflatedSetting(viewModelScope, settings::setDownloadQuality)
     private val scaleWrites = ConflatedSetting(viewModelScope, settings::setSubtitleScale)
     private val backgroundWrites = ConflatedSetting(viewModelScope, settings::setSubtitleBackground)
+    private val subtitleLanguageWrites = ConflatedSetting(viewModelScope, settings::setSubtitleLanguage)
+    private val audioLanguageWrites = ConflatedSetting(viewModelScope, settings::setAudioLanguage)
     private val malEnabledWrites = ConflatedSetting(viewModelScope, settings::setMalSyncEnabled)
     // Selecting a source (including Auto) never installs anything: sources are only added when the
     // user explicitly asks (Browse extensions, or the "Install recommended sources" button).
@@ -98,6 +107,8 @@ class MoreViewModel(
     fun setDownloadQuality(quality: DownloadQuality) = qualityWrites.set(quality)
     fun setSubtitleScale(scale: Float) = scaleWrites.set(scale)
     fun setSubtitleBackground(enabled: Boolean) = backgroundWrites.set(enabled)
+    fun setSubtitleLanguage(code: String) = subtitleLanguageWrites.set(code)
+    fun setAudioLanguage(code: String) = audioLanguageWrites.set(code)
     fun setSelectedSource(id: String) = sourceWrites.set(id)
 
     /** Manually (re)install the community-recommended sources. */

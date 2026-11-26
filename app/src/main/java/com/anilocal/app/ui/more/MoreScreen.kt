@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -50,11 +51,14 @@ import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
 import com.anilocal.app.appViewModel
 import com.anilocal.app.domain.model.DownloadQuality
+import com.anilocal.app.domain.model.TrackLanguages
 import com.anilocal.app.domain.source.Sources
 import com.anilocal.app.ui.common.ScreenHeader
 import com.anilocal.app.ui.icons.AppIcons
 import com.anilocal.app.ui.kit.Button
 import com.anilocal.app.ui.kit.CircularProgressIndicator
+import com.anilocal.app.ui.kit.DropdownMenu
+import com.anilocal.app.ui.kit.DropdownMenuItem
 import com.anilocal.app.ui.kit.FilterChip
 import com.anilocal.app.ui.kit.HorizontalDivider
 import com.anilocal.app.ui.kit.Icon
@@ -71,6 +75,7 @@ import com.anilocal.app.ui.player.CAPTION_TEXT_SIZE_FRACTION
 import com.anilocal.app.ui.player.CaptionStyle
 import com.anilocal.app.ui.player.Captions
 import com.anilocal.app.ui.theme.AppTheme
+import java.util.Locale
 import kotlin.math.roundToInt
 
 @kotlin.OptIn(ExperimentalLayoutApi::class)
@@ -210,6 +215,19 @@ fun MoreScreen(
                     "Download over WiFi only", "Pause downloads on mobile data; resume on WiFi",
                     wifiOnly, vm::setWifiOnly, divider = true,
                 )
+            }
+        }
+
+        item(key = "language", contentType = "settings") {
+            val subtitleLanguage by vm.subtitleLanguage.collectAsStateWithLifecycle()
+            val audioLanguage by vm.audioLanguage.collectAsStateWithLifecycle()
+            SettingsGroup(
+                "Language",
+                "What an episode starts with. Subtitles fall back to your device language, then English; " +
+                    "audio also picks a source's sub or dub version.",
+            ) {
+                PickerRow("Subtitles", SubtitleLanguageOptions, subtitleLanguage, vm::setSubtitleLanguage)
+                PickerRow("Audio", AudioLanguageOptions, audioLanguage, vm::setAudioLanguage, divider = true)
             }
         }
 
@@ -392,6 +410,61 @@ private fun SwitchRow(
             }
         }
         Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+    }
+}
+
+/** Subtitle-language choices as (setting value, label). */
+private val SubtitleLanguageOptions: List<Pair<String, String>> =
+    listOf(
+        TrackLanguages.AUTO to "Device language (${Locale.getDefault().getDisplayLanguage(Locale.ENGLISH)})",
+        TrackLanguages.OFF to "Off",
+    ) + TrackLanguages.choices.map { it to TrackLanguages.displayName(it) }
+
+/** Audio-language choices: Japanese (anime's original, the default) first, the source's own pick last. */
+private val AudioLanguageOptions: List<Pair<String, String>> =
+    listOf(TrackLanguages.JAPANESE to "Japanese (original)") +
+        TrackLanguages.choices.filter { it != TrackLanguages.JAPANESE }.map { it to TrackLanguages.displayName(it) } +
+        (TrackLanguages.AUTO to "Source default")
+
+/** A title over its current value; tapping the row drops a menu of [options] (value to label). */
+@Composable
+private fun PickerRow(
+    title: String,
+    options: List<Pair<String, String>>,
+    selected: String,
+    onSelect: (String) -> Unit,
+    divider: Boolean = false,
+) {
+    var open by remember { mutableStateOf(false) }
+    if (divider) RowDivider()
+    Box {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(role = Role.DropdownList) { open = true }
+                .defaultMinSize(minHeight = 56.dp)
+                .padding(start = 16.dp, end = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f).padding(vertical = 10.dp)) {
+                Text(title, style = AppTheme.type.bodyLarge)
+                Text(
+                    options.firstOrNull { it.first == selected }?.second ?: selected,
+                    style = AppTheme.type.bodySmall,
+                    color = AppTheme.colors.onSurfaceVariant,
+                )
+            }
+            Icon(AppIcons.Filled.ExpandMore, null, tint = AppTheme.colors.onSurfaceVariant)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.heightIn(max = 360.dp)) {
+            options.forEach { (value, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = { onSelect(value); open = false },
+                    leadingIcon = { if (value == selected) Icon(AppIcons.Filled.Check, null) },
+                )
+            }
+        }
     }
 }
 

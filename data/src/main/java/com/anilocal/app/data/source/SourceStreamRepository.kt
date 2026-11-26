@@ -9,6 +9,7 @@ import com.anilocal.app.domain.source.NoSourceInstalledException
 import android.os.SystemClock
 import com.anilocal.app.data.cache.JsonCache
 import com.anilocal.app.domain.model.AnimeDetail
+import com.anilocal.app.domain.model.TrackLanguages
 import com.anilocal.app.domain.model.VideoStream
 import com.anilocal.app.domain.repo.SettingsRepository
 import com.anilocal.app.domain.repo.StreamRepository
@@ -151,7 +152,14 @@ class SourceStreamRepository internal constructor(
             ?: error("source '${source.info.name}': episode $episodeNumber is unavailable for \"${detail.title}\"")
         val server = source.servers(episode).firstOrNull()
             ?: error("source '${source.info.name}': no servers for episode of \"${detail.title}\"")
-        val variants = source.resolve(server).sortedByDescending { it.height ?: 0 }
+        // The preferred audio first, then the best height: a source offering an episode both
+        // subbed and dubbed tells them apart only in the label, and a height-only sort played
+        // whichever version happened to come in the higher resolution.
+        val audio = settings.audioLanguage.first()
+        val variants = source.resolve(server).sortedWith(
+            compareByDescending<VideoStream> { TrackLanguages.audioFit(it.quality, audio) }
+                .thenByDescending { it.height ?: 0 },
+        )
         if (variants.isEmpty()) error("source '${source.info.name}': no streams for episode $episodeNumber of \"${detail.title}\"")
         // Some sources attach subtitle tracks to only one rendition (often a lower one). Union every
         // variant's subs onto EVERY variant (deduped by url, the variant's own first so the default
@@ -210,7 +218,7 @@ class SourceStreamRepository internal constructor(
         failedStreamUrl: String?,
     ): VideoStream = withContext(Dispatchers.IO) {
         val selected = settings.selectedSourceId.first()
-        val winner = recovery.resolve(anime, episodeNumber, failedStreamUrl, selected)
+        val winner = recovery.resolve(anime, episodeNumber, failedStreamUrl, selected, settings.audioLanguage.first())
         coroutineContext.ensureActive()
         // Only the accepted winner writes shared state: abandoned extension calls cannot overwrite
         // pins/cache after the player closes or a newer recovery starts.

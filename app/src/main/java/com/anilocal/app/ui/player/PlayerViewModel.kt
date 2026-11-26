@@ -43,6 +43,7 @@ import com.anilocal.app.domain.model.Episode
 import com.anilocal.app.domain.model.OfflineEpisode
 import com.anilocal.app.domain.model.SkipMarker
 import com.anilocal.app.domain.model.Subtitle
+import com.anilocal.app.domain.model.TrackLanguages
 import com.anilocal.app.domain.model.VideoStream
 import com.anilocal.app.domain.model.withFallback
 import com.anilocal.app.domain.repo.CatalogRepository
@@ -62,7 +63,6 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import java.util.Locale
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -93,7 +93,7 @@ class PlayerViewModel(
     private val downloads: DownloadRepository,
     // App-lifetime scope so the final save survives viewModelScope being cancelled on teardown.
     private val appScope: CoroutineScope,
-    settings: SettingsRepository,
+    private val settings: SettingsRepository,
 ) : ViewModel() {
 
     // The episode currently loaded — the single source of truth, observable by the UI (the overlay's
@@ -238,9 +238,13 @@ class PlayerViewModel(
     private var knownMarkers: List<SkipMarker> = emptyList()
 
     private val episodeLoaded: Boolean get() = session.attached
-    private data class TextChoice(val label: String?, val language: String?, val ordinal: Int)
+    private data class TextChoice(val label: String?, val language: String?)
     private var textChoice: TextChoice? = null
     private var restoreTextChoice = false
+    // The language settings the current media was built with (its default caption, the track
+    // selector's preferences), and whether the "captions off" setting has had its one say yet.
+    private var mediaPrefs = TrackPrefs(TrackLanguages.AUTO, TrackLanguages.JAPANESE)
+    private var subtitleSettingApplied = false
 
     private val recovery = PlaybackRecovery(viewModelScope) {
         val generation = session.generation
@@ -582,15 +586,23 @@ class PlayerViewModel(
 
     private suspend fun play(uri: String, mimeType: String?, subtitles: List<Subtitle>,
         headers: Map<String, String> = emptyMap(), generation: Int = session.generation) {
+        val prefs = trackPrefs()
         val dataSource = playbackDataSource(headers, offline = _offline.value)
-        val media = buildMedia(uri, mimeType, subtitles, dataSource)
+        val media = buildMedia(uri, mimeType, subtitles, dataSource, prefs)
 
         checkSession(generation)
+        // "Off" starts the session with captions hidden; turning them on in the player then
+        // carries to the next episodes like any other caption choice.
+        if (!subtitleSettingApplied) {
+            subtitleSettingApplied = true
+            if (prefs.subtitles == TrackLanguages.OFF) _textDisabled.value = true
+        }
         val previous = currentPlayer
         val replacement = createPlayer(dataSource)
         replacement.setPlaybackSpeed(_speed.value)
         replacement.volume = previous.volume
-        replacement.trackSelectionParameters = carriedTrackParameters(previous)
+        replacement.trackSelectionParameters = carriedTrackParameters(previous, prefs)
+        mediaPrefs = prefs
         restoreTextChoice = textChoice != null
         textGroups = emptyList()
         _textTracks.value = emptyList()
@@ -613,13 +625,20 @@ class PlayerViewModel(
     }
 
     // The outgoing player's track parameters minus its text override (that names the old media's
-    // TrackGroup); captions stay off if the user turned them off.
-    private fun carriedTrackParameters(from: ExoPlayer) = from.trackSelectionParameters.buildUpon()
+    // TrackGroup); captions stay off if the user turned them off. The language settings steer the
+    // tracks a stream carries itself (an HLS stream's own caption and audio renditions): left alone,
+    // the track selector takes whichever the stream flags as default, which can be any language.
+    private fun carriedTrackParameters(from: ExoPlayer, prefs: TrackPrefs) = from.trackSelectionParameters.buildUpon()
         .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, _textDisabled.value).build()
+        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, _textDisabled.value)
+        .setPreferredTextLanguages(*TrackLanguages.subtitleOrder(prefs.subtitles).toTypedArray())
+        .setPreferredAudioLanguages(*listOf(prefs.audio).filter { it != TrackLanguages.AUTO }.toTypedArray())
+        .build()
+
+    private suspend fun trackPrefs() = TrackPrefs(settings.subtitleLanguage.first(), settings.audioLanguage.first())
 
     private suspend fun buildMedia(uri: String, mimeType: String?, subtitles: List<Subtitle>,
-        dataSource: CacheDataSource.Factory): MediaSource {
+        dataSource: CacheDataSource.Factory, prefs: TrackPrefs): MediaSource {
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSource)
             .experimentalParseSubtitlesDuringExtraction(false)
 
@@ -654,7 +673,11 @@ class PlayerViewModel(
         val subMimes = coroutineScope { subtitles.map { sub -> async { resolveSubtitleMime(sub.url, dataSource) } }.awaitAll() }
         val subFactory = SingleSampleMediaSource.Factory(dataSource)
             .setTreatLoadErrorsAsEndOfStream(true)
-        val defaultTrack = defaultSubtitleIndex(subtitles)
+        // Sources name a sidecar's language in free text ("English", "Spanish - Latino"); as an ISO
+        // code it compares with the stream's own tracks and the track selector's preferences.
+        val order = TrackLanguages.subtitleOrder(prefs.subtitles)
+        val codes = languageCodes(subtitles.map { "${it.language} ${it.label}" }, order)
+        val defaultTrack = defaultSubtitleIndex(codes, order)
         val subSources = subtitles.mapIndexed { index, sub ->
             val flags = if (index == defaultTrack) {
                 C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_AUTOSELECT
@@ -663,7 +686,7 @@ class PlayerViewModel(
             }
             val subConfig = MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
                 .setMimeType(subMimes[index])
-                .setLanguage(sub.language)
+                .setLanguage(codes[index] ?: sub.language)
                 .setLabel(sub.label)
                 .setSelectionFlags(flags)
                 .build()
@@ -676,28 +699,25 @@ class PlayerViewModel(
     }
 
     /**
-     * Which sidecar shows by default: the first track in the device's language, else English, else the
-     * first listed. Sources order tracks arbitrarily (one lists Arabic first), and label them loosely —
-     * "English", "eng", "en", "Portuguese (Brazil)" — so a language matches its English or native
-     * name, or its 2/3-letter code, as a whole word of the track's language or label.
+     * Which sidecar shows by default: the first in the subtitle setting's language, else the device's,
+     * else English ([order]). Sources order tracks arbitrarily (one lists Arabic first). Failing those,
+     * the first track whose language can't be told (a lone "Default" track is usually the site's own
+     * language) — never one known to be in another language, which starting on its own looks like the
+     * app picking the wrong one; the CC menu still offers it. -1 = none.
      */
-    private fun defaultSubtitleIndex(subtitles: List<Subtitle>): Int {
-        if (subtitles.size < 2) return 0
-        for (locale in listOf(Locale.getDefault(), Locale.ENGLISH).distinctBy { it.language }) {
-            val names = listOfNotNull(
-                locale.language,
-                runCatching { locale.isO3Language }.getOrNull(),
-                locale.getDisplayLanguage(Locale.ENGLISH),
-                locale.getDisplayLanguage(locale),
-            ).map { it.lowercase() }.filter { it.isNotBlank() }.distinct()
-            val patterns = names.map { Regex("(^|[^\\p{L}])" + Regex.escape(it) + "($|[^\\p{L}])") }
-            val index = subtitles.indexOfFirst { sub ->
-                val text = "${sub.language} ${sub.label}".lowercase()
-                patterns.any { it.containsMatchIn(text) }
-            }
-            if (index >= 0) return index
-        }
-        return 0
+    private fun defaultSubtitleIndex(codes: List<String?>, order: List<String>): Int =
+        firstInOrder(codes, order).takeIf { it >= 0 } ?: codes.indexOf(null)
+
+    /** The ISO code each of [texts] (a track's language and label) names, or null. */
+    private fun languageCodes(texts: List<String>, order: List<String>): List<String?> {
+        val among = (TrackLanguages.choices + order).distinct()
+        return texts.map { TrackLanguages.identify(it, among) }
+    }
+
+    /** The first of [codes] in [order]'s earliest language, or -1. */
+    private fun firstInOrder(codes: List<String?>, order: List<String>): Int {
+        for (code in order) codes.indexOf(code).let { if (it >= 0) return it }
+        return -1
     }
 
     // Resolve the next episode's stream in the background so the advance/Next transition isn't stalled
@@ -791,15 +811,16 @@ class PlayerViewModel(
         checkSession(generation)
         val uri = offline?.streamUri ?: checkNotNull(stream).url
         val dataSource = playbackDataSource(stream?.headers.orEmpty(), offline = offline != null)
+        val prefs = trackPrefs()
         val media = buildMedia(uri, offline?.mimeType ?: stream?.mimeType,
-            offline?.subtitles ?: stream?.subtitles.orEmpty(), dataSource)
+            offline?.subtitles ?: stream?.subtitles.orEmpty(), dataSource, prefs)
         checkSession(generation)
         val owner = PlayerOwner(INACTIVE_GENERATION)
         val loadControl = StandbyLoadControl()
         val player = createPlayer(dataSource, owner, loadControl)
         player.setPlaybackSpeed(_speed.value)
         player.volume = currentPlayer.volume
-        player.trackSelectionParameters = carriedTrackParameters(currentPlayer)
+        player.trackSelectionParameters = carriedTrackParameters(currentPlayer, prefs)
         player.playWhenReady = false
         // An expired link, or a device that won't open a second decoder, only drops the standby.
         player.addListener(object : Player.Listener {
@@ -809,7 +830,7 @@ class PlayerViewModel(
         })
         return Standby(next, player, owner, loadControl, media, uri,
             skips = offline?.markers ?: stream?.skips.orEmpty(), offline = offline,
-            resolvedAtMs = resolvedAtMs).also { standby = it }
+            resolvedAtMs = resolvedAtMs, prefs = prefs).also { standby = it }
     }
 
     // Start the standby's download once this episode is buffered to where its content ends (Media3
@@ -876,7 +897,8 @@ class PlayerViewModel(
         warm.loadControl.capped = false
         player.setPlaybackSpeed(_speed.value)
         player.volume = previous.volume
-        player.trackSelectionParameters = carriedTrackParameters(previous)
+        player.trackSelectionParameters = carriedTrackParameters(previous, warm.prefs)
+        mediaPrefs = warm.prefs
         restoreTextChoice = textChoice != null
         textGroups = emptyList()
         _textTracks.value = emptyList()
@@ -1056,7 +1078,9 @@ class PlayerViewModel(
             restoreTextChoice = false
             val choice = textChoice ?: return
             if (_textDisabled.value) return
-            selectTextTrack(matchTextChoice(choice, groups.map { (group, index) -> group.getFormat(index) }))
+            // A pick this episode doesn't have leaves its default (the setting's language) showing.
+            val match = matchTextChoice(choice, groups.map { (group, index) -> group.getFormat(index) })
+            if (match >= 0) selectTextTrack(match)
         }
     }
 
@@ -1149,7 +1173,7 @@ class PlayerViewModel(
     fun selectTextTrack(index: Int) {
         val (group, trackIndex) = textGroups.getOrNull(index) ?: return
         val format = group.getFormat(trackIndex)
-        textChoice = TextChoice(format.label, format.language, index)
+        textChoice = TextChoice(format.label, format.language)
         restoreTextChoice = false
         showTextTrack(group, trackIndex)
     }
@@ -1164,9 +1188,10 @@ class PlayerViewModel(
 
     /**
      * The keyboard's C: captions showing → off; off → back on with the track the user last picked
-     * (matched as across episodes), else the one the media flags as default, else the first. Only
-     * a pick from the menu is remembered, so the default case doesn't follow the user to the next
-     * episode. Returns the label now showing, or null when captions went off or there are none.
+     * (matched as across episodes), else the one in the subtitle setting's language, else the one the
+     * media flags as default, else the first. Only a pick from the menu is remembered, so the default
+     * case doesn't follow the user to the next episode. Returns the label now showing, or null when
+     * captions went off or there are none.
      */
     fun toggleCaptions(): String? {
         if (textGroups.isEmpty()) return null
@@ -1178,22 +1203,28 @@ class PlayerViewModel(
             return null
         }
         val formats = textGroups.map { (group, index) -> group.getFormat(index) }
-        val picked = textChoice?.let { matchTextChoice(it, formats) }
-        val index = picked
-            ?: formats.indexOfFirst { it.selectionFlags and C.SELECTION_FLAG_DEFAULT != 0 }.coerceAtLeast(0)
+        val picked = textChoice?.let { matchTextChoice(it, formats) }?.takeIf { it >= 0 }
+        val index = picked ?: preferredTextIndex(formats)
         if (picked != null) selectTextTrack(index)
         else textGroups[index].let { (group, trackIndex) -> showTextTrack(group, trackIndex) }
         return _textTracks.value.getOrNull(index)?.label
     }
 
+    // The user's pick in another episode's list: the same label and language, else the same
+    // language, else -1. Never the same position — the next list can hold another language there.
     private fun matchTextChoice(choice: TextChoice, formats: List<Format>): Int {
         val byLabel = formats.indexOfFirst { choice.label != null && it.label == choice.label && it.language == choice.language }
-        val byLanguage = formats.indexOfFirst { choice.language != null && it.language == choice.language }
-        return when {
-            byLabel >= 0 -> byLabel
-            byLanguage >= 0 -> byLanguage
-            else -> choice.ordinal.coerceIn(0, formats.lastIndex)
-        }
+        if (byLabel >= 0) return byLabel
+        return formats.indexOfFirst { choice.language != null && it.language == choice.language }
+    }
+
+    // Captions coming back on without a remembered pick: the subtitle setting's language, as when
+    // an episode starts, else the media's own default, else the first.
+    private fun preferredTextIndex(formats: List<Format>): Int {
+        val order = TrackLanguages.subtitleOrder(mediaPrefs.subtitles)
+        val codes = languageCodes(formats.map { "${it.language.orEmpty()} ${it.label.orEmpty()}" }, order)
+        return firstInOrder(codes, order).takeIf { it >= 0 }
+            ?: formats.indexOfFirst { it.selectionFlags and C.SELECTION_FLAG_DEFAULT != 0 }.coerceAtLeast(0)
     }
 
     fun disableTextTrack() {
@@ -1233,6 +1264,9 @@ class PlayerViewModel(
         currentPlayer.release()
     }
 
+    /** The language settings, as read for one episode's media: [subtitles] and [audio] are ISO codes or [TrackLanguages.AUTO]/[TrackLanguages.OFF]. */
+    private data class TrackPrefs(val subtitles: String, val audio: String)
+
     /** The episode generation a player's callbacks belong to; mutable so a standby can be promoted. */
     private class PlayerOwner(var generation: Int)
 
@@ -1256,6 +1290,7 @@ class PlayerViewModel(
         val skips: List<SkipMarker>,
         val offline: OfflineEpisode?,
         val resolvedAtMs: Long,
+        val prefs: TrackPrefs,
     ) {
         private var prepared = false
 
