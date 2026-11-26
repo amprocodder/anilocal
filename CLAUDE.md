@@ -388,7 +388,15 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   episode list) — portrait with the video on top on phones, landscape side-by-side on tablets
   (`smallestScreenWidthDp >= 600`). Back on the watch page leaves the player. The video `Box` stays
   the first child of one `BoxWithConstraints` and only its size changes, so its SurfaceView is never
-  recreated on a mode switch — keep it that way (no Column/Row swap around it).
+  recreated on a mode switch — keep it that way (no Column/Row swap around it). On tablets a toggle
+  **glides** (`VideoGlide`, `Motion.FULLSCREEN_MS`): the *old* layout is transformed (a uniform
+  scale + move in a `graphicsLayer`, which the SurfaceView follows) until the video sits where the new
+  mode puts it, the watch page fades in or out around it, and only then does the layout switch
+  (`layoutFullscreen` lags `fullscreen`). On the watch page the video is laid out at its fullscreen
+  16:9 size and scaled into the box (`laidOutAt`), so a toggle never resizes the SurfaceView: one
+  resized while its on-screen rect stays the same (exactly where a glide ends) shows a frame at its old
+  scale. Phones snap — their toggle rotates the screen, and the system's rotation animation is the
+  transition.
   **The player draws its own video and captions — no media3-ui.** `VideoSurface` is a `SurfaceView` sized
   like Media3's AspectRatioFrameLayout (`VideoScale` Fit/Zoom/Stretch, same 1% tolerance), black until
   the current player's first frame (PlayerView's shutter), and on a player swap it moves the surface from
@@ -529,8 +537,12 @@ are built with `appViewModel { graph -> XViewModel(graph.catalog, …) }`, which
   - `NavDisplay` + `AppNavigation` (activity-scoped ViewModel) — each entry gets its own `ViewModelStore` and
     `rememberSaveable` state, disposed only once it's off every stack and off screen; the stacks survive
     config changes and process death (saved as JSON). Predictive back seeks the pop animation
-    (`enableOnBackInvokedCallback` is on); the player cuts in/out with no transition (its SurfaceView
-    can't fade with Compose). A screen's own `BackHandler` (the player's) wins over the navigator's.
+    (`enableOnBackInvokedCallback` is on). The player slides up from the bottom edge over the screen it
+    opens from and back down on close (`Motion`; a slide only — its SurfaceView moves with the Compose
+    layers but can't fade with them), while `AppRoot`'s bottom bar sinks under it and rises back; the
+    bar slides over the screen's edge and claims its space only once fully up, so the screen above is
+    laid out once. A screen's own `BackHandler` (the player's) wins over the navigator's; the closing
+    player's `active` is false so its handler stands down, and `openPlayer` ignores a second open.
   - The bottom bar shows only at a tab's root. Adding a tab = a `TopTab` entry + a `Route` + a branch in
     `MainActivity`'s `when (route)`; adding a screen = a `Route` + a branch.
 - ViewModels are plain classes built with `appViewModel { graph -> … }` and take only domain
