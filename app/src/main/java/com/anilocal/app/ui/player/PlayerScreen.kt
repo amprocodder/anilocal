@@ -77,10 +77,13 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -89,6 +92,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.zIndex
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -140,6 +144,12 @@ fun PlayerScreen(
     route: Route.Player,
     onBack: () -> Unit,
     onEpisodeChanged: (Int) -> Unit,
+    /** Swiping the fullscreen video down: shows Home beneath the player, revealed as far as `progress` reads (0–1). */
+    onRevealHome: (progress: () -> Float) -> Unit,
+    /** The swipe let go without leaving: Home is covered again. */
+    onCancelReveal: () -> Unit,
+    /** The swipe let go to leave, and the player is off screen: land on Home. */
+    onGoHome: () -> Unit,
     /** False once the player is closing (it slides away), so Back goes to the screen beneath. */
     active: Boolean = true,
     vm: PlayerViewModel = appViewModel { playerViewModel(it, route) },
@@ -202,11 +212,47 @@ fun PlayerScreen(
     // Read inside the pointerInput(Unit) block so a lock/unlock doesn't restart the tap detector.
     val isLocked by rememberUpdatedState(locked)
 
+    // Swipe down to go Home (fullscreen only; see SwipeHomeState). As the drag takes hold, the
+    // controls step aside and the system bars come back, so Home is laid out for the bars it will have
+    // before it shows; let go short and both are as they were, once the player has sprung back.
+    val swipe = remember { SwipeHomeState() }
+    var controlsBeforeSwipe by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    val revealHome by rememberUpdatedState(onRevealHome)
+    val cancelReveal by rememberUpdatedState(onCancelReveal)
+    val goHome by rememberUpdatedState(onGoHome)
+    val swipeEvents = remember(swipe, activity, view, haptics) {
+        object : SwipeHomeEvents {
+            override fun onStart() {
+                controlsBeforeSwipe = controlsVisible
+                controlsVisible = false
+                revealHome { swipe.progress }
+                WindowCompat.getInsetsController(activity.window, view).show(WindowInsetsCompat.Type.systemBars())
+            }
+
+            override fun onArmed() = haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+
+            override fun onReturned() {
+                cancelReveal()
+                if (fullscreen) WindowCompat.getInsetsController(activity.window, view).hide(WindowInsetsCompat.Type.systemBars())
+                if (controlsBeforeSwipe) {
+                    controlsVisible = true
+                    interactionTick++
+                }
+            }
+
+            override fun onGone() = goHome()
+        }
+    }
+    // Leaving composition mid-swipe (the activity going away) mustn't leave Home showing beneath.
+    DisposableEffect(swipe) { onDispose { if (swipe.engaged) cancelReveal() } }
+
     // Lock mode swallows back (shows the unlock chip instead); the episode panel closes on back;
     // fullscreen backs out to the watch page, and only the watch page leaves the player.
     val exitFullscreen = { fullscreen = false; interactionTick++ }
     BackHandler(enabled = active) {
         when {
+            swipe.engaged -> Unit   // being swiped away to Home: the swipe decides
             episodesOpen -> episodesOpen = false
             locked -> unlockVisible = true
             fullscreen -> exitFullscreen()
@@ -310,7 +356,7 @@ fun PlayerScreen(
                     seekFlash = SeekFlash(forward)
                     interactionTick++
                 }
-                KeyEvent.KEYCODE_F -> if (first) {
+                KeyEvent.KEYCODE_F -> if (first && !swipe.engaged) {
                     fullscreen = !fullscreen
                     interactionTick++
                 }
@@ -364,7 +410,19 @@ fun PlayerScreen(
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
-            .drawBehind { drawRect(lerp(watchBackground, Color.Black, modeProgress.value)) }
+            .onSizeChanged { swipe.playerSize = it.toSize() }
+            // Over the whole player, so the drag is measured in untransformed px; the tap layer,
+            // buttons and seek bar below still get their touches (a seek-bar drag cancels it).
+            .swipeHome(
+                swipe,
+                enabled = {
+                    isActive && fullscreen && layoutFullscreen && modeProgress.value >= 1f && !locked &&
+                        !ccMenuOpen && !speedMenuOpen && !episodesOpen
+                },
+                events = swipeEvents,
+            )
+            // Behind the video; swiped down, it clears to show Home rising beneath.
+            .drawBehind { drawRect(lerp(watchBackground, Color.Black, modeProgress.value), alpha = 1f - swipe.progress) }
             .then(
                 if (layoutFullscreen) Modifier
                 else Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
@@ -398,7 +456,8 @@ fun PlayerScreen(
         else Modifier.padding(start = videoStart, top = videoTop).size(videoWidth, videoHeight))
             // Above the watch page, which the video overlaps only while it glides.
             .zIndex(1f)
-            .graphicsLayer { glide.apply(this, modeProgress.value) }
+            // Swiped (only ever in fullscreen, where the glide is at rest) the swipe places it instead.
+            .graphicsLayer { if (swipe.engaged) swipe.applyTo(this) else glide.apply(this, modeProgress.value) }
             .background(Color.Black)
     ) {
         // The video surface (+ captions over the video frame). Same position in every mode, so the
@@ -416,7 +475,8 @@ fun PlayerScreen(
         // Tap layer — sits UNDER the control overlay; the overlay's buttons/seek bar consume their
         // own touches, so a tap anywhere else (including the scrims) lands here. A single tap
         // toggles the controls; a double-tap on the left/right third seeks 10s back/forward (the
-        // middle third ignores it). No other gestures: everything else is a button.
+        // middle third ignores it). The only other gesture is the fullscreen swipe down to Home
+        // (on the player's root, above); everything else is a button.
         Box(
             Modifier
                 .fillMaxSize()
@@ -569,7 +629,8 @@ fun PlayerScreen(
         if (!locked) {
             SkipButton(
                 positionMs = position,
-                markers = markers,
+                // Steps aside with the controls while the player is being swiped away.
+                markers = if (swipe.engaged) emptyList() else markers,
                 onSkip = vm::seekPast,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -735,7 +796,7 @@ private fun Modifier.laidOutAt(size: Size) = layout { measurable, constraints ->
     }
 }
 
-private fun Rect.fitAspect(aspect: Float): Rect =
+internal fun Rect.fitAspect(aspect: Float): Rect =
     if (width / height > aspect) Rect(Offset(center.x - height * aspect / 2f, top), Size(height * aspect, height))
     else Rect(Offset(left, center.y - width / aspect / 2f), Size(width, width / aspect))
 

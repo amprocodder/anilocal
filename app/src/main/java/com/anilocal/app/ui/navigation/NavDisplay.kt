@@ -8,6 +8,7 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.SeekableTransitionState
 import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.tween
@@ -25,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -35,6 +37,7 @@ import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.anilocal.app.ui.theme.Motion
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import kotlin.reflect.KClass
 
@@ -153,7 +156,8 @@ class AppNavigation(savedState: SavedStateHandle) : ViewModel() {
  * tabs) and ViewModelStore. Changes animate: a quick fade on tab switches, fade + scale on push/pop,
  * and the player rising over the screen it opens from and sinking back down when it closes — a pure
  * slide, since its video SurfaceView moves with the Compose layers but can't fade or scale with them.
- * A predictive back gesture seeks the pop animation with the finger and commits or springs back.
+ * A predictive back gesture seeks the pop animation with the finger and commits or springs back; a
+ * screen being dragged away to Home ([Navigator.revealed]) seeks Home in beneath it the same way.
  */
 @Composable
 fun NavDisplay(
@@ -176,7 +180,23 @@ fun NavDisplay(
         }
     }
 
-    PredictiveBackHandler(enabled = navigator.canGoBack) { progress ->
+    // Home showing beneath a screen being dragged away to it: the transition seeks toward Home with
+    // the drag (once any transition into that screen has finished). Let go without leaving, and Home
+    // is put away again; if the screen did leave, the effect above finishes the transition from here.
+    val revealed = navigator.revealed
+    LaunchedEffect(revealed) {
+        if (revealed == null) {
+            val stillHere = transitionState.currentState.id == navigator.current.id
+            if (stillHere && transitionState.targetState != transitionState.currentState) {
+                transitionState.snapTo(transitionState.currentState)
+            }
+            return@LaunchedEffect
+        }
+        snapshotFlow { transitionState.currentState == transitionState.targetState }.first { it }
+        snapshotFlow { navigator.revealProgress }.collect { transitionState.seekTo(it, revealed) }
+    }
+
+    PredictiveBackHandler(enabled = navigator.canGoBack && revealed == null) { progress ->
         val target = navigator.previous ?: return@PredictiveBackHandler
         gesture = true
         try {
@@ -192,7 +212,9 @@ fun NavDisplay(
     transition.AnimatedContent(
         modifier = modifier,
         contentKey = { it.id },
-        transitionSpec = { navTransition(if (gesture) NavMove.Pop else navigator.lastMove) },
+        transitionSpec = {
+            navTransition(if (gesture) NavMove.Pop else navigator.lastMove, revealing = navigator.revealed != null)
+        },
     ) { entry ->
         saveable.SaveableStateProvider(entry.id) {
             CompositionLocalProvider(LocalViewModelStoreOwner provides nav.ownerOf(entry)) {
@@ -209,7 +231,16 @@ fun NavDisplay(
     }
 }
 
-private fun AnimatedContentTransitionScope<NavEntry>.navTransition(move: NavMove): ContentTransform {
+private fun AnimatedContentTransitionScope<NavEntry>.navTransition(move: NavMove, revealing: Boolean): ContentTransform {
+    // Home showing through beneath a screen dragged away to it (Navigator.revealHome): it settles
+    // forward from slightly back into place as the drag goes on — seeked with the finger. The dragged
+    // screen moves itself, so here it's only kept, on top, until the drag ends.
+    if (revealing) return ContentTransform(
+        scaleIn(tween(Motion.PLAYER_CLOSE_MS, easing = LinearEasing), initialScale = REVEAL_SCALE),
+        ExitTransition.KeepUntilTransitionsFinished,
+        targetContentZIndex = -1f,
+        sizeTransform = null,
+    )
     val from = initialState.route
     val to = targetState.route
     // The player slides up from the bottom edge over the screen it was opened from (which holds
@@ -242,3 +273,6 @@ private fun AnimatedContentTransitionScope<NavEntry>.navTransition(move: NavMove
         )
     }
 }
+
+/** Home's scale beneath a screen that's just begun to be dragged away to it. */
+private const val REVEAL_SCALE = 0.94f

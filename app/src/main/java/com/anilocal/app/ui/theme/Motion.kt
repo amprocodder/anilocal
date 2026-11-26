@@ -4,8 +4,9 @@ import androidx.compose.animation.core.CubicBezierEasing
 
 /**
  * The app's motion: the curves and durations shared by the transitions that move the player — the
- * player rising over the screen it opens from and sinking back down, the bottom bar getting out of
- * its way, and the video gliding between fullscreen and the watch page. Short enough that nothing
+ * player rising over the screen it opens from and sinking back down (or being swiped away to Home),
+ * the bottom bar getting out of its way, and the video gliding between fullscreen and the watch
+ * page. Short enough that nothing
  * waits on them: playback starts loading the moment the player opens, whatever the animation does.
  */
 object Motion {
@@ -27,4 +28,7 @@ object Motion {
 
     /** The video gliding between fullscreen and its box on the watch page. */
     const val FULLSCREEN_MS = 280
+
+    /** The player dropping off the bottom edge when a swipe down lets go at a standstill (a fling is quicker). */
+    const val PLAYER_SWIPE_OUT_MS = 260
 }

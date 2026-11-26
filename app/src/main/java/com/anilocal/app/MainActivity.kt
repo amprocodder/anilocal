@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
@@ -118,6 +119,14 @@ private fun AppRoot() {
             else -> barSlide.snapTo(1f)
         }
     }
+    // Swiping the player down to Home brings the bar up with Home, as far as the swipe has gone. It's
+    // kept in step here so that landing on Home carries on from where it is; let go short, and it's
+    // back under the player.
+    val revealing = navigator.revealed != null
+    LaunchedEffect(revealing) {
+        if (revealing) snapshotFlow { navigator.revealProgress }.collect { barSlide.snapTo(it) }
+        else if (isPlayer) barSlide.snapTo(0f)
+    }
 
     // The resume bar's episode is the likeliest thing to be played next: once the app is open and
     // its first screen has settled, build that episode's player off screen — resolved, buffered and
@@ -173,57 +182,70 @@ private fun AppRoot() {
 
     // Vertical insets are handled per-screen so edge-to-edge art (Home hero, Details header) can
     // draw under the status bar while other screens use statusBarsPadding() (or their own top
-    // bar). Horizontal bars/cutouts (landscape 3-button nav, corner cutouts) stay padded here
-    // for every route — no screen wants content under those.
+    // bar). Horizontal bars/cutouts (landscape 3-button nav, corner cutouts) are padded here for
+    // every screen but the player — no screen wants content under those — and per screen, so one
+    // showing beneath the player (as it opens, closes, or is swiped away to Home) already sits
+    // where it will once the player has gone.
     // Surface: the screen's background and default content colour (what Material's Scaffold gave).
     Surface(Modifier.fillMaxSize(), color = AppTheme.colors.background) {
         Column(Modifier.fillMaxSize()) {
             val sideInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal)
-            Box(Modifier.weight(1f).then(if (isPlayer) Modifier else Modifier.windowInsetsPadding(sideInsets))) {
+            Box(Modifier.weight(1f)) {
                 NavDisplay(nav, modifier = Modifier.fillMaxSize()) { entry ->
                     val openDetail: (String) -> Unit = { navigator.navigate(Route.Detail(it)) }
                     val play: (String, Int) -> Unit = { animeId, ep -> openPlayer(Route.Player(animeId, ep)) }
                     val resume: (String, Int, Long) -> Unit = { id, ep, pos -> openPlayer(Route.Player(id, ep, pos)) }
-                    when (val route = entry.route) {
-                        Route.Home -> HomeScreen(
-                            onOpen = openDetail,
-                            onResume = resume,
-                            onExplore = { navigator.selectTab(TopTab.Explore) },
-                        )
-                        Route.Explore -> ExploreScreen(onOpen = openDetail)
-                        Route.Library -> LibraryScreen(onOpen = openDetail)
-                        Route.Downloads -> DownloadsScreen(onPlay = play)
-                        Route.Settings -> MoreScreen(
-                            onBrowseExtensions = { navigator.navigate(Route.Extensions) },
-                            onConfigureSource = { navigator.navigate(Route.SourcePreferences(it)) },
-                        )
-                        Route.Extensions -> ExtensionsScreen(onBack = { navigator.back() })
-                        is Route.SourcePreferences -> SourcePreferencesScreen(route.sourceId, onBack = { navigator.back() })
-                        is Route.Detail -> DetailsScreen(
-                            animeId = route.animeId,
-                            onPlay = play,
-                            onResume = resume,
-                            onOpenDetail = openDetail,
-                            onBack = { navigator.back() },
-                        )
-                        is Route.Player -> PlayerScreen(
-                            route = route,
-                            // False while it slides away on close: Back then belongs to the screen beneath.
-                            active = entry.id == navigator.current.id,
-                            onBack = { navigator.back() },
-                            // Kept on the route so a restored stack reopens the episode that was playing.
-                            onEpisodeChanged = { navigator.update(entry.id, route.copy(episode = it, startMs = 0L)) },
-                        )
+                    Box(
+                        Modifier.fillMaxSize().then(if (entry.route is Route.Player) Modifier else Modifier.windowInsetsPadding(sideInsets)),
+                        propagateMinConstraints = true,
+                    ) {
+                        when (val route = entry.route) {
+                            Route.Home -> HomeScreen(
+                                onOpen = openDetail,
+                                onResume = resume,
+                                onExplore = { navigator.selectTab(TopTab.Explore) },
+                            )
+                            Route.Explore -> ExploreScreen(onOpen = openDetail)
+                            Route.Library -> LibraryScreen(onOpen = openDetail)
+                            Route.Downloads -> DownloadsScreen(onPlay = play)
+                            Route.Settings -> MoreScreen(
+                                onBrowseExtensions = { navigator.navigate(Route.Extensions) },
+                                onConfigureSource = { navigator.navigate(Route.SourcePreferences(it)) },
+                            )
+                            Route.Extensions -> ExtensionsScreen(onBack = { navigator.back() })
+                            is Route.SourcePreferences -> SourcePreferencesScreen(route.sourceId, onBack = { navigator.back() })
+                            is Route.Detail -> DetailsScreen(
+                                animeId = route.animeId,
+                                onPlay = play,
+                                onResume = resume,
+                                onOpenDetail = openDetail,
+                                onBack = { navigator.back() },
+                            )
+                            is Route.Player -> PlayerScreen(
+                                route = route,
+                                // False while it slides away on close: Back then belongs to the screen beneath.
+                                active = entry.id == navigator.current.id,
+                                onBack = { navigator.back() },
+                                // Kept on the route so a restored stack reopens the episode that was playing.
+                                onEpisodeChanged = { navigator.update(entry.id, route.copy(episode = it, startMs = 0L)) },
+                                // Swiping the fullscreen video down drags it away to Home, shown beneath it.
+                                onRevealHome = navigator::revealHome,
+                                onCancelReveal = navigator::cancelReveal,
+                                onGoHome = navigator::goHome,
+                            )
+                        }
                     }
                 }
             }
-            if (showBottomBar || barSinking) {
+            if (showBottomBar || barSinking || revealing) {
                 Box(
                     Modifier.layout { measurable, constraints ->
                         val bar = measurable.measure(constraints)
                         val claimed = if (barUp && showBottomBar) bar.height else 0
+                        // Read straight from the swipe while it's on, so the bar moves in the same frame.
+                        val slide = if (revealing) navigator.revealProgress else barSlide.value
                         layout(bar.width, claimed) {
-                            bar.place(0, claimed - (bar.height * barSlide.value).roundToInt())
+                            bar.place(0, claimed - (bar.height * slide).roundToInt())
                         }
                     },
                 ) {
@@ -238,7 +260,8 @@ private fun AppRoot() {
                         NavigationBar {
                             TopTab.entries.forEach { tab ->
                                 NavigationBarItem(
-                                    selected = navigator.tab == tab,
+                                    // Rising with Home under a swipe, it's Home's bar already.
+                                    selected = (if (revealing) TopTab.Home else navigator.tab) == tab,
                                     onClick = { navigator.selectTab(tab) },
                                     icon = tab.icon,
                                     label = tab.label,
@@ -246,7 +269,8 @@ private fun AppRoot() {
                             }
                         }
                     }
-                    // Sinking under the player: it takes no more taps (a tab switch would strand it).
+                    // Sinking under the player (or rising with a swipe still under way): it takes no
+                    // taps (a tab switch would strand the player).
                     if (!showBottomBar) {
                         Box(Modifier.matchParentSize().pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } })
                     }

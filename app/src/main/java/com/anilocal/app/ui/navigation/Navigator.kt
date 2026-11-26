@@ -86,6 +86,41 @@ class Navigator(saved: NavState? = null) {
         }
     }
 
+    /**
+     * Home's root while it shows beneath the current screen, which a gesture is dragging away to it
+     * (the player's swipe down): NavDisplay composes it under that screen. Null otherwise.
+     */
+    var revealed: NavEntry? by mutableStateOf(null)
+        private set
+    private var revealedBy: () -> Float = { 0f }
+
+    /** How far the screen over [revealed] has been dragged away: 0 = still in place … 1 = gone. */
+    val revealProgress: Float get() = if (revealed == null) 0f else revealedBy().coerceIn(0f, 1f)
+
+    /** Shows Home's root beneath the current screen, as far revealed as [progress] reads (snapshot state). */
+    fun revealHome(progress: () -> Float) {
+        revealedBy = progress
+        revealed = stacks.getValue(TopTab.Home).first()
+    }
+
+    /** The drag let go without leaving: the screen covers Home again. */
+    fun cancelReveal() {
+        revealed = null
+        revealedBy = { 0f }
+    }
+
+    /**
+     * Leaves the current screen for Home's root — where a swipe down from the player lands: the
+     * screen is popped off its stack, Home's stack goes back to its root, and the Home tab is selected.
+     */
+    fun goHome() {
+        cancelReveal()
+        lastMove = NavMove.Pop
+        stack.let { if (it.size > 1) it.removeAt(it.lastIndex) }
+        stacks.getValue(TopTab.Home).let { if (it.size > 1) it.removeRange(1, it.size) }
+        tab = TopTab.Home
+    }
+
     /** Replaces the route of entry [id], keeping its identity (so its screen isn't rebuilt). */
     fun update(id: String, route: Route) {
         for (s in stacks.values) {
