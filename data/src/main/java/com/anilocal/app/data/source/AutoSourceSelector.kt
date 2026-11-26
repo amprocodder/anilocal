@@ -157,12 +157,17 @@ class AutoSourceSelector(
                 raceScope.launch(Dispatchers.IO) {
                     if (i > 0) delay(i * STAGGER_MS)
                     if (strong.isCompleted) return@launch
-                    probeGate.withPermit {
-                        if (strong.isCompleted) return@withPermit
-                        val r = tryProbe(src, probe, CANDIDATE_TIMEOUT_MS) ?: return@withPermit
-                        if (r.streams.isEmpty()) return@withPermit
-                        if (r.confident) strong.complete(src to r) else weak.add(src to r)
+                    // Waiting for a permit doesn't count against the candidate's deadline: the
+                    // clock starts in tryProbe, which also takes the permit over and releases it
+                    // only when the extension call itself ends.
+                    probeGate.acquire()
+                    if (strong.isCompleted) {
+                        probeGate.release()
+                        return@launch
                     }
+                    val r = tryProbe(src, probe, CANDIDATE_TIMEOUT_MS, heldPermit = true) ?: return@launch
+                    if (r.streams.isEmpty()) return@launch
+                    if (r.confident) strong.complete(src to r) else weak.add(src to r)
                 }
             }
             raceScope.launch {
@@ -183,14 +188,21 @@ class AutoSourceSelector(
 
     /** Probe one source under a timeout, recording the outcome for the scoreboard. Returns null on
      *  timeout/failure (recorded), the result on success (recorded), and rethrows real cancellation
-     *  from a losing race branch (records nothing). */
+     *  from a losing race branch (records nothing).
+     *
+     *  With [heldPermit], the caller has acquired a [probeGate] permit and hands it over: it's
+     *  released when the probe's work completes, not when this returns. A probe abandoned at its
+     *  deadline keeps running until its blocking call returns, and it keeps its slot until then, so
+     *  the gate bounds the extension calls actually in flight, not just the ones still awaited. */
     private suspend fun tryProbe(
         source: AnimeSource,
         probe: suspend (AnimeSource) -> SourceResolution,
         timeoutMs: Long,
+        heldPermit: Boolean = false,
     ): SourceResolution? {
         val start = SystemClock.elapsedRealtime()
         val work = probeScope.async(Dispatchers.IO) { probe(source) }
+        if (heldPermit) work.invokeOnCompletion { probeGate.release() }
         return try {
             val r = withTimeout(timeoutMs) { work.await() }
             record(source.info.id, SystemClock.elapsedRealtime() - start, success = true)
