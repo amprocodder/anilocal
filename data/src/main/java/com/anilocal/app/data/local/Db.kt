@@ -102,8 +102,12 @@ internal class Db(context: Context, name: String, private val schema: Schema) {
 
     /** Runs [block] in a transaction on the IO pool; when it returns true, observers of [tables] re-read. */
     suspend fun write(vararg tables: String, block: (SQLiteDatabase) -> Boolean) {
-        val changed = withContext(Dispatchers.IO) { transaction(block) }
-        if (changed) changes.emit(tables.toSet())
+        withContext(Dispatchers.IO) {
+            // Published with the commit, not after withContext returns: a caller cancelled during
+            // the transaction still committed it, and withContext would then throw before an emit
+            // after it ran. (tryEmit never fails here: the buffer drops its oldest instead.)
+            if (transaction(block)) changes.tryEmit(tables.toSet())
+        }
     }
 
     /** Blocking transaction, for callers already on a background thread. */
